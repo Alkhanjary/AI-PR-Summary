@@ -58,7 +58,7 @@ def main():
     client = OpenAI(api_key=api_key, base_url=base_url)
 
     if truncated:
-        print(f"(Note: diff truncated to {MAX_CHARS} characters)", file=sys.stderr)
+        print(f"(Note: diff truncated to {MAX_CHARS} characters. Consider splitting large PRs.)", file=sys.stderr)
 
     try:
         response = client.chat.completions.create(
