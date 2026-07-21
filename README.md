@@ -1,4 +1,26 @@
 # AI PR Summary
+## Installation
+
+### 1. Install Git Bash (if you don't have it)
+
+Download and install Git for Windows from https://git-scm.com/downloads — this includes Git Bash.
+
+### 2. Get the exact tool files onto your computer
+
+Open Git Bash, then clone this repo (this pulls the real, working files — not a recreation):
+
+cd ~/desktop
+git clone https://github.com/Alkhanjary/AI-PR-Summary.git
+cd AI-PR-Summary
+
+### 3. Open Git Bash in any other folder later
+
+Right-click inside any folder in Windows Explorer -> "Git Bash Here". Or from an already-open Git Bash window:
+
+cd /c/Users/YourWindowsUsername/path/to/folder
+
+### 4. Continue with Quick Start below
+
 ## Quick Start
 
 py -m pip install -r requirements.txt
