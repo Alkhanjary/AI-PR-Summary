@@ -16,6 +16,9 @@ Return ONLY markdown with:
 ## Summary
 - 2 to 4 short bullets of what changed
 
+## Impact
+- 1 to 3 short bullets explaining what this change actually does — the resulting behavior, new capability, or functional effect. Focus on outcome, not mechanics (e.g. "Users can now filter results by date" not "Added a date parameter").
+
 ## Risk
 low | medium | high (one word, then one short reason)
 
@@ -77,3 +80,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
