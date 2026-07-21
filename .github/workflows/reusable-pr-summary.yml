@@ -1,0 +1,104 @@
+name: Reusable AI PR Summary
+
+on:
+  workflow_call:
+    secrets:
+      LLM_API_KEY:
+        required: true
+      LLM_BASE_URL:
+        required: true
+      LLM_MODEL:
+        required: true
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get diff
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          git diff "origin/$BASE_REF...HEAD" -- . ':(exclude)*.lock' ':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)*.min.js' ':(exclude)*.min.css' > pr.diff
+
+      - name: Call LLM
+        id: summarize
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          if [ -z "$(cat pr.diff)" ]; then
+            echo "summary=No changes detected to summarize." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DIFF_CONTENT=$(head -c 8000 pr.diff)
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "$LLM_BASE_URL/chat/completions" \
+            -H "Authorization: Bearer $LLM_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg model "$LLM_MODEL" --arg diff "$DIFF_CONTENT" '{
+              model: $model,
+              messages: [
+                {role: "system", content: "You review code diffs for PR reviewers.\n\nReturn ONLY markdown with:\n\n## Suggested Title\nOne concise conventional-commit style PR title\n\n## Summary\n- 2 to 4 short bullets of what changed\n\n## Impact\n- 1 to 3 short bullets explaining what this change actually does, the resulting behavior or functional effect\n\n## Risk\nlow | medium | high (one word, then one short reason)\n\n## Flags\n- Note any missing tests, hardcoded secrets, or leftover TODOs. Write None noticed if nothing stands out.\n\n## Files\n- top 5 changed files\n\nDo not invent changes that are not in the diff."},
+                {role: "user", content: $diff}
+              ]
+            }')")
+          HTTP_STATUS=$(echo "$RESPONSE" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | sed '$ d')
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "LLM call failed with status $HTTP_STATUS"
+            echo "$BODY"
+            echo "summary=Could not generate summary (HTTP $HTTP_STATUS)." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SUMMARY=$(echo "$BODY" | jq -r '.choices[0].message.content // empty')
+          if [ -z "$SUMMARY" ]; then
+            echo "Empty summary. Raw response:"
+            echo "$BODY"
+            echo "summary=Could not generate summary (empty response)." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "summary<<SUMMARY_EOF"
+            echo "$SUMMARY"
+            echo "SUMMARY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post or update comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SUMMARY: ${{ steps.summarize.outputs.summary }}
+        with:
+          script: |
+            const summary = process.env.SUMMARY || "Could not generate summary";
+            const marker = "<!-- ai-pr-summary -->";
+            const body = `${marker}\n${summary}`;
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
