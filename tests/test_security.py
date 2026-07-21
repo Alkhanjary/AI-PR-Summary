@@ -120,3 +120,69 @@ def test_report_separates_sensitive_files_section():
     report = format_security_report(scan_security(diff))
     assert "## Security-Sensitive Areas Touched" in report
     assert "login.py" in report
+
+
+def test_detects_unquoted_env_secret():
+    diff = make_diff(".env.production", ["STRIPE_SECRET_KEY=sk_live_a8f3k2j9d0s1"])
+    findings = scan_security(diff)
+    assert any(f["category"] == "hardcoded-secret" and f["severity"] == "high" for f in findings)
+
+
+def test_detects_json_api_key():
+    diff = make_diff("config.json", ['    "api_key": "a8f3k2j9d0s1x7c4",'])
+    findings = scan_security(diff)
+    assert any(f["category"] == "hardcoded-secret" for f in findings)
+
+
+def test_detects_php_sql_interpolation():
+    diff = make_diff("query.php", ['$q = "SELECT * FROM users WHERE id = $id";'])
+    findings = scan_security(diff)
+    assert any(f["category"] == "injection" for f in findings)
+
+
+def test_detects_innerhtml_xss_sink():
+    diff = make_diff("render.js", ["element.innerHTML = userComment;"])
+    findings = scan_security(diff)
+    assert any(f["category"] == "xss" for f in findings)
+
+
+def test_detects_actions_expression_injection():
+    diff = make_diff(".github/workflows/build.yml",
+                     ['      run: echo "${{ github.event.pull_request.title }}"'])
+    findings = scan_security(diff)
+    assert any(f["category"] == "workflow-injection" and f["severity"] == "high" for f in findings)
+
+
+def test_placeholder_value_is_not_flagged_as_secret():
+    diff = make_diff("config.py", ['API_KEY = "your-api-key"'])
+    findings = scan_security(diff)
+    assert not any(f["category"] == "hardcoded-secret" for f in findings)
+
+
+def test_secret_evidence_is_redacted():
+    diff = make_diff("config.py", ['PASSWORD = "hunter2realvalue"'])
+    findings = scan_security(diff)
+    secret = [f for f in findings if f["category"] == "hardcoded-secret"][0]
+    assert "hunter2realvalue" not in secret["evidence"]
+    assert "[REDACTED]" in secret["evidence"]
+
+
+def test_secret_without_separator_is_fully_redacted():
+    diff = make_diff("notes.txt", ["aws key AKIA1234567890ABCDEF"])
+    findings = scan_security(diff)
+    secret = [f for f in findings if f["category"] == "hardcoded-secret"][0]
+    assert "AKIA1234567890ABCDEF" not in secret["evidence"]
+
+
+def test_one_finding_per_category_per_line():
+    # matches both the quoted-credential and AWS-key secret rules
+    diff = make_diff("deploy.py", ['AWS_KEY = "AKIA1234567890ABCDEF"'])
+    findings = scan_security(diff)
+    secrets = [f for f in findings if f["category"] == "hardcoded-secret"]
+    assert len(secrets) == 1
+
+
+def test_lockfiles_are_still_scanned():
+    diff = make_diff("package-lock.json", ['"npm_token": "a8f3k2j9d0s1x7c4"'])
+    findings = scan_security(diff)
+    assert any(f["category"] == "hardcoded-secret" for f in findings)
