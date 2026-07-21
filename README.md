@@ -130,14 +130,28 @@ git diff | prsum --security
 
 git diff | prsum --security --dry-run
 
+**Machine-readable output + merge gate (for CI):**
+
+git diff | prsum --json --fail-on high
+
+`--json` prints findings as JSON (never calls the LLM). `--fail-on high`
+makes the command exit with code **2** when findings at or above that
+severity exist — that exit code is the merge gate. Exit codes: 0 = clean,
+1 = operational error, 2 = findings at/above the threshold.
+
 ### What it does
 
 1. **Heuristic scan (deterministic, runs offline).** Every *added* line of the
-   diff is checked against known risky patterns, so findings always trace back
-   to what this change introduces:
-   - hardcoded secrets (API keys, passwords, tokens, AWS keys, private keys)
-   - injection risks (SQL built by string concatenation or f-strings)
+   **complete raw diff** is checked against known risky patterns — the scan runs
+   *before* lockfile filtering and size truncation, so a large or noisy diff
+   cannot hide a finding. Patterns covered:
+   - hardcoded secrets (quoted or unquoted assignments, JSON keys, AWS keys,
+     private keys) — obvious placeholders like `your-api-key` are skipped, and
+     detected secret values are **redacted** from all output
+   - injection risks (SQL built by concatenation, f-strings, or `$var` interpolation)
    - dangerous calls (eval/exec, os.system, shell=True, pickle.loads, unsafe yaml.load)
+   - XSS sinks (innerHTML, document.write, dangerouslySetInnerHTML)
+   - GitHub Actions expression injection (untrusted event data in `${{ }}`)
    - insecure transport (verify=False, unverified SSL context, plain http:// URLs)
    - weak crypto (MD5/SHA1 hashing, DES/ECB)
    - risky config (debug=True, CORS wildcard, chmod 777)
@@ -159,7 +173,7 @@ git diff | prsum --security --dry-run
 - [high] auth.py:2 — injection: possible SQL injection via string concatenation
     `query = "SELECT * FROM users WHERE name = '" + user + "'"`
 - [high] auth.py:3 — hardcoded-secret: possible hardcoded credential
-    `PASSWORD = "hunter2"`
+    `PASSWORD = [REDACTED]`
 
 ## Security-Sensitive Areas Touched
 - auth.py — filename suggests security-sensitive code
@@ -170,8 +184,20 @@ In normal mode (without --security), the tool still runs the scan quietly and
 prints a one-line note to stderr when it spots something, so risky changes
 never pass completely silently.
 
-The heuristic scan is a fast tripwire, not a full security audit — treat
-findings as pointers for human review.
+### Positioning and limitations
+
+- **The gate is deterministic; the LLM is advisory.** Only the regex scan's
+  exit code can block a merge. The LLM assessment is never used as a gate,
+  because PR diffs are attacker-controlled input and could attempt prompt
+  injection (both prompts also instruct the model to ignore embedded
+  instructions).
+- **This is a fast tripwire, not a security audit.** The rules catch common,
+  obvious mistakes. For depth, layer dedicated tools on top: secret scanning
+  (Gitleaks/TruffleHog), SAST (Semgrep/CodeQL), and dependency/vulnerability
+  scanning (OSV-Scanner/Trivy/Dependabot).
+- Findings are heuristic: expect some false positives (a matched pattern in a
+  comment) and false negatives (novel or language-specific issues). Treat
+  every finding as a pointer for human review.
 
 ---
 
@@ -204,18 +230,26 @@ jobs:
       contents: read
       issues: write
     uses: YOUR_GITHUB_USERNAME/AI-PR-Summary/.github/workflows/reusable-pr-summary.yml@main
+    with:
+      fail_on: high   # optional — block merge on high findings (high | medium | low | none)
     secrets:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
 
-The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing to it shares the same behavior, and improving it here updates it everywhere on the next PR.
+The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing to it shares the same behavior, and improving it here updates it everywhere on the next PR. The workflow checks out this repo and runs the same summarize_pr.py used locally — there is no duplicated logic.
 
 ### What happens on every PR
 
-- Diffs the PR branch against its base branch
-- Sends it to the LLM
-- Posts a comment with the summary (updates the same comment on new pushes, no spam)
+- Diffs the PR branch against its base branch (full raw diff)
+- **Runs the deterministic security scan on the complete diff** and uploads
+  the findings as a machine-readable security-findings JSON artifact
+- Sends the (filtered, truncated) diff to the LLM for the advisory summary
+- Posts one comment containing the summary plus the security findings
+  (updates the same comment on new pushes, no spam)
+- **Fails the check** if findings at or above the fail_on threshold exist
+  (default: high) — or if the scan itself errored (fail-closed). Make the
+  check required in branch protection to actually block merging.
 
 ---
 
