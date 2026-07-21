@@ -10,8 +10,13 @@ on:
       LLM_MODEL:
         required: true
 
+concurrency:
+  group: pr-summary-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   summarize:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -28,6 +33,49 @@ jobs:
           BASE_REF="${{ github.event.pull_request.base.ref }}"
           git diff "origin/$BASE_REF...HEAD" -- . ':(exclude)*.lock' ':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)*.min.js' ':(exclude)*.min.css' > pr.diff
 
+      - name: Smart truncate diff
+        id: truncate
+        run: |
+          python3 << 'PYEOF'
+          MAX_CHARS = 8000
+
+          with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
+              diff_text = f.read()
+
+          lines = diff_text.splitlines(keepends=True)
+          chunks = []
+          current_name = None
+          current_lines = []
+          for line in lines:
+              if line.startswith("diff --git"):
+                  if current_name is not None:
+                      chunks.append((current_name, "".join(current_lines)))
+                  current_name = line.strip().split(" b/")[-1]
+                  current_lines = [line]
+              else:
+                  current_lines.append(line)
+          if current_name is not None:
+              chunks.append((current_name, "".join(current_lines)))
+
+          kept = []
+          omitted = []
+          used = 0
+          for name, chunk in chunks:
+              if used + len(chunk) <= MAX_CHARS:
+                  kept.append(chunk)
+                  used += len(chunk)
+              else:
+                  omitted.append(name)
+
+          result = "".join(kept) if kept else diff_text[:MAX_CHARS]
+
+          with open("pr_truncated.diff", "w", encoding="utf-8") as f:
+              f.write(result)
+
+          if omitted:
+              print(f"Omitted {len(omitted)} file(s) to fit size limit: {', '.join(omitted)}")
+          PYEOF
+
       - name: Call LLM
         id: summarize
         env:
@@ -35,11 +83,11 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
-          if [ -z "$(cat pr.diff)" ]; then
+          if [ -z "$(cat pr_truncated.diff)" ]; then
             echo "summary=No changes detected to summarize." >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          DIFF_CONTENT=$(head -c 8000 pr.diff)
+          DIFF_CONTENT=$(cat pr_truncated.diff)
           PROMPT_JSON=$(jq -n --arg model "$LLM_MODEL" --arg diff "$DIFF_CONTENT" '{
             model: $model,
             messages: [
@@ -50,7 +98,7 @@ jobs:
 
           SUMMARY=""
           for attempt in 1 2 3; do
-            RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "$LLM_BASE_URL/chat/completions" \
+            RESPONSE=$(curl -s --max-time 30 --connect-timeout 10 -w "\nHTTP_STATUS:%{http_code}" "$LLM_BASE_URL/chat/completions" \
               -H "Authorization: Bearer $LLM_API_KEY" \
               -H "Content-Type: application/json" \
               -d "$PROMPT_JSON")
@@ -62,12 +110,12 @@ jobs:
                 break
               fi
             fi
-            echo "Attempt $attempt failed (HTTP $HTTP_STATUS). Retrying..."
+            echo "Attempt $attempt failed (HTTP ${HTTP_STATUS:-timeout}). Retrying..."
             sleep $((attempt * 2))
           done
 
           if [ -z "$SUMMARY" ]; then
-            echo "summary=Could not generate summary after 3 attempts. Check the Actions log for details." >> "$GITHUB_OUTPUT"
+            echo "summary=Could not generate summary after 3 attempts (timeout or error). Check the Actions log for details." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
