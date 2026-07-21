@@ -260,3 +260,4 @@ The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing
 - Empty input is rejected with a clear error instead of wasting an API call.
 - On API failure, the tool prints a clear error instead of crashing silently.
 
+
