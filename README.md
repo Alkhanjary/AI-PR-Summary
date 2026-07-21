@@ -112,11 +112,9 @@ jobs:
       issues: write
     uses: YOUR_GITHUB_USERNAME/AI-PR-Summary/.github/workflows/reusable-pr-summary.yml@main
     secrets:
-      LLM_API_KEY: SECRET_LLM_API_KEY
-      LLM_BASE_URL: SECRET_LLM_BASE_URL
-      LLM_MODEL: SECRET_LLM_MODEL
-
-(Note: replace the SECRET_ placeholders above with the real GitHub Actions secret syntax when creating the file.)
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
 
 The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing to it shares the same behavior, and improving it here updates it everywhere on the next PR.
 
