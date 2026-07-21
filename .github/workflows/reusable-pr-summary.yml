@@ -2,6 +2,12 @@ name: Reusable AI PR Summary
 
 on:
   workflow_call:
+    inputs:
+      fail_on:
+        description: "Fail the check when the security scan finds issues at or above this severity (high | medium | low | none)"
+        required: false
+        type: string
+        default: "high"
     secrets:
       LLM_API_KEY:
         required: true
@@ -23,118 +29,96 @@ jobs:
       contents: read
       issues: write
     steps:
-      - name: Checkout
+      - name: Checkout PR
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get diff
+      - name: Checkout AI-PR-Summary tool
+        uses: actions/checkout@v4
+        with:
+          repository: Alkhanjary/AI-PR-Summary
+          ref: main
+          path: .ai-pr-summary
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tool dependencies
+        run: pip install -r .ai-pr-summary/requirements.txt
+
+      - name: Get full raw diff
         run: |
           BASE_REF="${{ github.event.pull_request.base.ref }}"
-          git diff "origin/$BASE_REF...HEAD" -- . ':(exclude)*.lock' ':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)*.min.js' ':(exclude)*.min.css' > pr.diff
+          git diff "origin/$BASE_REF...HEAD" > pr.diff
 
-      - name: Smart truncate diff
-        id: truncate
+      # Deterministic gate: the scan runs on the COMPLETE raw diff via the
+      # same Python implementation used locally. The LLM never gates.
+      - name: Security scan (deterministic gate)
+        id: scan
         run: |
-          python3 << 'PYEOF'
-          MAX_CHARS = 8000
+          if [ ! -s pr.diff ]; then
+            echo "_No changes to scan._" > security.md
+            echo '{"version": 1, "counts": {}, "findings": []}' > security.json
+            echo "gate_exit=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          python .ai-pr-summary/summarize_pr.py --security --dry-run --file pr.diff > security.md
+          md_exit=$?
+          python .ai-pr-summary/summarize_pr.py --json --fail-on "${{ inputs.fail_on }}" --file pr.diff > security.json
+          gate_exit=$?
+          set -e
+          # fail closed: a scan that errored must not pass the gate
+          if [ "$gate_exit" = "0" ] && [ "$md_exit" != "0" ]; then
+            gate_exit=3
+          fi
+          echo "gate_exit=$gate_exit" >> "$GITHUB_OUTPUT"
 
-          with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
-              diff_text = f.read()
+      - name: Upload security findings (JSON)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-findings
+          path: security.json
+          if-no-files-found: ignore
 
-          lines = diff_text.splitlines(keepends=True)
-          chunks = []
-          current_name = None
-          current_lines = []
-          for line in lines:
-              if line.startswith("diff --git"):
-                  if current_name is not None:
-                      chunks.append((current_name, "".join(current_lines)))
-                  current_name = line.strip().split(" b/")[-1]
-                  current_lines = [line]
-              else:
-                  current_lines.append(line)
-          if current_name is not None:
-              chunks.append((current_name, "".join(current_lines)))
-
-          kept = []
-          omitted = []
-          used = 0
-          for name, chunk in chunks:
-              if used + len(chunk) <= MAX_CHARS:
-                  kept.append(chunk)
-                  used += len(chunk)
-              else:
-                  omitted.append(name)
-
-          result = "".join(kept) if kept else diff_text[:MAX_CHARS]
-
-          with open("pr_truncated.diff", "w", encoding="utf-8") as f:
-              f.write(result)
-
-          if omitted:
-              print(f"Omitted {len(omitted)} file(s) to fit size limit: {', '.join(omitted)}")
-          PYEOF
-
-      - name: Call LLM
-        id: summarize
+      - name: AI summary (advisory)
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
-          if [ -z "$(cat pr_truncated.diff)" ]; then
-            echo "summary=No changes detected to summarize." >> "$GITHUB_OUTPUT"
+          if [ ! -s pr.diff ]; then
+            echo "_No changes detected to summarize._" > summary.md
             exit 0
           fi
-          DIFF_CONTENT=$(cat pr_truncated.diff)
-          PROMPT_JSON=$(jq -n --arg model "$LLM_MODEL" --arg diff "$DIFF_CONTENT" '{
-            model: $model,
-            messages: [
-              {role: "system", content: "You review code diffs for PR reviewers.\n\nReturn ONLY markdown with:\n\n## Suggested Title\nOne concise conventional-commit style PR title\n\n## Summary\n- 2 to 4 short bullets of what changed\n\n## Impact\n- 1 to 3 short bullets explaining what this change actually does, the resulting behavior or functional effect\n\n## Risk\nlow | medium | high (one word, then one short reason)\n\n## Flags\n- Note any missing tests, hardcoded secrets, or leftover TODOs. Write None noticed if nothing stands out.\n\n## Files\n- top 5 changed files\n\nDo not invent changes that are not in the diff."},
-              {role: "user", content: $diff}
-            ]
-          }')
-
-          SUMMARY=""
-          for attempt in 1 2 3; do
-            RESPONSE=$(curl -s --max-time 30 --connect-timeout 10 -w "\nHTTP_STATUS:%{http_code}" "$LLM_BASE_URL/chat/completions" \
-              -H "Authorization: Bearer $LLM_API_KEY" \
-              -H "Content-Type: application/json" \
-              -d "$PROMPT_JSON")
-            HTTP_STATUS=$(echo "$RESPONSE" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
-            BODY=$(echo "$RESPONSE" | sed '$ d')
-            if [ "$HTTP_STATUS" = "200" ]; then
-              SUMMARY=$(echo "$BODY" | jq -r '.choices[0].message.content // empty')
-              if [ -n "$SUMMARY" ]; then
-                break
-              fi
-            fi
-            echo "Attempt $attempt failed (HTTP ${HTTP_STATUS:-timeout}). Retrying..."
-            sleep $((attempt * 2))
-          done
-
-          if [ -z "$SUMMARY" ]; then
-            echo "summary=Could not generate summary after 3 attempts (timeout or error). Check the Actions log for details." >> "$GITHUB_OUTPUT"
-            exit 0
+          set +e
+          python .ai-pr-summary/summarize_pr.py --file pr.diff > summary.md 2> summary.err
+          if [ ! -s summary.md ]; then
+            echo "_Could not generate AI summary (see Actions log). The security scan below still ran._" > summary.md
+            cat summary.err
           fi
-
-          {
-            echo "summary<<SUMMARY_EOF"
-            echo "$SUMMARY"
-            echo "SUMMARY_EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Post or update comment
         if: always()
         uses: actions/github-script@v7
         env:
-          SUMMARY: ${{ steps.summarize.outputs.summary }}
+          FAIL_ON: ${{ inputs.fail_on }}
+          GATE_EXIT: ${{ steps.scan.outputs.gate_exit }}
         with:
           script: |
-            const summary = process.env.SUMMARY || "Could not generate summary";
+            const fs = require("fs");
+            const read = p => { try { return fs.readFileSync(p, "utf8").trim(); } catch { return ""; } };
+            const summary = read("summary.md") || "Could not generate summary";
+            const security = read("security.md");
+            const gateNote = process.env.GATE_EXIT === "2"
+              ? `\n\n> ❌ **Security gate failed** — findings at or above \`${process.env.FAIL_ON}\` severity. See the security-findings artifact for machine-readable output.`
+              : "";
             const marker = "<!-- ai-pr-summary -->";
-            const body = `${marker}\n${summary}`;
+            const body = `${marker}\n${summary}\n\n---\n\n${security}${gateNote}`;
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -160,11 +144,11 @@ jobs:
       - name: Add risk label
         if: always()
         uses: actions/github-script@v7
-        env:
-          SUMMARY: ${{ steps.summarize.outputs.summary }}
         with:
           script: |
-            const summary = process.env.SUMMARY || "";
+            const fs = require("fs");
+            let summary = "";
+            try { summary = fs.readFileSync("summary.md", "utf8"); } catch {}
             const match = summary.match(/## Risk\s*\n\s*(low|medium|high)/i);
             if (!match) return;
             const level = match[1].toLowerCase();
@@ -217,3 +201,15 @@ jobs:
             } catch (e) {
               console.log("Could not add label:", e.message);
             }
+
+      - name: Enforce security gate
+        if: always()
+        run: |
+          GATE="${{ steps.scan.outputs.gate_exit }}"
+          if [ "$GATE" = "2" ]; then
+            echo "::error::Security scan found findings at or above '${{ inputs.fail_on }}' severity. See the PR comment and the security-findings artifact."
+            exit 1
+          elif [ "$GATE" != "0" ]; then
+            echo "::error::Security scan failed to run (exit $GATE) — failing closed."
+            exit 1
+          fi
