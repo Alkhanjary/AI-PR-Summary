@@ -117,7 +117,65 @@ Copy that output straight into your PR description.
 
 ---
 
-## 3. Automatic Setup (GitHub Action, any repo)
+## 3. Security Analysis Mode (--security)
+
+Adds a cybersecurity-focused review of the change: what the change impacts in
+the product from a security perspective, and whether it could harm the code.
+
+**Full security analysis (heuristic scan + LLM assessment):**
+
+git diff | prsum --security
+
+**Offline scan only — no API call, no key needed:**
+
+git diff | prsum --security --dry-run
+
+### What it does
+
+1. **Heuristic scan (deterministic, runs offline).** Every *added* line of the
+   diff is checked against known risky patterns, so findings always trace back
+   to what this change introduces:
+   - hardcoded secrets (API keys, passwords, tokens, AWS keys, private keys)
+   - injection risks (SQL built by string concatenation or f-strings)
+   - dangerous calls (eval/exec, os.system, shell=True, pickle.loads, unsafe yaml.load)
+   - insecure transport (verify=False, unverified SSL context, plain http:// URLs)
+   - weak crypto (MD5/SHA1 hashing, DES/ECB)
+   - risky config (debug=True, CORS wildcard, chmod 777)
+
+   It also flags when the change touches **security-sensitive areas**: auth/
+   login/token/crypto files, CI/CD workflows, Dockerfiles, dependency
+   manifests, and .env files.
+
+2. **LLM assessment.** The diff plus the scan findings are sent to the LLM
+   with a security-reviewer prompt that returns:
+   - **Security Impact** — which parts of the product the change touches
+   - **Harm Assessment** — "No harm identified" / "Potential harm" / "Likely harm", with the concrete attack scenario
+   - **Severity** — none | low | medium | high | critical
+   - **Recommendations** — concrete fixes or mitigations
+
+### Example output
+
+## Security Findings (heuristic scan)
+- [high] auth.py:2 — injection: possible SQL injection via string concatenation
+    `query = "SELECT * FROM users WHERE name = '" + user + "'"`
+- [high] auth.py:3 — hardcoded-secret: possible hardcoded credential
+    `PASSWORD = "hunter2"`
+
+## Security-Sensitive Areas Touched
+- auth.py — filename suggests security-sensitive code
+
+(...followed by the LLM's Security Impact / Harm Assessment / Severity / Recommendations sections.)
+
+In normal mode (without --security), the tool still runs the scan quietly and
+prints a one-line note to stderr when it spots something, so risky changes
+never pass completely silently.
+
+The heuristic scan is a fast tripwire, not a full security audit — treat
+findings as pointers for human review.
+
+---
+
+## 4. Automatic Setup (GitHub Action, any repo)
 
 Instead of running the tool yourself, GitHub can run it automatically on every pull request and post the summary as a PR comment.
 
