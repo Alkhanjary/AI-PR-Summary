@@ -35,6 +35,7 @@ def read_input(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Summarize a git diff for a PR.")
     parser.add_argument("--file", help="Path to a .diff file. If omitted, reads from stdin.")
+    parser.add_argument("--max-chars", type=int, default=MAX_CHARS, help="Override the diff truncation limit.")
     args = parser.parse_args()
 
     diff_text = read_input(args.file)
@@ -44,8 +45,8 @@ def main():
         sys.exit(1)
 
     truncated = False
-    if len(diff_text) > MAX_CHARS:
-        diff_text = diff_text[:MAX_CHARS]
+    if len(diff_text) > args.max_chars:
+        diff_text = diff_text[:args.max_chars]
         truncated = True
 
     api_key = os.environ.get("LLM_API_KEY")
@@ -58,7 +59,7 @@ def main():
     client = OpenAI(api_key=api_key, base_url=base_url)
 
     if truncated:
-        print(f"(Note: diff truncated to {MAX_CHARS} characters. Consider splitting large PRs.)", file=sys.stderr)
+        print(f"(Note: diff truncated to {args.max_chars} characters. Consider splitting large PRs.)", file=sys.stderr)
 
     try:
         response = client.chat.completions.create(
