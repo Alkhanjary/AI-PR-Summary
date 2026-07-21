@@ -1,4 +1,17 @@
 # AI PR Summary
+## Quick Start
+
+py -m pip install -r requirements.txt
+cp .env.example .env
+# edit .env with your real LLM_API_KEY
+
+echo "alias prsum='py /full/path/to/AI-PR-Summary/summarize_pr.py'" >> ~/.bashrc
+source ~/.bashrc
+
+git diff | prsum
+
+---
+
 
 A tool that reads a git diff and generates a PR-ready summary using an LLM (via Ollama Cloud) — including a suggested title, what changed, what it does, how risky it is, and anything worth flagging (missing tests, secrets, TODOs).
 
