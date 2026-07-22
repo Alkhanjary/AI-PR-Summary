@@ -186,3 +186,44 @@ def test_lockfiles_are_still_scanned():
     diff = make_diff("package-lock.json", ['"npm_token": "a8f3k2j9d0s1x7c4"'])
     findings = scan_security(diff)
     assert any(f["category"] == "hardcoded-secret" for f in findings)
+
+
+def test_placeholder_word_in_trailing_comment_does_not_suppress_real_secret():
+    """Regression: a real secret followed by '# example' must still be flagged.
+    Placeholder detection must only look at the matched credential text,
+    not the whole line."""
+    diff = (
+        "diff --git a/config.py b/config.py\n"
+        "@@ -0,0 +1 @@\n"
+        '+API_KEY = "sk-live-abc123realvalue" # example\n'
+    )
+    findings = scan_security(diff)
+    secrets = [f for f in findings if f["category"] == "hardcoded-secret"]
+    assert len(secrets) == 1
+
+
+def test_unquoted_secret_with_inline_comment_is_detected():
+    """Regression: an unquoted credential followed by an inline comment
+    must still match, not silently pass through."""
+    diff = (
+        "diff --git a/config.py b/config.py\n"
+        "@@ -0,0 +1 @@\n"
+        "+TOKEN = abc123realtoken456  # inline comment\n"
+    )
+    findings = scan_security(diff)
+    secrets = [f for f in findings if f["category"] == "hardcoded-secret"]
+    assert len(secrets) == 1
+
+
+def test_secret_redaction_applies_to_every_finding_on_the_same_line():
+    """Regression: when a line has both a hardcoded secret AND another
+    issue (e.g. eval), the secret must not leak via the OTHER finding's
+    evidence."""
+    diff = (
+        "diff --git a/config.py b/config.py\n"
+        "@@ -0,0 +1 @@\n"
+        '+PASSWORD = "real-secret-value"; eval(user_input)\n'
+    )
+    findings = scan_security(diff)
+    for f in findings:
+        assert "real-secret-value" not in f["evidence"]

@@ -91,7 +91,7 @@ SECURITY_RULES = [
      re.compile(r"""(?i)["']?[\w-]*(api[_-]?key|apikey|secret|token|passw(?:or)?d|passwd)\b["']?\s*[:=]\s*["'][^"']{4,}["']"""),
      "possible hardcoded credential"),
     ("hardcoded-secret", "high",
-     re.compile(r"""^\s*(?:export\s+)?[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_]*\s*=\s*[^\s"']{6,}\s*$"""),
+     re.compile(r"""^\s*(?:export\s+)?[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_]*\s*=\s*[^\s"']{6,}(?:\s*\#.*)?\s*$"""),
      "possible unquoted credential assignment"),
     ("hardcoded-secret", "high",
      re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -228,7 +228,7 @@ def redact_secret(content):
     """Keep only the key side of a credential line so reports never echo the secret."""
     stripped = content.strip()
     if ":" in stripped or "=" in stripped:
-        key = re.split(r"[:=]", stripped, 1)[0].strip().strip("\"'")
+        key = re.split(r"[:=]", stripped, maxsplit=1)[0].strip().strip("\"'")
         if key:
             return (key + " = [REDACTED]")[:90]
     return "[REDACTED]"
@@ -276,19 +276,23 @@ def scan_security(diff_text):
             continue
         if line.startswith("+"):
             content = line[1:]
+            line_findings = []
+            line_has_secret = False
             for category, severity, pattern, message in SECURITY_RULES:
-                if pattern.search(content):
-                    if category == "hardcoded-secret" and PLACEHOLDER_VALUE_RE.search(content):
+                m = pattern.search(content)
+                if m:
+                    if category == "hardcoded-secret" and PLACEHOLDER_VALUE_RE.search(m.group(0)):
                         continue
                     key = (current_file, new_line, category)
                     if key in seen:
                         continue
                     seen.add(key)
                     if category == "hardcoded-secret":
+                        line_has_secret = True
                         evidence = redact_secret(content)
                     else:
                         evidence = content.strip()[:90]
-                    findings.append({
+                    line_findings.append({
                         "severity": severity,
                         "category": category,
                         "file": current_file or "unknown",
@@ -296,6 +300,15 @@ def scan_security(diff_text):
                         "message": message,
                         "evidence": evidence,
                     })
+            if line_has_secret:
+                # A secret was found on this line: redact evidence on every
+                # finding from it, not just the hardcoded-secret finding,
+                # so a co-occurring dangerous-call/injection finding can never
+                # leak the secret's raw value.
+                for f in line_findings:
+                    if f["category"] != "hardcoded-secret":
+                        f["evidence"] = redact_secret(content)
+            findings.extend(line_findings)
             if new_line is not None:
                 new_line += 1
         elif not line.startswith("-"):
