@@ -38,8 +38,13 @@ One concise conventional-commit style PR title (e.g. "fix: handle empty diff inp
 low | medium | high (one word, then one short reason)
 
 ## Flags
-- Note any missing tests, hardcoded secrets/credentials, or leftover TODOs.
+- Note any hardcoded secrets/credentials or leftover TODOs.
 - Write "None noticed" if nothing stands out.
+
+## Suggested Tests
+- List specific test file paths to add or update (e.g. `tests/test_auth.py`), each with a short reason tied to what changed in the diff.
+- If the diff shows an existing test file or a `tests/` folder convention, follow that naming pattern; otherwise default to `tests/test_<module>.py`.
+- Write "None needed" if the change has no testable logic (docs, comments, config-only, formatting).
 
 ## Files
 - top 5 changed files
