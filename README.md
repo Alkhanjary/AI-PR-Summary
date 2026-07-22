@@ -185,14 +185,21 @@ How the CI option works:
 
 ### Reducing false positives
 
-- **Documentation and test files are excluded by default.** Any path under
-  `tests/`, `docs/`, or ending in `.md` is skipped by the scan, since these
-  routinely contain example vulnerable code and example secrets on purpose
-  (to explain or test detection), which are never shipped or executed.
-- **Inline suppression:** add `# nosec` to the end of any line to suppress
-  findings for that exact line. Use this for legitimate cases in real source
-  files — e.g. the scanner's own pattern definitions, which contain the text
-  of what they detect without being an actual vulnerability.
+- **Every path is scanned — no exclusions by file location.** A file's path
+  is attacker-controlled in a PR diff, so `tests/`, `docs/`, and `.md` files
+  are scanned exactly like any other file. A real secret or `eval()` call
+  doesn't stop being dangerous because of what directory it's added to.
+- **Inline suppression:** add `# nosec` to the end of a line to suppress
+  *lower-confidence* findings on that exact line (xss, insecure-transport,
+  weak-crypto, risky-config, sensitive-file) — for legitimate cases like the
+  scanner's own pattern definitions, which contain the text of what they
+  detect without being an actual vulnerability. Suppressed findings are
+  still printed in a "Suppressed by # nosec" section (and the JSON
+  `suppressed` array) so a human reviewer always sees them.
+  **`# nosec` cannot suppress high-confidence categories** —
+  hardcoded-secret, injection, dangerous-call, workflow-injection — because
+  the diff carrying that comment is exactly what an attacker controls; those
+  always gate the merge regardless of any comment on the line.
 
 ### Example output
 

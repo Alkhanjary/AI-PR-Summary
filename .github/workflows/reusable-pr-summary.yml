@@ -8,6 +8,19 @@ on:
         required: false
         type: string
         default: "high"
+      tool_ref:
+        description: >
+          Git ref (tag or full commit SHA) of Alkhanjary/AI-PR-Summary to check
+          out for the scanner/summary code. GitHub does not expose a reusable
+          workflow's own resolved ref to itself (github.workflow_ref reflects
+          the CALLER's top-level workflow, not this file, and there is no
+          job.workflow_sha/workflow_ref/workflow_repository context - the job
+          context only exposes container/services/status). To fully pin your
+          integration, set this to the SAME tag/SHA you pinned in your
+          workflow's "uses:" line for this reusable workflow.
+        required: false
+        type: string
+        default: "main"
     secrets:
       LLM_API_KEY:
         required: false
@@ -28,31 +41,27 @@ jobs:
       pull-requests: write
       contents: read
       issues: write
+    env:
+      # Job-level env so step `if:` conditions can test env.LLM_API_KEY
+      # instead of referencing `secrets` directly in an `if:` expression.
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - name: Resolve pinned tool ref
-        id: pin
-        run: |
-          # github.workflow_ref looks like: owner/repo/.github/workflows/reusable-pr-summary.yml@refs/tags/v2
-          # Extract everything after the @ so the tool checkout always matches
-          # the exact version of THIS reusable workflow that is running.
-          REF="${{ github.workflow_ref }}"
-          RESOLVED_REF="${REF##*@}"
-          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
-
       - name: Checkout AI-PR-Summary tool
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Alkhanjary/AI-PR-Summary
-          ref: ${{ steps.pin.outputs.ref }}
+          ref: ${{ inputs.tool_ref }}
           path: .ai-pr-summary
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
@@ -71,7 +80,7 @@ jobs:
         run: |
           if [ ! -s pr.diff ]; then
             echo "_No changes to scan._" > security.md
-            echo '{"version": 1, "counts": {}, "findings": []}' > security.json
+            echo '{"version": 1, "counts": {}, "findings": [], "suppressed": []}' > security.json
             echo "gate_exit=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -89,18 +98,14 @@ jobs:
 
       - name: Upload security findings (JSON)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: security-findings
           path: security.json
           if-no-files-found: ignore
 
       - name: AI summary (advisory)
-        if: ${{ secrets.LLM_API_KEY != '' }}
-        env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        if: env.LLM_API_KEY != ''
         run: |
           if [ ! -s pr.diff ]; then
             echo "_No changes detected to summarize._" > summary.md
@@ -114,14 +119,14 @@ jobs:
           fi
 
       - name: Note missing AI summary (no secrets available, e.g. fork PR)
-        if: ${{ secrets.LLM_API_KEY == '' }}
+        if: env.LLM_API_KEY == ''
         run: |
           echo "_AI summary skipped: no LLM credentials available (common on fork/Dependabot PRs). The deterministic security scan below still ran and still gates the merge._" > summary.md
 
       - name: Post or update comment
         if: always() && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           FAIL_ON: ${{ inputs.fail_on }}
           GATE_EXIT: ${{ steps.scan.outputs.gate_exit }}
@@ -161,7 +166,7 @@ jobs:
       - name: Add risk label
         if: always() && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const fs = require("fs");

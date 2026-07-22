@@ -87,3 +87,47 @@ def test_scan_covers_ignored_lockfiles(tmp_path):
     assert result.returncode == 2
     data = json.loads(result.stdout)
     assert any(f["file"] == "package-lock.json" for f in data["findings"])
+
+
+def test_attacker_cannot_bypass_gate_by_naming_the_file_tests_or_docs(tmp_path):
+    # Reviewer-reported bypass: a real credential added to tests/test_deploy.py
+    # produced zero findings because tests/docs/*.md were excluded wholesale.
+    payload = file_section("tests/test_deploy.py", ['API_KEY = "sk-live-realvalue123"'])
+    diff = write_diff(tmp_path, "bad.diff", payload)
+
+    result = run_cli(["--json", "--fail-on", "high"], diff)
+    assert result.returncode == 2
+    data = json.loads(result.stdout)
+    assert any(f["file"] == "tests/test_deploy.py" for f in data["findings"])
+
+
+def test_attacker_cannot_bypass_gate_with_inline_nosec_on_a_secret(tmp_path):
+    # "# nosec" is attacker-controlled diff content — it must not be able to
+    # wave away a high-confidence finding like a hardcoded secret.
+    payload = file_section("config.py", ['API_KEY = "sk-live-realvalue123"  # nosec'])
+    diff = write_diff(tmp_path, "bad.diff", payload)
+
+    result = run_cli(["--json", "--fail-on", "high"], diff)
+    assert result.returncode == 2
+
+
+def test_attacker_cannot_bypass_gate_with_placeholder_variable_name(tmp_path):
+    # Reviewer-reported bypass: EXAMPLE_API_KEY with a real value produced
+    # zero findings because placeholder detection checked the whole match
+    # (including the variable name), not just the captured value.
+    payload = file_section("config.py", ['EXAMPLE_API_KEY = "sk-live-realvalue123"'])
+    diff = write_diff(tmp_path, "bad.diff", payload)
+
+    result = run_cli(["--json", "--fail-on", "high"], diff)
+    assert result.returncode == 2
+
+
+def test_attacker_cannot_bypass_gate_with_placeholder_word_in_comment(tmp_path):
+    # Reviewer-reported bypass: TOKEN=... # example produced zero findings
+    # because the unquoted-credential regex's whole match (including the
+    # trailing comment) was checked for placeholder words.
+    payload = file_section("config.py", ["TOKEN=abc123realtoken456 # example"])
+    diff = write_diff(tmp_path, "bad.diff", payload)
+
+    result = run_cli(["--json", "--fail-on", "high"], diff)
+    assert result.returncode == 2
