@@ -10,11 +10,11 @@ on:
         default: "high"
     secrets:
       LLM_API_KEY:
-        required: true
+        required: false
       LLM_BASE_URL:
-        required: true
+        required: false
       LLM_MODEL:
-        required: true
+        required: false
 
 concurrency:
   group: pr-summary-${{ github.event.pull_request.number }}
@@ -96,6 +96,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: AI summary (advisory)
+        if: ${{ secrets.LLM_API_KEY != '' }}
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
@@ -112,8 +113,14 @@ jobs:
             cat summary.err
           fi
 
+      - name: Note missing AI summary (no secrets available, e.g. fork PR)
+        if: ${{ secrets.LLM_API_KEY == '' }}
+        run: |
+          echo "_AI summary skipped: no LLM credentials available (common on fork/Dependabot PRs). The deterministic security scan below still ran and still gates the merge._" > summary.md
+
       - name: Post or update comment
-        if: always()
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           FAIL_ON: ${{ inputs.fail_on }}
@@ -152,7 +159,8 @@ jobs:
             }
 
       - name: Add risk label
-        if: always()
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
