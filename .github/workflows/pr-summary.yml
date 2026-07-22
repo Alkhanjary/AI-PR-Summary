@@ -1,0 +1,19 @@
+name: AI PR Summary
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  summarize:
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
+
+    uses: Alkhanjary/AI-PR-Summary/.github/workflows/reusable-pr-summary.yml@main
+
+    secrets:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
