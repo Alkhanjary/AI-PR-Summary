@@ -34,11 +34,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve pinned tool ref
+        id: pin
+        run: |
+          # github.workflow_ref looks like: owner/repo/.github/workflows/reusable-pr-summary.yml@refs/tags/v2
+          # Extract everything after the @ so the tool checkout always matches
+          # the exact version of THIS reusable workflow that is running.
+          REF="${{ github.workflow_ref }}"
+          RESOLVED_REF="${REF##*@}"
+          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout AI-PR-Summary tool
         uses: actions/checkout@v4
         with:
           repository: Alkhanjary/AI-PR-Summary
-          ref: main
+          ref: ${{ steps.pin.outputs.ref }}
           path: .ai-pr-summary
 
       - name: Set up Python
