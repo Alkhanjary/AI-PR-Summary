@@ -79,6 +79,12 @@ Do not invent changes that are not in the diff."""
 
 # Values that look like placeholders, not real credentials — suppresses
 # hardcoded-secret findings for template/example lines.
+SUPPRESS_MARKER_RE = re.compile(r"#\s*nosec\b", re.IGNORECASE)
+# Documentation and test fixtures routinely contain example vulnerable code
+# and example secrets on purpose (to demonstrate/test detection). These are
+# never shipped/executed, so they are excluded from the scan by default.
+# Real source lines still go through per-line "# nosec" suppression instead.
+SCAN_EXCLUDE_PATH_RE = re.compile(r"(?i)(^|/)(tests?/|docs?/)|\.md$")
 PLACEHOLDER_VALUE_RE = re.compile(
     r"(?i)(your[-_a-z]*|example|placeholder|change[-_]?me|dummy|sample|test[-_]?key"
     r"|xxxx+|<[^>]+>|\$\{|\$\()"
@@ -113,7 +119,7 @@ SECURITY_RULES = [
                 r"|\$\{\{[^}]*github\.head_ref[^}]*\}\}"),
      "untrusted GitHub event data in workflow expression (script injection risk)"),
     ("xss", "medium",
-     re.compile(r"\.innerHTML\s*=|document\.write\s*\(|dangerouslySetInnerHTML"),
+     re.compile(r"\.innerHTML\s*=|document\.write\s*\(|dangerouslySetInnerHTML"),  # nosec - pattern definition, not usage
      "possible XSS sink"),
     ("dangerous-call", "high",
      re.compile(r"\beval\s*\(|\bexec\s*\("),
@@ -134,7 +140,7 @@ SECURITY_RULES = [
      re.compile(r"ssl\._create_unverified_context"),
      "unverified SSL context"),
     ("insecure-transport", "medium",
-     re.compile(r"http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0)\S"),
+     re.compile(r"http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0)\S"),  # nosec - pattern definition, not usage
      "unencrypted http:// URL"),
     ("weak-crypto", "medium",
      re.compile(r"(?i)\b(md5|sha1)\s*\("),
@@ -254,6 +260,9 @@ def scan_security(diff_text):
         if line.startswith("diff --git"):
             current_file = line.strip().split(" b/")[-1]
             new_line = None
+            if SCAN_EXCLUDE_PATH_RE.search(current_file):
+                current_file = None  # marks this file as excluded from findings below
+                continue
             if current_file not in flagged_paths:
                 for pattern, reason in SENSITIVE_PATH_PATTERNS:
                     if pattern.search(current_file):
@@ -268,6 +277,8 @@ def scan_security(diff_text):
                         })
                         break
             continue
+        if current_file is None:
+            continue
         hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
         if hunk:
             new_line = int(hunk.group(1))
@@ -276,6 +287,10 @@ def scan_security(diff_text):
             continue
         if line.startswith("+"):
             content = line[1:]
+            if SUPPRESS_MARKER_RE.search(content):
+                if new_line is not None:
+                    new_line += 1
+                continue
             line_findings = []
             line_has_secret = False
             for category, severity, pattern, message in SECURITY_RULES:

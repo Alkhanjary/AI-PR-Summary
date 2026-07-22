@@ -227,3 +227,28 @@ def test_secret_redaction_applies_to_every_finding_on_the_same_line():
     findings = scan_security(diff)
     for f in findings:
         assert "real-secret-value" not in f["evidence"]
+
+
+def test_nosec_marker_suppresses_finding_on_that_line():
+    """An explicit '# nosec' marker suppresses findings for that exact line,
+    for legitimate fixtures/documentation examples."""
+    diff = (
+        "diff --git a/config.py b/config.py\n"
+        "@@ -0,0 +1 @@\n"
+        '+API_KEY = "sk-live-realvalue123"  # nosec\n'
+    )
+    findings = scan_security(diff)
+    assert findings == []
+
+
+def test_nosec_marker_only_suppresses_the_marked_line():
+    """A '# nosec' marker on one line must not suppress findings on other lines."""
+    diff = (
+        "diff --git a/config.py b/config.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        '+API_KEY = "sk-live-realvalue123"  # nosec\n'
+        '+TOKEN = "sk-live-anothersecretvalue"\n'
+    )
+    findings = scan_security(diff)
+    secrets = [f for f in findings if f["category"] == "hardcoded-secret"]
+    assert len(secrets) == 1

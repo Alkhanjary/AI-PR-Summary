@@ -23,7 +23,7 @@ jobs:
 
       - name: Smoke test the security gate exit policy
         run: |
-          printf 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,1 +1,2 @@\n context\n+result = eval(user_input)\n' > bad.diff
+          printf 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,1 +1,2 @@\n context\n+result = eval(user_input)\n' > bad.diff  # nosec - intentional fixture for the gate smoke test
 
           echo "--- report output ---"
           python summarize_pr.py --security --dry-run --file bad.diff
