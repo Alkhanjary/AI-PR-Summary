@@ -11,7 +11,7 @@ jobs:
       contents: read
       issues: write
 
-    uses: Alkhanjary/AI-PR-Summary/.github/workflows/reusable-pr-summary.yml@main
+    uses: Alkhanjary/AI-PR-Summary/.github/workflows/reusable-pr-summary.yml@feat/suggested-tests
 
     secrets:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
