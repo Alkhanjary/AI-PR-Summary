@@ -171,3 +171,5 @@ The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing
 - Empty input is rejected with a clear error instead of wasting an API call.
 - On API failure, the tool prints a clear error instead of crashing silently.
 - The summary includes a "Suggested Tests" section naming specific test files to add or update. This is inferred from the diff alone (no repo scanning), so it's a starting point, not a guarantee those files don't already exist.
+
+
