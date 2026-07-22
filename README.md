@@ -76,17 +76,23 @@ source ~/.bashrc
 
 ## 2. Local Usage
 
-The core idea: git diff produces the changes, the tool reads them and returns a summary.
+The core idea: `git diff` produces the changes, the tool reads them and returns a summary. Pick the command that matches your situation:
 
-**Most common — summarize your current uncommitted changes:**
+| Your situation | Command |
+|---|---|
+| I edited files, haven't committed yet | `git diff \| prsum` |
+| I want a summary of my whole branch vs. main | `git diff main...HEAD \| prsum` |
+| I already saved a diff to a file | `prsum --file change.diff` |
+
+**1. I edited files, haven't committed yet — summarize the uncommitted changes:**
 
 git diff | prsum
 
-**Summarize your whole branch, compared to main:**
+**2. I want to see everything my branch will bring into main — summarize the whole branch:**
 
 git diff main...HEAD | prsum
 
-**From a saved diff file:**
+**3. I already have a diff saved as a file:**
 
 git diff > change.diff
 prsum --file change.diff
@@ -121,23 +127,33 @@ Copy that output straight into your PR description.
 
 Adds a cybersecurity-focused review of the change: what the change impacts in
 the product from a security perspective, and whether it could harm the code.
+Pick the command that matches your situation:
 
-**Full security analysis (heuristic scan + LLM assessment):**
+| Your situation | Command |
+|---|---|
+| I want the full review (scan + AI assessment) | `git diff \| prsum --security` |
+| I just want a quick offline scan, no API key needed | `git diff \| prsum --security --dry-run` |
+| I'm wiring this into CI and need a pass/fail result | `git diff \| prsum --json --fail-on high` |
+
+**1. Full security analysis (heuristic scan + LLM assessment):**
 
 git diff | prsum --security
 
-**Offline scan only — no API call, no key needed:**
+**2. Offline scan only — fastest option, no API call, no key needed:**
 
 git diff | prsum --security --dry-run
 
-**Machine-readable output + merge gate (for CI):**
+**3. Machine-readable output + merge gate (for CI):**
 
 git diff | prsum --json --fail-on high
 
-`--json` prints findings as JSON (never calls the LLM). `--fail-on high`
-makes the command exit with code **2** when findings at or above that
-severity exist — that exit code is the merge gate. Exit codes: 0 = clean,
-1 = operational error, 2 = findings at/above the threshold.
+How the CI option works:
+- `--json` prints findings as JSON instead of markdown, and never calls the LLM.
+- `--fail-on high` makes the command exit with code **2** when findings at or
+  above that severity exist. Your CI pipeline treats that exit code as the
+  merge gate.
+- Exit codes at a glance: `0` = clean, `1` = the tool itself errored,
+  `2` = findings at or above your chosen threshold.
 
 ### What it does
 
@@ -166,6 +182,17 @@ severity exist — that exit code is the merge gate. Exit codes: 0 = clean,
    - **Harm Assessment** — "No harm identified" / "Potential harm" / "Likely harm", with the concrete attack scenario
    - **Severity** — none | low | medium | high | critical
    - **Recommendations** — concrete fixes or mitigations
+
+### Reducing false positives
+
+- **Documentation and test files are excluded by default.** Any path under
+  `tests/`, `docs/`, or ending in `.md` is skipped by the scan, since these
+  routinely contain example vulnerable code and example secrets on purpose
+  (to explain or test detection), which are never shipped or executed.
+- **Inline suppression:** add `# nosec` to the end of any line to suppress
+  findings for that exact line. Use this for legitimate cases in real source
+  files — e.g. the scanner's own pattern definitions, which contain the text
+  of what they detect without being an actual vulnerability.
 
 ### Example output
 
