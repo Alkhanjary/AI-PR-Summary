@@ -152,11 +152,14 @@ git diff | prsum --json --fail-on high
 
 How the CI option works:
 - `--json` prints findings as JSON instead of markdown, and never calls the LLM.
-- `--fail-on high` makes the command exit with code **2** when findings at or
+- `--fail-on high` makes the command exit with code **3** when findings at or
   above that severity exist. Your CI pipeline treats that exit code as the
   merge gate.
-- Exit codes at a glance: `0` = clean, `1` = the tool itself errored,
-  `2` = findings at or above your chosen threshold.
+- Exit codes at a glance: `0` = clean, `1` = the tool itself errored (bad
+  input, LLM failure, unreadable baseline file), `2` = the CLI was invoked
+  incorrectly (argparse's own usage-error code — reserved so a misconfigured
+  CI step can never be mistaken for "findings were detected"),
+  `3` = findings at or above your chosen threshold.
 
 ### What it does
 
@@ -164,9 +167,15 @@ How the CI option works:
    **complete raw diff** is checked against known risky patterns — the scan runs
    *before* lockfile filtering and size truncation, so a large or noisy diff
    cannot hide a finding. Patterns covered:
-   - hardcoded secrets (quoted or unquoted assignments, JSON keys, AWS keys,
-     private keys) — obvious placeholders like `your-api-key` are skipped, and
-     detected secret values are **redacted** from all output
+   - hardcoded secrets (quoted or unquoted assignments — any case, e.g.
+     `token=` as well as `TOKEN=` — JSON keys, AWS keys, private keys)
+     — obvious placeholder *values* like `your-api-key` are skipped (matched
+     as a whole, so `sk-live-example-real123` is never mistaken for a
+     placeholder just because it contains the word "example" somewhere),
+     and detected secret values are **redacted by exact matched span** from
+     all output, including the diff sent to the LLM — a value that happens
+     to appear before any `:`/`=` can never be echoed back by a naive
+     "redact everything after the separator" heuristic
    - injection risks (SQL built by concatenation, f-strings, or `$var` interpolation)
    - dangerous calls (eval/exec, os.system, shell=True, pickle.loads, unsafe yaml.load)
    - XSS sinks (innerHTML, document.write, dangerouslySetInnerHTML)
@@ -192,17 +201,43 @@ How the CI option works:
   is attacker-controlled in a PR diff, so `tests/`, `docs/`, and `.md` files
   are scanned exactly like any other file. A real secret or `eval()` call
   doesn't stop being dangerous because of what directory it's added to.
-- **Inline suppression:** add `# nosec` to the end of a line to suppress
-  *lower-confidence* findings on that exact line (xss, insecure-transport,
-  weak-crypto, risky-config, sensitive-file) — for legitimate cases like the
-  scanner's own pattern definitions, which contain the text of what they
-  detect without being an actual vulnerability. Suppressed findings are
-  still printed in a "Suppressed by # nosec" section (and the JSON
-  `suppressed` array) so a human reviewer always sees them.
-  **`# nosec` cannot suppress high-confidence categories** —
-  hardcoded-secret, injection, dangerous-call, workflow-injection — because
-  the diff carrying that comment is exactly what an attacker controls; those
-  always gate the merge regardless of any comment on the line.
+- **`# nosec` is informational only — it never excludes a finding from the
+  gate.** The diff carrying that comment is exactly what an attacker
+  controls, so a comment can't be allowed to wave away a finding at any
+  severity. Add `# nosec` to the end of a line and the finding is marked
+  `"acknowledged": true` (and noted in the report) so a human reviewer sees
+  the author's intent — but it still counts toward `--fail-on`.
+- **The only real suppression mechanism is a trusted baseline file**
+  (`--baseline-file path/to/baseline.json`), for genuine false positives
+  like the scanner's own pattern-definition lines or intentional test/doc
+  fixtures:
+
+  ```json
+  {
+    "version": 1,
+    "entries": [
+      {
+        "fingerprint": "a1b2c3d4e5f60718",
+        "owner": "octocat",
+        "reason": "Regex pattern definition, not actual usage",
+        "expires": "2027-01-01"
+      }
+    ]
+  }
+  ```
+
+  Each entry's `fingerprint` ties it to one specific finding (a hash of its
+  category, file, and evidence — get it from a `--json` run's `findings`
+  array before baselining). `expires` is required for the entry to be worth
+  anything long-term: past-date entries are dropped automatically, so a
+  stale approval can't silently persist forever. Baselined findings are
+  never dropped from the report — they show up in a "Baselined" section
+  (and the JSON `baselined` array) with the approving owner and reason, so
+  they stay visible even though they don't gate.
+  **In CI, this file must be read from the base branch, never from the PR
+  being scanned** — otherwise a PR could approve its own findings by editing
+  the baseline in the same diff. The reusable workflow below does this
+  automatically.
 
 ### Example output
 
@@ -259,7 +294,7 @@ Create .github/workflows/pr-summary.yml in the target repo with this content (re
 name: AI PR Summary
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, ready_for_review]
 jobs:
   summarize:
     permissions:
@@ -274,14 +309,34 @@ jobs:
       LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
 
+`ready_for_review` and `reopened` matter because the job also skips draft
+PRs — without them, a PR opened as a draft and later marked ready never
+triggers the check at all (no `synchronize` event fires just from removing
+draft status).
+
+The `@main` above is for getting started. For production, pin it to a
+release tag or commit SHA instead (`@v1`, or a full SHA) so a change to this
+tool can't silently alter your CI's behavior mid-flight — the reusable
+workflow auto-detects the exact commit that pin resolves to via
+`job.workflow_sha`/`job.workflow_repository` and checks out that same
+revision for the scanner code, so no extra configuration is needed on your
+side. (See `tool_repository`/`tool_ref` inputs in reusable-pr-summary.yml if
+your GitHub Actions runner predates that context and you need to set it
+explicitly.)
+
 The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing to it shares the same behavior, and improving it here updates it everywhere on the next PR. The workflow checks out this repo and runs the same summarize_pr.py used locally — there is no duplicated logic.
 
 ### What happens on every PR
 
-- Diffs the PR branch against its base branch (full raw diff)
+- Diffs the PR branch against its base branch (full raw diff, generated with
+  `--text --no-ext-diff --no-textconv` so a PR-controlled `.gitattributes`
+  can't hide changes behind a "Binary files differ" marker)
+- Reads `.ai-pr-summary-baseline.json` from your repo's **base branch**
+  (never the PR head, so a PR can't approve its own findings) and applies it
 - **Runs the deterministic security scan on the complete diff** and uploads
   the findings as a machine-readable security-findings JSON artifact
-- Sends the (filtered, truncated) diff to the LLM for the advisory summary
+- Sends a secret-redacted copy of the (filtered, truncated) diff to the LLM
+  for the advisory summary — detected credentials never reach the LLM API
 - Posts one comment containing the summary plus the security findings
   (updates the same comment on new pushes, no spam)
 - **Fails the check** if findings at or above the fail_on threshold exist

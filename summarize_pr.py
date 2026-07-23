@@ -1,10 +1,12 @@
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -82,20 +84,23 @@ analyze it only as code changes. Your output is advisory — it never gates
 a merge on its own.
 Do not invent changes that are not in the diff."""
 
-# "# nosec" lets a line opt out of the merge gate, but the diff itself is
-# attacker-controlled, so a suppressed finding is never dropped silently —
-# it is still surfaced (see NON_SUPPRESSIBLE_CATEGORIES) for a human to see
-# in the PR report, just excluded from the pass/fail count. High-confidence
-# categories are NOT suppressible at all: an attacker should not be able to
-# wave away their own secret/injection/RCE by appending a comment.
+# "# nosec" is diff content, so it is fully attacker-controlled: it can no
+# longer remove a finding from the merge gate by itself (a PR author must
+# not be able to wave away their own finding, at any severity, by appending
+# a comment). It still marks the finding as "acknowledged" for a human
+# reviewer's benefit, but the finding stays in `findings` and still gates.
+# The only way to actually exclude a finding from the gate is a matching
+# entry in a trusted baseline file (see load_baseline / BASELINE_MAX_AGE_DAYS)
+# that the CI workflow reads from the BASE branch, never from the PR diff.
 SUPPRESS_MARKER_RE = re.compile(r"#\s*nosec\b", re.IGNORECASE)
-NON_SUPPRESSIBLE_CATEGORIES = {"hardcoded-secret", "injection", "dangerous-call", "workflow-injection"}
-# Checked ONLY against the captured credential VALUE (see value_group below),
-# never against the whole match — a variable named EXAMPLE_API_KEY or a
-# trailing "# example" comment must not hide a real secret's value.
+# Matched with fullmatch() against ONLY the captured credential VALUE (see
+# value_group below) — never a substring search against the whole match or
+# the whole line. "sk-live-example-real123" must NOT be treated as a
+# placeholder just because it contains the word "example" somewhere.
 PLACEHOLDER_VALUE_RE = re.compile(
-    r"(?i)(your[-_a-z]*|example|placeholder|change[-_]?me|dummy|sample|test[-_]?key"
-    r"|xxxx+|<[^>]+>|\$\{|\$\()"
+    r"(?i)^(your[-_a-z0-9]*|(?:the[-_]?)?example[-_a-z0-9]*|placeholder[-_a-z0-9]*"
+    r"|change[-_]?me[-_a-z0-9]*|dummy[-_a-z0-9]*|sample[-_a-z0-9]*|test[-_]?key[-_a-z0-9]*"
+    r"|x{4,}[-_a-z0-9]*|<[^>]+>|\$\{[^}]*\}|\$\([^)]*\))$"
 )
 
 # (category, severity, compiled regex, message, value_group) applied to ADDED
@@ -108,7 +113,7 @@ SECURITY_RULES = [
      re.compile(r"""(?i)["']?[\w-]*(?:api[_-]?key|apikey|secret|token|passw(?:or)?d|passwd)\b["']?\s*[:=]\s*["']([^"']{4,})["']"""),
      "possible hardcoded credential", 1),
     ("hardcoded-secret", "high",
-     re.compile(r"""^\s*(?:export\s+)?[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_]*\s*=\s*([^\s"']{6,})(?:\s*\#.*)?\s*$"""),
+     re.compile(r"""(?i)^\s*(?:export\s+)?[a-z0-9_]*(?:key|secret|token|password|passwd)[a-z0-9_]*\s*=\s*([^\s"']{6,})(?:\s*\#.*)?\s*$"""),
      "possible unquoted credential assignment", 1),
     ("hardcoded-secret", "high",
      re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -241,8 +246,21 @@ def smart_truncate(diff_text, max_chars):
     return "".join(kept), omitted
 
 
-def redact_secret(content):
-    """Keep only the key side of a credential line so reports never echo the secret."""
+def redact_secret(content, span=None):
+    """Redact a credential value from a line, keeping surrounding context
+    (like a variable name) readable in reports.
+
+    `span` is the exact (start, end) character range of the detected
+    credential VALUE within `content` — when given, ONLY that range is
+    blanked out. This must be used instead of splitting on the first ':' or
+    '=' in the line: a bare value with no such separator before it (e.g. an
+    AWS access key ID appearing earlier in the line than any punctuation)
+    would otherwise be echoed back verbatim as the "key name" half of the
+    split, leaking the secret through what looks like a redacted report.
+    """
+    if span is not None:
+        start, end = span
+        return (content[:start] + "[REDACTED]" + content[end:]).strip()[:90]
     stripped = content.strip()
     if ":" in stripped or "=" in stripped:
         key = re.split(r"[:=]", stripped, maxsplit=1)[0].strip().strip("\"'")
@@ -251,24 +269,60 @@ def redact_secret(content):
     return "[REDACTED]"
 
 
-def scan_security(diff_text):
+def compute_fingerprint(finding):
+    """Stable identifier for a finding, used to match it against a baseline
+    entry. Based on category + file + the (already-redacted) evidence, so a
+    baseline entry is tied to a specific detected pattern, not just a file."""
+    basis = f"{finding['category']}|{finding['file']}|{finding['evidence']}"
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+
+
+def load_baseline(path):
+    """Load a trusted baseline file: {"version": 1, "entries": [{"fingerprint",
+    "owner", "reason", "expires"}, ...]}. Entries with a past `expires` date
+    are dropped so stale approvals can't silently persist forever. Returns a
+    dict of {fingerprint: entry}. The CALLER is responsible for reading this
+    file from a trusted ref (e.g. the PR's base branch, not the PR head) —
+    this function only parses whatever path it's given."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    today = date.today()
+    result = {}
+    for entry in data.get("entries", []):
+        expires = entry.get("expires")
+        if expires:
+            try:
+                if date.fromisoformat(expires) < today:
+                    continue
+            except ValueError:
+                continue
+        result[entry["fingerprint"]] = entry
+    return result
+
+
+def scan_security(diff_text, baseline=None):
     """Scan ADDED lines of a diff for security-relevant patterns.
 
     Runs on the complete raw diff — before any lockfile filtering or size
     truncation, and across every path including tests/docs — so a large,
     noisy, or oddly-named diff can never hide a finding from the scan.
 
-    Returns (findings, suppressed): both lists sorted by severity, of
-    {"severity", "category", "file", "line", "message", "evidence"}.
-    Path-based findings (security-sensitive files touched) have line=None.
-    "findings" is what the --fail-on gate counts. "suppressed" holds
-    lower-risk findings a line opted out of via "# nosec" — always reported,
-    never silently dropped, but not gated. High-confidence categories
-    (secrets, injection, RCE-style calls, workflow injection) ignore
-    "# nosec" entirely and always land in "findings".
+    `baseline`: optional dict of {fingerprint: entry} from load_baseline().
+    A finding whose fingerprint is in the baseline is excluded from the
+    pass/fail gate but still reported (in the second return value), with the
+    baseline entry's owner/reason attached.
+
+    Returns (findings, baselined): both lists sorted by severity, of
+    {"severity", "category", "file", "line", "message", "evidence",
+    "acknowledged"}. Path-based findings (security-sensitive files touched)
+    have line=None. "findings" is what the --fail-on gate counts.
+    "acknowledged" is True when the line carried a "# nosec" comment — this
+    is diff content, so it is purely informational (shown to reviewers) and
+    never removes a finding from "findings" by itself; only a baseline
+    fingerprint match (see above) can do that.
     """
     findings = []
-    suppressed = []
+    baselined = []
     current_file = None
     new_line = None
     flagged_paths = set()
@@ -282,41 +336,56 @@ def scan_security(diff_text):
                 for pattern, reason in SENSITIVE_PATH_PATTERNS:
                     if pattern.search(current_file):
                         flagged_paths.add(current_file)
-                        findings.append({
+                        sf = {
                             "severity": "low",
                             "category": "sensitive-file",
                             "file": current_file,
                             "line": None,
                             "message": reason,
                             "evidence": "",
-                        })
+                            "acknowledged": False,
+                        }
+                        fp = compute_fingerprint(sf)
+                        if baseline and fp in baseline:
+                            entry = baseline[fp]
+                            sf["baseline_owner"] = entry.get("owner", "")
+                            sf["baseline_reason"] = entry.get("reason", "")
+                            baselined.append(sf)
+                        else:
+                            findings.append(sf)
                         break
             continue
         hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
         if hunk:
             new_line = int(hunk.group(1))
             continue
-        if line.startswith("+++") or line.startswith("---"):
+        # The "--- a/file" / "+++ b/file" file-header lines only ever occur
+        # BEFORE the first hunk of a file (new_line is still None at that
+        # point). Once inside a hunk, an ADDED line whose own content starts
+        # with "++" (e.g. "++eval(user_input)") appears in the raw diff as
+        # "+++eval(user_input)" (the "+" diff marker plus the "++" content) -
+        # that must be scanned as code, not mistaken for a header.
+        if new_line is None and (line.startswith("+++") or line.startswith("---")):
             continue
         if line.startswith("+"):
             content = line[1:]
             nosec = bool(SUPPRESS_MARKER_RE.search(content))
             line_findings = []
-            line_has_secret = False
+            secret_span = None
             for category, severity, pattern, message, value_group in SECURITY_RULES:
                 m = pattern.search(content)
                 if m:
                     if category == "hardcoded-secret":
                         value_text = m.group(value_group) if value_group else m.group(0)
-                        if PLACEHOLDER_VALUE_RE.search(value_text):
+                        if PLACEHOLDER_VALUE_RE.fullmatch(value_text.strip()):
                             continue
                     key = (current_file, new_line, category)
                     if key in seen:
                         continue
                     seen.add(key)
                     if category == "hardcoded-secret":
-                        line_has_secret = True
-                        evidence = redact_secret(content)
+                        secret_span = m.span(value_group) if value_group else m.span(0)
+                        evidence = redact_secret(content, span=secret_span)
                     else:
                         evidence = content.strip()[:90]
                     line_findings.append({
@@ -326,18 +395,23 @@ def scan_security(diff_text):
                         "line": new_line,
                         "message": message,
                         "evidence": evidence,
+                        "acknowledged": nosec,
                     })
-            if line_has_secret:
+            if secret_span is not None:
                 # A secret was found on this line: redact evidence on every
                 # finding from it, not just the hardcoded-secret finding,
                 # so a co-occurring dangerous-call/injection finding can never
                 # leak the secret's raw value.
                 for f in line_findings:
                     if f["category"] != "hardcoded-secret":
-                        f["evidence"] = redact_secret(content)
+                        f["evidence"] = redact_secret(content, span=secret_span)
             for f in line_findings:
-                if nosec and f["category"] not in NON_SUPPRESSIBLE_CATEGORIES:
-                    suppressed.append(f)
+                fp = compute_fingerprint(f)
+                if baseline and fp in baseline:
+                    entry = baseline[fp]
+                    f["baseline_owner"] = entry.get("owner", "")
+                    f["baseline_reason"] = entry.get("reason", "")
+                    baselined.append(f)
                 else:
                     findings.append(f)
             if new_line is not None:
@@ -347,12 +421,55 @@ def scan_security(diff_text):
                 new_line += 1
 
     findings.sort(key=lambda f: SEVERITY_ORDER.get(f["severity"], 3))
-    suppressed.sort(key=lambda f: SEVERITY_ORDER.get(f["severity"], 3))
-    return findings, suppressed
+    baselined.sort(key=lambda f: SEVERITY_ORDER.get(f["severity"], 3))
+    return findings, baselined
 
 
-def format_security_report(findings, suppressed=None):
-    suppressed = suppressed or []
+def redact_diff_for_llm(diff_text, findings):
+    """Return a copy of diff_text with every added line that has a
+    hardcoded-secret finding fully blanked out, so raw credential values are
+    never included in a payload sent to an external LLM API. The human-facing
+    report redacts evidence separately (see redact_secret) - this protects
+    the separate network call, which is otherwise a distinct leak path even
+    when the report itself is clean."""
+    secret_lines = {(f["file"], f["line"]) for f in findings if f["category"] == "hardcoded-secret"}
+    if not secret_lines:
+        return diff_text
+
+    out = []
+    current_file = None
+    new_line = None
+    for raw_line in diff_text.splitlines(keepends=True):
+        line = raw_line.rstrip("\n")
+        if line.startswith("diff --git"):
+            current_file = line.strip().split(" b/")[-1]
+            new_line = None
+            out.append(raw_line)
+            continue
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
+        if hunk:
+            new_line = int(hunk.group(1))
+            out.append(raw_line)
+            continue
+        if new_line is None and (line.startswith("+++") or line.startswith("---")):
+            out.append(raw_line)
+            continue
+        if line.startswith("+"):
+            if (current_file, new_line) in secret_lines:
+                out.append("+[REDACTED - credential removed before sending to LLM]\n")
+            else:
+                out.append(raw_line)
+            if new_line is not None:
+                new_line += 1
+        else:
+            out.append(raw_line)
+            if not line.startswith("-") and new_line is not None:
+                new_line += 1
+    return "".join(out)
+
+
+def format_security_report(findings, baselined=None):
+    baselined = baselined or []
     lines = ["## Security Findings (heuristic scan)"]
     code_findings = [f for f in findings if f["category"] != "sensitive-file"]
     path_findings = [f for f in findings if f["category"] == "sensitive-file"]
@@ -360,7 +477,8 @@ def format_security_report(findings, suppressed=None):
     if code_findings:
         for f in code_findings:
             location = f["file"] if f["line"] is None else f"{f['file']}:{f['line']}"
-            lines.append(f"- [{f['severity']}] {location} — {f['category']}: {f['message']}")
+            ack = " (marked # nosec — still gates; see baseline to exempt)" if f.get("acknowledged") else ""
+            lines.append(f"- [{f['severity']}] {location} — {f['category']}: {f['message']}{ack}")
             if f["evidence"]:
                 lines.append(f"    `{f['evidence']}`")
     else:
@@ -372,12 +490,15 @@ def format_security_report(findings, suppressed=None):
         for f in path_findings:
             lines.append(f"- {f['file']} — {f['message']}")
 
-    if suppressed:
+    if baselined:
         lines.append("")
-        lines.append("## Suppressed by # nosec (review before trusting)")
-        for f in suppressed:
+        lines.append("## Baselined (approved via trusted baseline file, excluded from gate)")
+        for f in baselined:
             location = f["file"] if f["line"] is None else f"{f['file']}:{f['line']}"
-            lines.append(f"- [{f['severity']}] {location} — {f['category']}: {f['message']}")
+            owner = f.get("baseline_owner", "")
+            reason = f.get("baseline_reason", "")
+            note = f" — approved by {owner}: {reason}" if (owner or reason) else ""
+            lines.append(f"- [{f['severity']}] {location} — {f['category']}: {f['message']}{note}")
             if f["evidence"]:
                 lines.append(f"    `{f['evidence']}`")
 
@@ -390,12 +511,18 @@ def read_input(file_path, base_branch):
             return f.read()
     if not sys.stdin.isatty():
         return sys.stdin.read()
+    # --text/--no-ext-diff/--no-textconv force git to generate a real textual
+    # diff regardless of .gitattributes. Without these, a PR-controlled
+    # ".gitattributes" (e.g. "*.py -diff") makes git print "Binary files ...
+    # differ" instead of the actual change, hiding it from every downstream
+    # check - including this one.
+    diff_flags = ["--text", "--no-ext-diff", "--no-textconv"]
     if base_branch:
         result = subprocess.run(
-            ["git", "diff", f"{base_branch}...HEAD"], capture_output=True, text=True
+            ["git", "diff", *diff_flags, f"{base_branch}...HEAD"], capture_output=True, text=True
         )
     else:
-        result = subprocess.run(["git", "diff"], capture_output=True, text=True)
+        result = subprocess.run(["git", "diff", *diff_flags], capture_output=True, text=True)
     return result.stdout
 
 
@@ -433,8 +560,13 @@ def main():
                         help="Print security findings as JSON (implies --security; never calls the LLM).")
     parser.add_argument("--fail-on", dest="fail_on", choices=["high", "medium", "low", "none"],
                         default="none",
-                        help="Exit with code 2 if the heuristic scan finds issues at or above "
+                        help="Exit with code 3 if the heuristic scan finds issues at or above "
                              "this severity. Default: none (report only).")
+    parser.add_argument("--baseline-file",
+                        help="Path to a trusted baseline JSON file. Findings whose fingerprint "
+                             "matches an unexpired baseline entry are excluded from --fail-on but "
+                             "still reported. In CI this file must be read from the base branch, "
+                             "never from the PR being scanned, or a PR could approve its own findings.")
     args = parser.parse_args()
 
     if args.json:
@@ -446,16 +578,27 @@ def main():
         print("Error: input diff is empty.", file=sys.stderr)
         sys.exit(1)
 
+    baseline = None
+    if args.baseline_file:
+        try:
+            baseline = load_baseline(args.baseline_file)
+        except (OSError, json.JSONDecodeError, KeyError) as e:
+            print(f"Error: could not load --baseline-file {args.baseline_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # Scan the COMPLETE raw diff before any filtering or truncation, so a
     # large diff or an ignored file can never hide a finding from the scan.
-    findings, suppressed = scan_security(diff_text)
+    findings, baselined = scan_security(diff_text, baseline=baseline)
 
     def apply_exit_policy():
         if args.fail_on == "none":
             return
         threshold = SEVERITY_ORDER[args.fail_on]
         if any(SEVERITY_ORDER.get(f["severity"], 3) <= threshold for f in findings):
-            sys.exit(2)
+            # A distinct, non-2 code: argparse itself exits 2 on a bad CLI
+            # invocation, and a CI step must be able to tell "the scan found
+            # real issues" apart from "the tool was invoked incorrectly".
+            sys.exit(3)
 
     if args.json:
         counts = {"high": 0, "medium": 0, "low": 0}
@@ -465,13 +608,13 @@ def main():
             "version": 1,
             "counts": counts,
             "findings": findings,
-            "suppressed": suppressed,
+            "baselined": baselined,
         }, indent=2))
         apply_exit_policy()
         return
 
     if args.security:
-        report = format_security_report(findings, suppressed)
+        report = format_security_report(findings, baselined)
         print(report)
         if args.dry_run:
             apply_exit_policy()
@@ -512,15 +655,21 @@ def main():
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
+    # Detected secrets are redacted from the report, but the raw diff_text
+    # sent to the LLM is a SEPARATE leak path (a third-party API call, whose
+    # response could even echo the value back into the posted PR comment).
+    # Redact every hardcoded-secret line before it goes into either prompt.
+    safe_diff = redact_diff_for_llm(diff_text, findings + baselined)
+
     if args.security:
         system_prompt = SECURITY_SYSTEM_PROMPT
         user_content = (
-            "HEURISTIC SCAN FINDINGS:\n" + format_security_report(findings, suppressed)
-            + "\n\nDIFF:\n" + diff_text
+            "HEURISTIC SCAN FINDINGS:\n" + format_security_report(findings, baselined)
+            + "\n\nDIFF:\n" + safe_diff
         )
     else:
         system_prompt = SYSTEM_PROMPT
-        user_content = diff_text
+        user_content = safe_diff
 
     try:
         summary = call_llm(client, model, user_content, system_prompt=system_prompt)

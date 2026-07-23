@@ -8,19 +8,28 @@ on:
         required: false
         type: string
         default: "high"
-      tool_ref:
+      tool_repository:
         description: >
-          Git ref (tag or full commit SHA) of Alkhanjary/AI-PR-Summary to check
-          out for the scanner/summary code. GitHub does not expose a reusable
-          workflow's own resolved ref to itself (github.workflow_ref reflects
-          the CALLER's top-level workflow, not this file, and there is no
-          job.workflow_sha/workflow_ref/workflow_repository context - the job
-          context only exposes container/services/status). To fully pin your
-          integration, set this to the SAME tag/SHA you pinned in your
-          workflow's "uses:" line for this reusable workflow.
+          Override: explicit owner/repo for the AI-PR-Summary tool checkout.
+          Leave empty (default) to auto-resolve via job.workflow_repository,
+          which GitHub Actions sets to the exact repository that defines THIS
+          reusable workflow file (added to the job context in 2026). Only set
+          this if your runner does not yet support job.workflow_repository -
+          the job fails loudly with a clear error if auto-resolution comes up
+          empty, rather than silently falling back to a mutable ref.
         required: false
         type: string
-        default: "main"
+        default: ""
+      tool_ref:
+        description: >
+          Override: explicit ref/commit SHA for the AI-PR-Summary tool
+          checkout. Leave empty (default) to auto-resolve via
+          job.workflow_sha, which GitHub Actions sets to the exact commit
+          that defines THIS reusable workflow file. Only set this if your
+          runner does not yet support job.workflow_sha.
+        required: false
+        type: string
+        default: ""
     secrets:
       LLM_API_KEY:
         required: false
@@ -53,11 +62,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve tool checkout coordinates
+        id: pin
+        run: |
+          REPO="${{ inputs.tool_repository }}"
+          REF="${{ inputs.tool_ref }}"
+          if [ -z "$REPO" ]; then
+            REPO="${{ job.workflow_repository }}"
+          fi
+          if [ -z "$REF" ]; then
+            REF="${{ job.workflow_sha }}"
+          fi
+          if [ -z "$REPO" ] || [ -z "$REF" ]; then
+            echo "::error::Could not resolve a pinned repository/ref for the AI-PR-Summary tool checkout. job.workflow_repository/job.workflow_sha came back empty, which can happen on older GitHub Actions runners (this context was added in 2026) or GitHub Enterprise Server. Set the 'tool_repository' and 'tool_ref' inputs explicitly as a workaround (matching the tag/SHA you pinned in this workflow's own 'uses:' line)."
+            exit 1
+          fi
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout AI-PR-Summary tool
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          repository: Alkhanjary/AI-PR-Summary
-          ref: ${{ inputs.tool_ref }}
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.ref }}
           path: .ai-pr-summary
 
       - name: Set up Python
@@ -68,10 +95,24 @@ jobs:
       - name: Install tool dependencies
         run: pip install -r .ai-pr-summary/requirements.txt
 
+      - name: Load trusted baseline (from base branch, never from the PR head)
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          # A PR must not be able to approve its own findings by editing the
+          # baseline file in the same diff being scanned, so this reads the
+          # baseline strictly from the base branch's committed state.
+          git show "origin/$BASE_REF:.ai-pr-summary-baseline.json" > baseline.json 2>/dev/null \
+            || echo '{"version": 1, "entries": []}' > baseline.json
+
       - name: Get full raw diff
         run: |
           BASE_REF="${{ github.event.pull_request.base.ref }}"
-          git diff "origin/$BASE_REF...HEAD" > pr.diff
+          # --text/--no-ext-diff/--no-textconv force a real textual diff
+          # regardless of .gitattributes. Without these, a PR-controlled
+          # ".gitattributes" (e.g. "*.py -diff") makes git print "Binary
+          # files ... differ" instead of the actual change, hiding it from
+          # both the security scan and the AI summary below.
+          git diff --text --no-ext-diff --no-textconv "origin/$BASE_REF...HEAD" > pr.diff
 
       # Deterministic gate: the scan runs on the COMPLETE raw diff via the
       # same Python implementation used locally. The LLM never gates.
@@ -80,19 +121,24 @@ jobs:
         run: |
           if [ ! -s pr.diff ]; then
             echo "_No changes to scan._" > security.md
-            echo '{"version": 1, "counts": {}, "findings": [], "suppressed": []}' > security.json
+            echo '{"version": 1, "counts": {}, "findings": [], "baselined": []}' > security.json
             echo "gate_exit=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           set +e
-          python .ai-pr-summary/summarize_pr.py --security --dry-run --file pr.diff > security.md
+          python .ai-pr-summary/summarize_pr.py --security --dry-run --file pr.diff --baseline-file baseline.json > security.md
           md_exit=$?
-          python .ai-pr-summary/summarize_pr.py --json --fail-on "${{ inputs.fail_on }}" --file pr.diff > security.json
+          python .ai-pr-summary/summarize_pr.py --json --fail-on "${{ inputs.fail_on }}" --file pr.diff --baseline-file baseline.json > security.json
           gate_exit=$?
           set -e
-          # fail closed: a scan that errored must not pass the gate
-          if [ "$gate_exit" = "0" ] && [ "$md_exit" != "0" ]; then
-            gate_exit=3
+          # fail closed: a scan that errored (any exit other than 0 "clean"
+          # or 3 "findings at/above threshold", the tool's own two normal
+          # outcomes) must not silently pass the gate. Use a sentinel (9)
+          # that can't collide with the tool's own exit codes.
+          if [ "$gate_exit" != "0" ] && [ "$gate_exit" != "3" ]; then
+            gate_exit=9
+          elif [ "$gate_exit" = "0" ] && [ "$md_exit" != "0" ]; then
+            gate_exit=9
           fi
           echo "gate_exit=$gate_exit" >> "$GITHUB_OUTPUT"
 
@@ -136,9 +182,11 @@ jobs:
             const read = p => { try { return fs.readFileSync(p, "utf8").trim(); } catch { return ""; } };
             const summary = read("summary.md") || "Could not generate summary";
             const security = read("security.md");
-            const gateNote = process.env.GATE_EXIT === "2"
+            const gateNote = process.env.GATE_EXIT === "3"
               ? `\n\n> ❌ **Security gate failed** — findings at or above \`${process.env.FAIL_ON}\` severity. See the security-findings artifact for machine-readable output.`
-              : "";
+              : (process.env.GATE_EXIT !== "0"
+                ? `\n\n> ⚠️ **Security scan could not run** (failing closed) — this does not mean the change is safe, it means the check itself errored. See the Actions log.`
+                : "");
             const marker = "<!-- ai-pr-summary -->";
             const body = `${marker}\n${summary}\n\n---\n\n${security}${gateNote}`;
             const comments = await github.rest.issues.listComments({
@@ -229,7 +277,7 @@ jobs:
         if: always()
         run: |
           GATE="${{ steps.scan.outputs.gate_exit }}"
-          if [ "$GATE" = "2" ]; then
+          if [ "$GATE" = "3" ]; then
             echo "::error::Security scan found findings at or above '${{ inputs.fail_on }}' severity. See the PR comment and the security-findings artifact."
             exit 1
           elif [ "$GATE" != "0" ]; then

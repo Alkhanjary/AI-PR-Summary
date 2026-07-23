@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -34,11 +36,36 @@ jobs:
           python summarize_pr.py --json --fail-on high --file bad.diff > out.json
           code=$?
           set -e
-          if [ "$code" != "2" ]; then
-            echo "expected exit code 2 for high finding, got $code"
+          if [ "$code" != "3" ]; then
+            echo "expected exit code 3 for high finding, got $code"
             exit 1
           fi
           python -c "import json; d = json.load(open('out.json')); assert d['counts']['high'] >= 1, d"
 
           printf 'diff --git a/y.py b/y.py\n--- a/y.py\n+++ b/y.py\n@@ -1,1 +1,2 @@\n context\n+total = a + b\n' > clean.diff
           python summarize_pr.py --json --fail-on high --file clean.diff > /dev/null
+
+      # Real integration test (not a synthetic fixture): scans THIS PR's
+      # actual diff against the repo's own baseline file. Proves the
+      # baseline mechanism genuinely neutralizes this repo's known,
+      # intentional fixtures (test/doc examples) rather than just working
+      # in isolated unit tests. Uses the baseline from the checked-out PR
+      # head - safe here because ci.yml enforces THIS repo's own bar on its
+      # own PRs, so a PR editing the baseline is itself a visible, reviewed
+      # diff in the same PR (unlike the reusable workflow calling into a
+      # DIFFERENT repo, which reads the baseline from the base ref instead).
+      - name: Self-scan integration test (validates the baseline against this repo's own diff)
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --text --no-ext-diff --no-textconv "origin/${{ github.event.pull_request.base.ref }}...HEAD" > self.diff
+          set +e
+          python summarize_pr.py --json --fail-on high --file self.diff --baseline-file .ai-pr-summary-baseline.json > self.json
+          code=$?
+          set -e
+          echo "--- self-scan result ---"
+          cat self.json
+          if [ "$code" != "0" ]; then
+            echo "Self-scan of this PR's own diff was not clean (exit $code) even with the baseline applied."
+            echo "Either this PR introduced a real finding, or it added a new intentional fixture that needs a baseline entry in .ai-pr-summary-baseline.json."
+            exit 1
+          fi
