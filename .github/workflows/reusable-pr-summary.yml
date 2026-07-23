@@ -2,13 +2,41 @@ name: Reusable AI PR Summary
 
 on:
   workflow_call:
+    inputs:
+      fail_on:
+        description: "Fail the check when the security scan finds issues at or above this severity (high | medium | low | none)"
+        required: false
+        type: string
+        default: "high"
+      tool_repository:
+        description: >
+          Override: explicit owner/repo for the AI-PR-Summary tool checkout.
+          Leave empty (default) to auto-resolve via job.workflow_repository,
+          which GitHub Actions sets to the exact repository that defines THIS
+          reusable workflow file (added to the job context in 2026). Only set
+          this if your runner does not yet support job.workflow_repository -
+          the job fails loudly with a clear error if auto-resolution comes up
+          empty, rather than silently falling back to a mutable ref.
+        required: false
+        type: string
+        default: ""
+      tool_ref:
+        description: >
+          Override: explicit ref/commit SHA for the AI-PR-Summary tool
+          checkout. Leave empty (default) to auto-resolve via
+          job.workflow_sha, which GitHub Actions sets to the exact commit
+          that defines THIS reusable workflow file. Only set this if your
+          runner does not yet support job.workflow_sha.
+        required: false
+        type: string
+        default: ""
     secrets:
       LLM_API_KEY:
-        required: true
+        required: false
       LLM_BASE_URL:
-        required: true
+        required: false
       LLM_MODEL:
-        required: true
+        required: false
 
 concurrency:
   group: pr-summary-${{ github.event.pull_request.number }}
@@ -22,119 +50,145 @@ jobs:
       pull-requests: write
       contents: read
       issues: write
+    env:
+      # Job-level env so step `if:` conditions can test env.LLM_API_KEY
+      # instead of referencing `secrets` directly in an `if:` expression.
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout PR
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - name: Get diff
+      - name: Resolve tool checkout coordinates
+        id: pin
+        run: |
+          REPO="${{ inputs.tool_repository }}"
+          REF="${{ inputs.tool_ref }}"
+          if [ -z "$REPO" ]; then
+            REPO="${{ job.workflow_repository }}"
+          fi
+          if [ -z "$REF" ]; then
+            REF="${{ job.workflow_sha }}"
+          fi
+          if [ -z "$REPO" ] || [ -z "$REF" ]; then
+            echo "::error::Could not resolve a pinned repository/ref for the AI-PR-Summary tool checkout. job.workflow_repository/job.workflow_sha came back empty, which can happen on older GitHub Actions runners (this context was added in 2026) or GitHub Enterprise Server. Set the 'tool_repository' and 'tool_ref' inputs explicitly as a workaround (matching the tag/SHA you pinned in this workflow's own 'uses:' line)."
+            exit 1
+          fi
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout AI-PR-Summary tool
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .ai-pr-summary
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install tool dependencies
+        run: pip install -r .ai-pr-summary/requirements.txt
+
+      - name: Load trusted baseline (from base branch, never from the PR head)
         run: |
           BASE_REF="${{ github.event.pull_request.base.ref }}"
-          git diff "origin/$BASE_REF...HEAD" -- . ':(exclude)*.lock' ':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)*.min.js' ':(exclude)*.min.css' > pr.diff
+          # A PR must not be able to approve its own findings by editing the
+          # baseline file in the same diff being scanned, so this reads the
+          # baseline strictly from the base branch's committed state.
+          git show "origin/$BASE_REF:.ai-pr-summary-baseline.json" > baseline.json 2>/dev/null \
+            || echo '{"version": 1, "entries": []}' > baseline.json
 
-      - name: Smart truncate diff
-        id: truncate
+      - name: Get full raw diff
         run: |
-          python3 << 'PYEOF'
-          MAX_CHARS = 8000
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          # --text/--no-ext-diff/--no-textconv force a real textual diff
+          # regardless of .gitattributes. Without these, a PR-controlled
+          # ".gitattributes" (e.g. "*.py -diff") makes git print "Binary
+          # files ... differ" instead of the actual change, hiding it from
+          # both the security scan and the AI summary below.
+          git diff --text --no-ext-diff --no-textconv "origin/$BASE_REF...HEAD" > pr.diff
 
-          with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
-              diff_text = f.read()
-
-          lines = diff_text.splitlines(keepends=True)
-          chunks = []
-          current_name = None
-          current_lines = []
-          for line in lines:
-              if line.startswith("diff --git"):
-                  if current_name is not None:
-                      chunks.append((current_name, "".join(current_lines)))
-                  current_name = line.strip().split(" b/")[-1]
-                  current_lines = [line]
-              else:
-                  current_lines.append(line)
-          if current_name is not None:
-              chunks.append((current_name, "".join(current_lines)))
-
-          kept = []
-          omitted = []
-          used = 0
-          for name, chunk in chunks:
-              if used + len(chunk) <= MAX_CHARS:
-                  kept.append(chunk)
-                  used += len(chunk)
-              else:
-                  omitted.append(name)
-
-          result = "".join(kept) if kept else diff_text[:MAX_CHARS]
-
-          with open("pr_truncated.diff", "w", encoding="utf-8") as f:
-              f.write(result)
-
-          if omitted:
-              print(f"Omitted {len(omitted)} file(s) to fit size limit: {', '.join(omitted)}")
-          PYEOF
-
-      - name: Call LLM
-        id: summarize
-        env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      # Deterministic gate: the scan runs on the COMPLETE raw diff via the
+      # same Python implementation used locally. The LLM never gates.
+      - name: Security scan (deterministic gate)
+        id: scan
         run: |
-          if [ -z "$(cat pr_truncated.diff)" ]; then
-            echo "summary=No changes detected to summarize." >> "$GITHUB_OUTPUT"
+          if [ ! -s pr.diff ]; then
+            echo "_No changes to scan._" > security.md
+            echo '{"version": 1, "counts": {}, "findings": [], "baselined": []}' > security.json
+            echo "gate_exit=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          DIFF_CONTENT=$(cat pr_truncated.diff)
-          PROMPT_JSON=$(jq -n --arg model "$LLM_MODEL" --arg diff "$DIFF_CONTENT" '{
-            model: $model,
-            messages: [
-              {role: "system", content: "You review code diffs for PR reviewers.\n\nReturn ONLY markdown with:\n\n## Suggested Title\nOne concise conventional-commit style PR title\n\n## Summary\n- 2 to 4 short bullets of what changed\n\n## Impact\n- 1 to 3 short bullets explaining what this change actually does, the resulting behavior or functional effect\n\n## Risk\nlow | medium | high (one word, then one short reason)\n\n## Flags\n- Note any hardcoded secrets or leftover TODOs. Write None noticed if nothing stands out.\n\n## Suggested Tests\n- List specific test file paths to add or update, each with a short reason tied to what changed in the diff.\n- Follow existing test naming conventions visible in the diff; otherwise default to tests/test_<module>.py.\n- Write None needed if the change has no testable logic (docs, comments, config-only, formatting).\n\n## Files\n- top 5 changed files\n\nDo not invent changes that are not in the diff."},
-              {role: "user", content: $diff}
-            ]
-          }')
+          set +e
+          python .ai-pr-summary/summarize_pr.py --security --dry-run --file pr.diff --baseline-file baseline.json > security.md
+          md_exit=$?
+          python .ai-pr-summary/summarize_pr.py --json --fail-on "${{ inputs.fail_on }}" --file pr.diff --baseline-file baseline.json > security.json
+          gate_exit=$?
+          set -e
+          # fail closed: a scan that errored (any exit other than 0 "clean"
+          # or 3 "findings at/above threshold", the tool's own two normal
+          # outcomes) must not silently pass the gate. Use a sentinel (9)
+          # that can't collide with the tool's own exit codes.
+          if [ "$gate_exit" != "0" ] && [ "$gate_exit" != "3" ]; then
+            gate_exit=9
+          elif [ "$gate_exit" = "0" ] && [ "$md_exit" != "0" ]; then
+            gate_exit=9
+          fi
+          echo "gate_exit=$gate_exit" >> "$GITHUB_OUTPUT"
 
-          SUMMARY=""
-          for attempt in 1 2 3; do
-            RESPONSE=$(curl -s --max-time 30 --connect-timeout 10 -w "\nHTTP_STATUS:%{http_code}" "$LLM_BASE_URL/chat/completions" \
-              -H "Authorization: Bearer $LLM_API_KEY" \
-              -H "Content-Type: application/json" \
-              -d "$PROMPT_JSON")
-            HTTP_STATUS=$(echo "$RESPONSE" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
-            BODY=$(echo "$RESPONSE" | sed '$ d')
-            if [ "$HTTP_STATUS" = "200" ]; then
-              SUMMARY=$(echo "$BODY" | jq -r '.choices[0].message.content // empty')
-              if [ -n "$SUMMARY" ]; then
-                break
-              fi
-            fi
-            echo "Attempt $attempt failed (HTTP ${HTTP_STATUS:-timeout}). Retrying..."
-            sleep $((attempt * 2))
-          done
+      - name: Upload security findings (JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-findings
+          path: security.json
+          if-no-files-found: ignore
 
-          if [ -z "$SUMMARY" ]; then
-            echo "summary=Could not generate summary after 3 attempts (timeout or error). Check the Actions log for details." >> "$GITHUB_OUTPUT"
+      - name: AI summary (advisory)
+        if: env.LLM_API_KEY != ''
+        run: |
+          if [ ! -s pr.diff ]; then
+            echo "_No changes detected to summarize._" > summary.md
             exit 0
           fi
+          set +e
+          python .ai-pr-summary/summarize_pr.py --file pr.diff > summary.md 2> summary.err
+          if [ ! -s summary.md ]; then
+            echo "_Could not generate AI summary (see Actions log). The security scan below still ran._" > summary.md
+            cat summary.err
+          fi
 
-          {
-            echo "summary<<SUMMARY_EOF"
-            echo "$SUMMARY"
-            echo "SUMMARY_EOF"
-          } >> "$GITHUB_OUTPUT"
+      - name: Note missing AI summary (no secrets available, e.g. fork PR)
+        if: env.LLM_API_KEY == ''
+        run: |
+          echo "_AI summary skipped: no LLM credentials available (common on fork/Dependabot PRs). The deterministic security scan below still ran and still gates the merge._" > summary.md
 
       - name: Post or update comment
-        if: always()
-        uses: actions/github-script@v7
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
-          SUMMARY: ${{ steps.summarize.outputs.summary }}
+          FAIL_ON: ${{ inputs.fail_on }}
+          GATE_EXIT: ${{ steps.scan.outputs.gate_exit }}
         with:
           script: |
-            const summary = process.env.SUMMARY || "Could not generate summary";
+            const fs = require("fs");
+            const read = p => { try { return fs.readFileSync(p, "utf8").trim(); } catch { return ""; } };
+            const summary = read("summary.md") || "Could not generate summary";
+            const security = read("security.md");
+            const gateNote = process.env.GATE_EXIT === "3"
+              ? `\n\n> ❌ **Security gate failed** — findings at or above \`${process.env.FAIL_ON}\` severity. See the security-findings artifact for machine-readable output.`
+              : (process.env.GATE_EXIT !== "0"
+                ? `\n\n> ⚠️ **Security scan could not run** (failing closed) — this does not mean the change is safe, it means the check itself errored. See the Actions log.`
+                : "");
             const marker = "<!-- ai-pr-summary -->";
-            const body = `${marker}\n${summary}`;
+            const body = `${marker}\n${summary}\n\n---\n\n${security}${gateNote}`;
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -158,13 +212,14 @@ jobs:
             }
 
       - name: Add risk label
-        if: always()
-        uses: actions/github-script@v7
-        env:
-          SUMMARY: ${{ steps.summarize.outputs.summary }}
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
-            const summary = process.env.SUMMARY || "";
+            const fs = require("fs");
+            let summary = "";
+            try { summary = fs.readFileSync("summary.md", "utf8"); } catch {}
             const match = summary.match(/## Risk\s*\n\s*(low|medium|high)/i);
             if (!match) return;
             const level = match[1].toLowerCase();
@@ -217,3 +272,15 @@ jobs:
             } catch (e) {
               console.log("Could not add label:", e.message);
             }
+
+      - name: Enforce security gate
+        if: always()
+        run: |
+          GATE="${{ steps.scan.outputs.gate_exit }}"
+          if [ "$GATE" = "3" ]; then
+            echo "::error::Security scan found findings at or above '${{ inputs.fail_on }}' severity. See the PR comment and the security-findings artifact."
+            exit 1
+          elif [ "$GATE" != "0" ]; then
+            echo "::error::Security scan failed to run (exit $GATE) — failing closed."
+            exit 1
+          fi

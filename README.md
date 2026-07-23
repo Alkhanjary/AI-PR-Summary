@@ -76,17 +76,23 @@ source ~/.bashrc
 
 ## 2. Local Usage
 
-The core idea: git diff produces the changes, the tool reads them and returns a summary.
+The core idea: `git diff` produces the changes, the tool reads them and returns a summary. Pick the command that matches your situation:
 
-**Most common — summarize your current uncommitted changes:**
+| Your situation | Command |
+|---|---|
+| I edited files, haven't committed yet | `git diff \| prsum` |
+| I want a summary of my whole branch vs. main | `git diff main...HEAD \| prsum` |
+| I already saved a diff to a file | `prsum --file change.diff` |
+
+**1. I edited files, haven't committed yet — summarize the uncommitted changes:**
 
 git diff | prsum
 
-**Summarize your whole branch, compared to main:**
+**2. I want to see everything my branch will bring into main — summarize the whole branch:**
 
 git diff main...HEAD | prsum
 
-**From a saved diff file:**
+**3. I already have a diff saved as a file:**
 
 git diff > change.diff
 prsum --file change.diff
@@ -120,7 +126,154 @@ Copy that output straight into your PR description.
 
 ---
 
-## 3. Automatic Setup (GitHub Action, any repo)
+## 3. Security Analysis Mode (--security)
+
+Adds a cybersecurity-focused review of the change: what the change impacts in
+the product from a security perspective, and whether it could harm the code.
+Pick the command that matches your situation:
+
+| Your situation | Command |
+|---|---|
+| I want the full review (scan + AI assessment) | `git diff \| prsum --security` |
+| I just want a quick offline scan, no API key needed | `git diff \| prsum --security --dry-run` |
+| I'm wiring this into CI and need a pass/fail result | `git diff \| prsum --json --fail-on high` |
+
+**1. Full security analysis (heuristic scan + LLM assessment):**
+
+git diff | prsum --security
+
+**2. Offline scan only — fastest option, no API call, no key needed:**
+
+git diff | prsum --security --dry-run
+
+**3. Machine-readable output + merge gate (for CI):**
+
+git diff | prsum --json --fail-on high
+
+How the CI option works:
+- `--json` prints findings as JSON instead of markdown, and never calls the LLM.
+- `--fail-on high` makes the command exit with code **3** when findings at or
+  above that severity exist. Your CI pipeline treats that exit code as the
+  merge gate.
+- Exit codes at a glance: `0` = clean, `1` = the tool itself errored (bad
+  input, LLM failure, unreadable baseline file), `2` = the CLI was invoked
+  incorrectly (argparse's own usage-error code — reserved so a misconfigured
+  CI step can never be mistaken for "findings were detected"),
+  `3` = findings at or above your chosen threshold.
+
+### What it does
+
+1. **Heuristic scan (deterministic, runs offline).** Every *added* line of the
+   **complete raw diff** is checked against known risky patterns — the scan runs
+   *before* lockfile filtering and size truncation, so a large or noisy diff
+   cannot hide a finding. Patterns covered:
+   - hardcoded secrets (quoted or unquoted assignments — any case, e.g.
+     `token=` as well as `TOKEN=` — JSON keys, AWS keys, private keys)
+     — obvious placeholder *values* like `your-api-key` are skipped (matched
+     as a whole, so `sk-live-example-real123` is never mistaken for a
+     placeholder just because it contains the word "example" somewhere),
+     and detected secret values are **redacted by exact matched span** from
+     all output, including the diff sent to the LLM — a value that happens
+     to appear before any `:`/`=` can never be echoed back by a naive
+     "redact everything after the separator" heuristic
+   - injection risks (SQL built by concatenation, f-strings, or `$var` interpolation)
+   - dangerous calls (eval/exec, os.system, shell=True, pickle.loads, unsafe yaml.load)
+   - XSS sinks (innerHTML, document.write, dangerouslySetInnerHTML)
+   - GitHub Actions expression injection (untrusted event data in `${{ }}`)
+   - insecure transport (verify=False, unverified SSL context, plain http:// URLs)
+   - weak crypto (MD5/SHA1 hashing, DES/ECB)
+   - risky config (debug=True, CORS wildcard, chmod 777)
+
+   It also flags when the change touches **security-sensitive areas**: auth/
+   login/token/crypto files, CI/CD workflows, Dockerfiles, dependency
+   manifests, and .env files.
+
+2. **LLM assessment.** The diff plus the scan findings are sent to the LLM
+   with a security-reviewer prompt that returns:
+   - **Security Impact** — which parts of the product the change touches
+   - **Harm Assessment** — "No harm identified" / "Potential harm" / "Likely harm", with the concrete attack scenario
+   - **Severity** — none | low | medium | high | critical
+   - **Recommendations** — concrete fixes or mitigations
+
+### Reducing false positives
+
+- **Every path is scanned — no exclusions by file location.** A file's path
+  is attacker-controlled in a PR diff, so `tests/`, `docs/`, and `.md` files
+  are scanned exactly like any other file. A real secret or `eval()` call
+  doesn't stop being dangerous because of what directory it's added to.
+- **`# nosec` is informational only — it never excludes a finding from the
+  gate.** The diff carrying that comment is exactly what an attacker
+  controls, so a comment can't be allowed to wave away a finding at any
+  severity. Add `# nosec` to the end of a line and the finding is marked
+  `"acknowledged": true` (and noted in the report) so a human reviewer sees
+  the author's intent — but it still counts toward `--fail-on`.
+- **The only real suppression mechanism is a trusted baseline file**
+  (`--baseline-file path/to/baseline.json`), for genuine false positives
+  like the scanner's own pattern-definition lines or intentional test/doc
+  fixtures:
+
+  ```json
+  {
+    "version": 1,
+    "entries": [
+      {
+        "fingerprint": "a1b2c3d4e5f60718",
+        "owner": "octocat",
+        "reason": "Regex pattern definition, not actual usage",
+        "expires": "2027-01-01"
+      }
+    ]
+  }
+  ```
+
+  Each entry's `fingerprint` ties it to one specific finding (a hash of its
+  category, file, and evidence — get it from a `--json` run's `findings`
+  array before baselining). `expires` is required for the entry to be worth
+  anything long-term: past-date entries are dropped automatically, so a
+  stale approval can't silently persist forever. Baselined findings are
+  never dropped from the report — they show up in a "Baselined" section
+  (and the JSON `baselined` array) with the approving owner and reason, so
+  they stay visible even though they don't gate.
+  **In CI, this file must be read from the base branch, never from the PR
+  being scanned** — otherwise a PR could approve its own findings by editing
+  the baseline in the same diff. The reusable workflow below does this
+  automatically.
+
+### Example output
+
+## Security Findings (heuristic scan)
+- [high] auth.py:2 — injection: possible SQL injection via string concatenation
+    `query = "SELECT * FROM users WHERE name = '" + user + "'"`
+- [high] auth.py:3 — hardcoded-secret: possible hardcoded credential
+    `PASSWORD = [REDACTED]`
+
+## Security-Sensitive Areas Touched
+- auth.py — filename suggests security-sensitive code
+
+(...followed by the LLM's Security Impact / Harm Assessment / Severity / Recommendations sections.)
+
+In normal mode (without --security), the tool still runs the scan quietly and
+prints a one-line note to stderr when it spots something, so risky changes
+never pass completely silently.
+
+### Positioning and limitations
+
+- **The gate is deterministic; the LLM is advisory.** Only the regex scan's
+  exit code can block a merge. The LLM assessment is never used as a gate,
+  because PR diffs are attacker-controlled input and could attempt prompt
+  injection (both prompts also instruct the model to ignore embedded
+  instructions).
+- **This is a fast tripwire, not a security audit.** The rules catch common,
+  obvious mistakes. For depth, layer dedicated tools on top: secret scanning
+  (Gitleaks/TruffleHog), SAST (Semgrep/CodeQL), and dependency/vulnerability
+  scanning (OSV-Scanner/Trivy/Dependabot).
+- Findings are heuristic: expect some false positives (a matched pattern in a
+  comment) and false negatives (novel or language-specific issues). Treat
+  every finding as a pointer for human review.
+
+---
+
+## 4. Automatic Setup (GitHub Action, any repo)
 
 Instead of running the tool yourself, GitHub can run it automatically on every pull request and post the summary as a PR comment.
 
@@ -141,7 +294,7 @@ Create .github/workflows/pr-summary.yml in the target repo with this content (re
 name: AI PR Summary
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, ready_for_review]
 jobs:
   summarize:
     permissions:
@@ -149,18 +302,46 @@ jobs:
       contents: read
       issues: write
     uses: YOUR_GITHUB_USERNAME/AI-PR-Summary/.github/workflows/reusable-pr-summary.yml@main
+    with:
+      fail_on: high   # optional — block merge on high findings (high | medium | low | none)
     secrets:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
 
-The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing to it shares the same behavior, and improving it here updates it everywhere on the next PR.
+`ready_for_review` and `reopened` matter because the job also skips draft
+PRs — without them, a PR opened as a draft and later marked ready never
+triggers the check at all (no `synchronize` event fires just from removing
+draft status).
+
+The `@main` above is for getting started. For production, pin it to a
+release tag or commit SHA instead (`@v1`, or a full SHA) so a change to this
+tool can't silently alter your CI's behavior mid-flight — the reusable
+workflow auto-detects the exact commit that pin resolves to via
+`job.workflow_sha`/`job.workflow_repository` and checks out that same
+revision for the scanner code, so no extra configuration is needed on your
+side. (See `tool_repository`/`tool_ref` inputs in reusable-pr-summary.yml if
+your GitHub Actions runner predates that context and you need to set it
+explicitly.)
+
+The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing to it shares the same behavior, and improving it here updates it everywhere on the next PR. The workflow checks out this repo and runs the same summarize_pr.py used locally — there is no duplicated logic.
 
 ### What happens on every PR
 
-- Diffs the PR branch against its base branch
-- Sends it to the LLM
-- Posts a comment with the summary (updates the same comment on new pushes, no spam)
+- Diffs the PR branch against its base branch (full raw diff, generated with
+  `--text --no-ext-diff --no-textconv` so a PR-controlled `.gitattributes`
+  can't hide changes behind a "Binary files differ" marker)
+- Reads `.ai-pr-summary-baseline.json` from your repo's **base branch**
+  (never the PR head, so a PR can't approve its own findings) and applies it
+- **Runs the deterministic security scan on the complete diff** and uploads
+  the findings as a machine-readable security-findings JSON artifact
+- Sends a secret-redacted copy of the (filtered, truncated) diff to the LLM
+  for the advisory summary — detected credentials never reach the LLM API
+- Posts one comment containing the summary plus the security findings
+  (updates the same comment on new pushes, no spam)
+- **Fails the check** if findings at or above the fail_on threshold exist
+  (default: high) — or if the scan itself errored (fail-closed). Make the
+  check required in branch protection to actually block merging.
 
 ---
 
