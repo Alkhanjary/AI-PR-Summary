@@ -1,0 +1,473 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "fingerprint": "9b221d0fff874565",
+      "owner": "alkhanjary",
+      "reason": "CI fixture: intentional vulnerable code used to smoke-test the gate exit policy",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "fa0d9606991a2d4c",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "2b56b5474b0d0ab0",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "95a2ba25f1da6537",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ba7cefa73af28f08",
+      "owner": "alkhanjary",
+      "reason": "Scanner pattern definition: the regex text itself matches its own detection pattern",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "00d4738400bdf4cf",
+      "owner": "alkhanjary",
+      "reason": "Scanner pattern definition: the regex text itself matches its own detection pattern",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "1d79cd10f40cfdd0",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "7a32f3032906327e",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "a49202fc087ba0e4",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "81bb6144d7ee623b",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "7c9e1e6996882dfa",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "0a47dd0402bf0a5c",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "fc83dfb5e76b5b96",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "b9f10a4d2e7f3034",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ddfa2a20be9eb7d2",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "5359bb4d2cfdbeaf",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "c5331e9d9f3ef9f0",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "5a7e1b9550114f17",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "807cc76ef7c3b9a8",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "b19fe4d0dc4cc344",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "a8330c1c640edb48",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "dfea4148412d43f1",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "9b5cc26c25d06b20",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "d38e0a042c39787b",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "44adf8ad427b2ea5",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "490ce848706de40f",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "b9bdb514fb901476",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "4dd5f0b7c2dbd52d",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "2a43650e77953991",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "e6ffae3389f1f1bd",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "5ae583da5c24743c",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "dba8ef25461d428e",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "0615cab205a92e9b",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "bfc83dc0e081f2d1",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "6165ec66a6607c4a",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "5a7e1b9550114f17",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "dca95fb7a4dd3dfb",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "eac1714127df6a45",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "e5025afffcf7e55e",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "8b28550cc693cf93",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "0b857788a2083b28",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "31d4628cd79d3c1a",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "7dae5214fa533a21",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "b4dda1093bb8cb2c",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "e6ffae3389f1f1bd",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "a6f1834168670dfb",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "a2da485d3a6dea9b",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "74de0bdb69a42cec",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "98dc4b49a207a5c9",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ef3cb1ec9b874cab",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ef3cb1ec9b874cab",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ef3cb1ec9b874cab",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ef3cb1ec9b874cab",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ef3cb1ec9b874cab",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ef3cb1ec9b874cab",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "5a7e1b9550114f17",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "0225e49e4c4f48d3",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "724636718e90ce4d",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "5a3238744925a422",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "c919234ff30cdf1f",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "64e434d7d88b5573",
+      "owner": "alkhanjary",
+      "reason": "Documentation example demonstrating vulnerable code the scanner detects",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "47ef01e8d8776900",
+      "owner": "alkhanjary",
+      "reason": "Scanner pattern definition: the regex text itself matches its own detection pattern",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "65dfa49d0aeb77fb",
+      "owner": "alkhanjary",
+      "reason": "Scanner pattern definition: the regex text itself matches its own detection pattern",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "e54058cdeb2c79f8",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "d704c3354baa5d6b",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "186cf36d24a0566a",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "8ff0e486a4aa3683",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "2ef35ab407e87b32",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "6d7a4f6533d0d850",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "980073f417a921fb",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "c8ed038ec6e690b5",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "c8ed038ec6e690b5",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "186cf36d24a0566a",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "c8ed038ec6e690b5",
+      "owner": "alkhanjary",
+      "reason": "Test fixture: intentionally vulnerable-looking code used to test scanner detection",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "32a9308cd5f0af61",
+      "owner": "alkhanjary",
+      "reason": "sensitive-file flag on a file this PR itself touches (workflow/config/env-example/baseline) - expected, not a vulnerability",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "51458a8dfd752bed",
+      "owner": "alkhanjary",
+      "reason": "sensitive-file flag on a file this PR itself touches (workflow/config/env-example/baseline) - expected, not a vulnerability",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "2cf546b300d42de8",
+      "owner": "alkhanjary",
+      "reason": "sensitive-file flag on a file this PR itself touches (workflow/config/env-example/baseline) - expected, not a vulnerability",
+      "expires": "2027-07-23"
+    },
+    {
+      "fingerprint": "ff4745e4ea7bfae3",
+      "owner": "alkhanjary",
+      "reason": "sensitive-file flag on a file this PR itself touches (workflow/config/env-example/baseline) - expected, not a vulnerability",
+      "expires": "2027-07-23"
+    }
+  ]
+}

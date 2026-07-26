@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from summarize_pr import is_ignored, filter_diff, split_by_file, smart_truncate
+from summarize_pr import is_ignored, filter_diff, split_by_file, smart_truncate, SYSTEM_PROMPT
 
 
 SAMPLE_DIFF = """diff --git a/app.py b/app.py
@@ -55,3 +55,13 @@ def test_smart_truncate_keeps_everything_if_under_budget():
 def test_smart_truncate_omits_when_over_budget():
     result, omitted = smart_truncate(SAMPLE_DIFF, max_chars=50)
     assert len(omitted) >= 1
+
+
+def test_system_prompt_requests_suggested_tests_section():
+    assert "## Suggested Tests" in SYSTEM_PROMPT
+
+
+def test_system_prompt_flags_no_longer_mentions_missing_tests():
+    # "missing tests" now lives in its own dedicated section, not Flags
+    flags_section = SYSTEM_PROMPT.split("## Flags")[1].split("## Suggested Tests")[0]
+    assert "missing tests" not in flags_section.lower()
