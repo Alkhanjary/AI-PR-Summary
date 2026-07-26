@@ -68,6 +68,8 @@ jobs:
       # same Python implementation used locally. The LLM never gates.
       - name: Security scan (deterministic gate)
         id: scan
+        env:
+          FAIL_ON: ${{ inputs.fail_on }}
         run: |
           if [ ! -s pr.diff ]; then
             echo "_No changes to scan._" > security.md
@@ -78,7 +80,7 @@ jobs:
           set +e
           python .ai-pr-summary/summarize_pr.py --security --dry-run --file pr.diff > security.md
           md_exit=$?
-          python .ai-pr-summary/summarize_pr.py --json --fail-on "${{ inputs.fail_on }}" --file pr.diff > security.json
+          python .ai-pr-summary/summarize_pr.py --json --fail-on "$FAIL_ON" --file pr.diff > security.json
           gate_exit=$?
           set -e
           # fail closed: a scan that errored must not pass the gate
