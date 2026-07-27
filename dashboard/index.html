@@ -832,10 +832,11 @@ runMonitorBtn.addEventListener('click', async () => {
   const repo = repoSelect.value;
   if (!repo) { monitorStatus.textContent = 'Pick a repo above first.'; return; }
 
-  monitorStatus.textContent = 'Loading commit activity...';
   monitorTableWrap.innerHTML = '';
-  monitorProgressWrap.style.display = 'none';
   [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap].forEach(w => w.style.display = 'none');
+  monitorProgressWrap.style.display = 'block';
+  monitorProgressLog.textContent = '';
+  monitorStatus.textContent = 'Loading commit activity...';
 
   try {
     const since = rangeToSince(monitorRange.value);
@@ -847,12 +848,7 @@ runMonitorBtn.addEventListener('click', async () => {
     const timeline = statsData.timeline || [];
     if (contributors.length === 0) { monitorStatus.textContent = 'No commit activity found for this range.'; return; }
 
-    renderMonitorCommitsChart(contributors);
-    renderTimelineChart(contributors, timeline);
-
     const useAi = monitorAi.checked;
-    monitorProgressWrap.style.display = 'block';
-    monitorProgressLog.textContent = '';
     monitorStatus.textContent = 'Scanning for bugs' + (useAi ? ' with AI verification (this can take a while)...' : '...');
 
     const startRes = await fetch(API_BASE + '/api/team-bugs/start', {
@@ -878,16 +874,21 @@ runMonitorBtn.addEventListener('click', async () => {
       }
       if (pollData.status === 'error') {
         monitorStatus.textContent = pollData.error || 'Bug scan failed.';
-        break;
+        monitorProgressWrap.style.display = 'none';
+        return;
       }
     }
 
     monitorProgressWrap.style.display = 'none';
     monitorStatus.textContent = contributors.length + ' contributor(s) \u2014 ' + monitorRange.options[monitorRange.selectedIndex].text.toLowerCase();
+
+    renderMonitorCommitsChart(contributors);
+    renderTimelineChart(contributors, timeline);
     renderSeverityChart(contributors, bugsByAuthor);
     renderScatterChart(contributors, bugsByAuthor);
     renderMonitorTable(contributors, bugsByAuthor);
   } catch (e) {
+    monitorProgressWrap.style.display = 'none';
     monitorStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
 });
