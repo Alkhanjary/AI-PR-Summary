@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -207,6 +208,56 @@ def github_commit_detail(sha):
         headers=gh_headers(),
     )
     return jsonify(r.json()), r.status_code
+
+
+OTHER_SCANNER_PATH = Path(__file__).resolve().parent.parent / "security-scan" / "scanner.py"
+
+
+@app.route("/api/vuln-scan", methods=["POST"])
+def vuln_scan():
+    """Runs the separate security-scan tool (kept in its own folder,
+    never merged into this repo) against a cloned/cached copy of the
+    given repo, and returns its JSON report."""
+    data = request.get_json(force=True)
+    repo = data.get("repo", "").strip()
+    use_ai = data.get("ai", True)
+    scan_types = data.get("scan_types", ["code"])
+    fail_on = data.get("fail_on", "high")
+    include_test_files = data.get("include_test_files", False)
+
+    if not OTHER_SCANNER_PATH.exists():
+        return jsonify({"error": f"Scanner not found at {OTHER_SCANNER_PATH}"}), 500
+
+    target_dir = get_repo_dir(repo)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        json_out = str(Path(tmpdir) / "report.json")
+        scan_arg = ",".join(scan_types) if scan_types else "code"
+        cmd = [
+            "py", str(OTHER_SCANNER_PATH), str(target_dir),
+            "--json", json_out,
+            "--scan", scan_arg,
+            "--fail-on", fail_on,
+        ]
+        if use_ai:
+            cmd.append("--ai")
+        if include_test_files:
+            cmd.append("--include-test-files")
+
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=OTHER_SCANNER_PATH.parent)
+
+        try:
+            with open(json_out, "r", encoding="utf-8") as f:
+                report = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return jsonify({
+                "error": "Scanner did not produce a valid report.",
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }), 500
+
+        return jsonify({"report": report})
 
 
 if __name__ == "__main__":

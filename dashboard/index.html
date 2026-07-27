@@ -89,6 +89,7 @@
   <div class="tab" data-panel="prs">Pull requests</div>
   <div class="tab" data-panel="commits">Commits</div>
   <div class="tab" data-panel="run">Run scan</div>
+  <div class="tab" data-panel="vuln">Vuln Scan</div>
 </div>
 
 <div class="panel active" id="panel-overview">
@@ -117,6 +118,33 @@
   </div>
   <div class="status" id="run-status"></div>
   <div class="card" id="run-result" style="display:none;"></div>
+</div>
+
+<div class="panel" id="panel-vuln">
+  <div class="row" style="align-items:center;flex-wrap:wrap;">
+    <span style="font-size:13px;color:#666;">Scan:</span>
+    <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-code" checked> code</label>
+    <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-web"> web (not yet implemented)</label>
+    <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-network"> network (not yet implemented)</label>
+  </div>
+  <div class="row" style="align-items:center;flex-wrap:wrap;">
+    <span style="font-size:13px;color:#666;">Fail on:</span>
+    <select id="vuln-fail-on" style="max-width:140px;">
+      <option value="critical">critical</option>
+      <option value="high" selected>high</option>
+      <option value="medium">medium</option>
+      <option value="low">low</option>
+      <option value="none">none</option>
+    </select>
+    <label style="font-size:13px;"><input type="checkbox" id="vuln-ai" checked> AI verification (slower, more accurate)</label>
+    <label style="font-size:13px;"><input type="checkbox" id="vuln-include-tests"> include test files in gate</label>
+  </div>
+  <div class="row">
+    <button id="run-vuln-btn">Run vulnerability scan</button>
+  </div>
+  <div class="status" id="vuln-status"></div>
+  <div id="vuln-summary" style="display:flex;gap:8px;margin-bottom:1rem;"></div>
+  <div id="vuln-results"></div>
 </div>
 
 <script>
@@ -398,9 +426,10 @@ async function loadPRsForScan() {
   prSelect.innerHTML = '<option>Loading...</option>';
   try {
     const res = await ghFetch(API_BASE + '/api/github/pulls?repo=' + encodeURIComponent(repo));
-    const prs = await res.json();
-    if (!Array.isArray(prs) || prs.length === 0) {
-      prSelect.innerHTML = '<option>No pull requests found</option>';
+    const allPrs = await res.json();
+    const prs = Array.isArray(allPrs) ? allPrs.filter(pr => pr.state === 'open') : [];
+    if (prs.length === 0) {
+      prSelect.innerHTML = '<option>No open pull requests</option>';
       return;
     }
     prSelect.innerHTML = prs.map(pr =>
@@ -524,6 +553,84 @@ async function runBothScans() {
 }
 
 runScanBtn.addEventListener('click', runBothScans);
+
+const runVulnBtn = document.getElementById('run-vuln-btn');
+const vulnStatus = document.getElementById('vuln-status');
+const vulnSummary = document.getElementById('vuln-summary');
+const vulnResults = document.getElementById('vuln-results');
+
+function vulnSeverityBadge(level) {
+  const lvl = (level || '').toLowerCase();
+  const cls = lvl === 'critical' || lvl === 'high' ? 'risk-high' : lvl === 'medium' ? 'risk-medium' : 'risk-low';
+  return '<span class="badge ' + cls + '">' + lvl + '</span>';
+}
+
+runVulnBtn.addEventListener('click', async () => {
+  const repo = repoSelect.value;
+  if (!repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
+
+  const scanTypes = [];
+  if (document.getElementById('vuln-scan-code').checked) scanTypes.push('code');
+  if (document.getElementById('vuln-scan-web').checked) scanTypes.push('web');
+  if (document.getElementById('vuln-scan-network').checked) scanTypes.push('network');
+
+  const body = {
+    repo: repo,
+    ai: document.getElementById('vuln-ai').checked,
+    scan_types: scanTypes,
+    fail_on: document.getElementById('vuln-fail-on').value,
+    include_test_files: document.getElementById('vuln-include-tests').checked,
+  };
+
+  vulnStatus.textContent = 'Running vulnerability scan' + (body.ai ? ' with AI verification (this can take a while)...' : '...');
+  vulnSummary.innerHTML = '';
+  vulnResults.innerHTML = '';
+
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      vulnStatus.textContent = data.error || 'Scan failed.';
+      return;
+    }
+    const report = data.report;
+    const findings = report.findings || [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+
+    vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings. Exit code: ' + report.exit_code;
+    vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
+      '<div class="metric" style="flex:1;"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
+    ).join('');
+
+    if (findings.length === 0) {
+      vulnResults.innerHTML = '<div class="card">No findings.</div>';
+    } else {
+      const order = { critical: 0, high: 1, medium: 2, low: 3 };
+      const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
+      vulnResults.innerHTML = sorted.map(f => {
+        const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
+        const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
+        return '<div class="card">' +
+          '<div class="top">' +
+          '<span style="font-size:14px;font-weight:700;">' + f.file + ':' + f.line + fixtureTag + '</span>' +
+          vulnSeverityBadge(f.severity) +
+          '</div>' +
+          '<div class="section-body" style="margin-top:6px;">' + f.description + verdictNote + '</div>' +
+          '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + f.evidence + '</div>' +
+          '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + f.impact + '</div>' +
+          '<div class="section-body"><b>Fix:</b> ' + f.improvement + '</div>' +
+          '</div>';
+      }).join('');
+    }
+  } catch (e) {
+    vulnStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  }
+});
 
 refreshBtn.addEventListener('click', loadDashboard);
 repoInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDashboard(); });
