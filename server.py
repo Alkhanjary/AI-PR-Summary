@@ -81,15 +81,22 @@ def get_repo_dir(repo):
 def team_stats():
     """Aggregates commit activity per contributor (commits, lines added,
     lines deleted) for the given repo, using GitHub's API for the commit
-    list and per-commit stats. Powers the Monitor tab's team overview."""
+    list and per-commit stats. Powers the Monitor tab's team overview.
+    Optional ?since=<ISO8601> filters to commits after that date, so the
+    dashboard can offer day/week/month/all-time views."""
     repo = request.args.get("repo", "").strip()
-    limit = int(request.args.get("limit", 50))
+    limit = int(request.args.get("limit", 100))
+    since = request.args.get("since", "").strip()
     if not repo:
         return jsonify({"error": "repo required"}), 400
 
+    params = {"per_page": min(limit, 100)}
+    if since:
+        params["since"] = since
+
     r = requests.get(
         "https://api.github.com/repos/" + repo + "/commits",
-        params={"per_page": min(limit, 100)},
+        params=params,
         headers=gh_headers(),
     )
     if r.status_code != 200:
@@ -115,7 +122,71 @@ def team_stats():
             stats[login]["additions"] += s.get("additions", 0)
             stats[login]["deletions"] += s.get("deletions", 0)
 
+    for v in stats.values():
+        v["avg_lines_per_commit"] = round((v["additions"] + v["deletions"]) / v["commits"], 1) if v["commits"] else 0
+
     return jsonify({"contributors": sorted(stats.values(), key=lambda x: -x["commits"])})
+
+
+@app.route("/api/team-bugs")
+def team_bugs():
+    """Runs a quick (regex-only, no AI, for speed) vulnerability scan on
+    the given repo, then uses git blame to attribute each finding to the
+    contributor whose commit introduced that line. Powers the per-person
+    bug counts and risk level on the Monitor tab."""
+    repo = request.args.get("repo", "").strip()
+    if not repo:
+        return jsonify({"error": "repo required"}), 400
+
+    if not ensure_scanner_available():
+        return jsonify({"error": f"Could not find or clone the scanner tool"}), 500
+
+    target_dir = get_repo_dir(repo)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        json_out = str(Path(tmpdir) / "report.json")
+        cmd = ["py", str(OTHER_SCANNER_PATH), str(target_dir), "--json", json_out, "--scan", "code", "--fail-on", "none"]
+        scan_env = os.environ.copy()
+        scan_env["PYTHONIOENCODING"] = "utf-8"
+        subprocess.run(cmd, cwd=OTHER_SCANNER_PATH.parent, capture_output=True, text=True, env=scan_env)
+
+        try:
+            with open(json_out, "r", encoding="utf-8") as f:
+                report = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return jsonify({"error": "Scan did not produce a valid report."}), 500
+
+    severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    contributors = {}
+
+    for finding in report.get("findings", []):
+        file_path = finding.get("file", "")
+        line = finding.get("line")
+        if not file_path or not line:
+            continue
+
+        blame = subprocess.run(
+            ["git", "blame", "-L", f"{line},{line}", "--porcelain", "--", file_path],
+            cwd=target_dir, capture_output=True, text=True,
+        )
+        author = "unknown"
+        for bline in blame.stdout.splitlines():
+            if bline.startswith("author "):
+                author = bline[len("author "):].strip()
+                break
+
+        if author not in contributors:
+            contributors[author] = {"author": author, "total_bugs": 0, "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}, "worst": "low"}
+        c = contributors[author]
+        c["total_bugs"] += 1
+        sev = finding.get("severity", "low")
+        if sev in c["by_severity"]:
+            c["by_severity"][sev] += 1
+        if severity_rank.get(sev, 0) > severity_rank.get(c["worst"], 0):
+            c["worst"] = sev
+
+    return jsonify({"contributors": sorted(contributors.values(), key=lambda x: -x["total_bugs"])})
 
 
 @app.route("/api/branches")
