@@ -213,25 +213,21 @@ def github_commit_detail(sha):
 OTHER_SCANNER_PATH = Path(__file__).resolve().parent.parent / "security-scan" / "scanner.py"
 
 
-@app.route("/api/vuln-scan", methods=["POST"])
-def vuln_scan():
-    """Runs the separate security-scan tool (kept in its own folder,
-    never merged into this repo) against a cloned/cached copy of the
-    given repo, and returns its JSON report."""
-    data = request.get_json(force=True)
-    repo = data.get("repo", "").strip()
-    use_ai = data.get("ai", True)
-    scan_types = data.get("scan_types", ["code"])
-    fail_on = data.get("fail_on", "high")
-    include_test_files = data.get("include_test_files", False)
+import threading
+import time
+import uuid
 
-    if not OTHER_SCANNER_PATH.exists():
-        return jsonify({"error": f"Scanner not found at {OTHER_SCANNER_PATH}"}), 500
+VULN_JOBS = {}
 
-    target_dir = get_repo_dir(repo)
 
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmpdir:
+def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files):
+    job = VULN_JOBS[job_id]
+    try:
+        target_dir = get_repo_dir(repo)
+        job["log"].append(f"Target ready: {target_dir}")
+
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
         json_out = str(Path(tmpdir) / "report.json")
         scan_arg = ",".join(scan_types) if scan_types else "code"
         cmd = [
@@ -245,19 +241,75 @@ def vuln_scan():
         if include_test_files:
             cmd.append("--include-test-files")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=OTHER_SCANNER_PATH.parent)
+        job["log"].append("Starting scan: " + " ".join(cmd))
+
+        proc = subprocess.Popen(
+            cmd, cwd=OTHER_SCANNER_PATH.parent,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                job["log"].append(line)
+        proc.wait()
 
         try:
             with open(json_out, "r", encoding="utf-8") as f:
                 report = json.load(f)
+            job["status"] = "done"
+            job["result"] = report
         except (FileNotFoundError, json.JSONDecodeError):
-            return jsonify({
-                "error": "Scanner did not produce a valid report.",
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            }), 500
+            job["status"] = "error"
+            job["error"] = "Scanner did not produce a valid report."
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)
 
-        return jsonify({"report": report})
+
+@app.route("/api/vuln-scan/start", methods=["POST"])
+def vuln_scan_start():
+    """Starts the vulnerability scan as a background job and returns a
+    job_id immediately, so the dashboard can poll for live progress
+    instead of blocking on one long request (AI verification especially
+    can take a while)."""
+    data = request.get_json(force=True)
+    repo = data.get("repo", "").strip()
+
+    if not OTHER_SCANNER_PATH.exists():
+        return jsonify({"error": f"Scanner not found at {OTHER_SCANNER_PATH}"}), 500
+
+    job_id = str(uuid.uuid4())
+    VULN_JOBS[job_id] = {"status": "running", "log": [], "result": None, "error": None, "started": time.time()}
+
+    thread = threading.Thread(
+        target=run_vuln_scan_job,
+        args=(
+            job_id, repo,
+            data.get("ai", True),
+            data.get("scan_types", ["code"]),
+            data.get("fail_on", "high"),
+            data.get("include_test_files", False),
+        ),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/vuln-scan/status/<job_id>")
+def vuln_scan_status(job_id):
+    job = VULN_JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "Unknown job_id"}), 404
+    return jsonify({
+        "status": job["status"],
+        "log": job["log"],
+        "result": job["result"],
+        "error": job["error"],
+        "elapsed": round(time.time() - job["started"], 1),
+    })
 
 
 if __name__ == "__main__":

@@ -582,21 +582,42 @@ runVulnBtn.addEventListener('click', async () => {
     include_test_files: document.getElementById('vuln-include-tests').checked,
   };
 
-  vulnStatus.textContent = 'Running vulnerability scan' + (body.ai ? ' with AI verification (this can take a while)...' : '...');
   vulnSummary.innerHTML = '';
-  vulnResults.innerHTML = '';
+  vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
 
   try {
-    const res = await fetch(API_BASE + '/api/vuln-scan', {
+    const startRes = await fetch(API_BASE + '/api/vuln-scan/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    const data = await res.json();
-    if (!res.ok) {
-      vulnStatus.textContent = data.error || 'Scan failed.';
+    const startData = await startRes.json();
+    if (!startRes.ok) {
+      vulnStatus.textContent = startData.error || 'Could not start scan.';
       return;
     }
+    const jobId = startData.job_id;
+    const progressLog = document.getElementById('vuln-progress-log');
+
+    let data;
+    while (true) {
+      await new Promise(r => setTimeout(r, 1000));
+      const pollRes = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
+      const pollData = await pollRes.json();
+      vulnStatus.textContent = 'Running... (' + pollData.elapsed + 's elapsed)';
+      if (progressLog) progressLog.textContent = pollData.log.join('\n');
+      if (progressLog) progressLog.scrollTop = progressLog.scrollHeight;
+
+      if (pollData.status === 'done') {
+        data = { report: pollData.result };
+        break;
+      }
+      if (pollData.status === 'error') {
+        vulnStatus.textContent = pollData.error || 'Scan failed.';
+        return;
+      }
+    }
+
     const report = data.report;
     const findings = report.findings || [];
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
