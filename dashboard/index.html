@@ -90,6 +90,7 @@
   <div class="tab" data-panel="commits">Commits</div>
   <div class="tab" data-panel="run">Run scan</div>
   <div class="tab" data-panel="vuln">Vuln Scan</div>
+  <div class="tab" data-panel="monitor">Monitor</div>
 </div>
 
 <div class="panel active" id="panel-overview">
@@ -145,6 +146,14 @@
   <div class="status" id="vuln-status"></div>
   <div id="vuln-summary" style="display:flex;gap:8px;margin-bottom:1rem;"></div>
   <div id="vuln-results"></div>
+</div>
+
+<div class="panel" id="panel-monitor">
+  <div class="row">
+    <button id="run-monitor-btn">Load team activity</button>
+  </div>
+  <div class="status" id="monitor-status"></div>
+  <div id="monitor-results"></div>
 </div>
 
 <script>
@@ -653,8 +662,53 @@ runVulnBtn.addEventListener('click', async () => {
   }
 });
 
+const runMonitorBtn = document.getElementById('run-monitor-btn');
+const monitorStatus = document.getElementById('monitor-status');
+const monitorResults = document.getElementById('monitor-results');
+
+runMonitorBtn.addEventListener('click', async () => {
+  const repo = repoSelect.value;
+  if (!repo) { monitorStatus.textContent = 'Pick a repo above first.'; return; }
+  monitorStatus.textContent = 'Loading team activity...';
+  monitorResults.innerHTML = '';
+  try {
+    const res = await fetch(API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo));
+    const data = await res.json();
+    if (!res.ok) {
+      monitorStatus.textContent = data.error || 'Could not load team activity.';
+      return;
+    }
+    const contributors = data.contributors || [];
+    if (contributors.length === 0) {
+      monitorStatus.textContent = 'No commit activity found.';
+      return;
+    }
+    monitorStatus.textContent = contributors.length + ' contributor(s), based on recent commits.';
+
+    const maxCommits = Math.max(...contributors.map(c => c.commits));
+    monitorResults.innerHTML = contributors.map(c => {
+      const barWidth = Math.max(4, Math.round((c.commits / maxCommits) * 100));
+      const avatarImg = c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:36px;height:36px;border-radius:50%;border:2px solid #e5e5f0;">' : '<div style="width:36px;height:36px;border-radius:50%;background:#e5e5f0;"></div>';
+      return '<div class="card" style="display:flex;align-items:center;gap:14px;">' +
+        avatarImg +
+        '<div style="flex:1;">' +
+        '<div style="font-weight:700;font-size:14px;">' + c.login + '</div>' +
+        '<div style="background:#e5e5f0;border-radius:6px;height:8px;margin-top:6px;overflow:hidden;">' +
+        '<div style="background:linear-gradient(90deg,#4f46e5,#7c3aed);height:100%;width:' + barWidth + '%;"></div>' +
+        '</div>' +
+        '</div>' +
+        '<div style="text-align:right;font-size:13px;color:#374151;min-width:150px;">' +
+        '<div><b>' + c.commits + '</b> commits</div>' +
+        '<div><span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></div>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+  } catch (e) {
+    monitorStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  }
+});
+
 refreshBtn.addEventListener('click', loadDashboard);
-repoInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDashboard(); });
 loadReposAndRefresh();
 </script>
 
