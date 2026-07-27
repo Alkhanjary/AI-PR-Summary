@@ -54,13 +54,35 @@ def github_repos():
     return jsonify(r.json()), r.status_code
 
 
+CACHE_DIR = Path(__file__).resolve().parent / ".repo-cache"
+CACHE_DIR.mkdir(exist_ok=True)
+
+
+def get_repo_dir(repo):
+    """Returns a local working copy of the given owner/repo, cloning it
+    (or fetching updates if already cloned) into a local cache folder.
+    This is what lets the Run scan tab follow whichever repo is picked
+    up top, not just the AI-PR-Summary folder this server lives in."""
+    if not repo:
+        return Path(__file__).resolve().parent
+    local_path = CACHE_DIR / repo.replace("/", "__")
+    if not local_path.exists():
+        subprocess.run(
+            ["git", "clone", "--no-single-branch", f"https://github.com/{repo}.git", str(local_path)],
+            capture_output=True, text=True,
+        )
+    else:
+        subprocess.run(["git", "fetch", "--all", "--quiet"], capture_output=True, text=True, cwd=local_path)
+    return local_path
+
+
 @app.route("/api/branches")
 def branches():
-    """Fetches fresh from origin, then lists ALL remote branches (from
-    GitHub) so the dashboard can offer a GitHub-style base/compare
-    selector that reflects reality, not just what's checked out locally."""
-    cwd = Path(__file__).resolve().parent
-    subprocess.run(["git", "fetch", "origin", "--quiet"], capture_output=True, text=True, cwd=cwd)
+    """Lists ALL remote branches for the given repo (cloning/fetching it
+    into a local cache first), so the dashboard can offer a GitHub-style
+    base/compare selector for whichever repo is currently selected."""
+    repo = request.args.get("repo", "").strip()
+    cwd = get_repo_dir(repo)
     result = subprocess.run(
         ["git", "branch", "-r", "--format=%(refname:short)"], capture_output=True, text=True, cwd=cwd
     )
@@ -74,14 +96,17 @@ def branches():
 
 @app.route("/api/current-diff")
 def current_diff():
-    """Runs git diff in this repo and returns it, so the dashboard can
-    get a diff without the browser needing filesystem/git access itself.
-    With no ?base=, returns uncommitted changes only.
-    With ?base=main&compare=my-branch, returns the full diff between the
-    two named branches, matching what a real PR would actually contain."""
+    """Runs git diff for the given repo (cloning/fetching it into a
+    local cache first) and returns it, so the dashboard can get a diff
+    for whichever repo is selected, not just the local AI-PR-Summary
+    checkout. With no ?base=, returns uncommitted changes only (only
+    meaningful for the AI-PR-Summary repo this server lives in).
+    With ?base=main&compare=my-branch, returns the full diff between
+    the two named branches, matching what a real PR would contain."""
+    repo = request.args.get("repo", "").strip()
     base = request.args.get("base", "").strip()
     compare = request.args.get("compare", "HEAD").strip() or "HEAD"
-    cwd = Path(__file__).resolve().parent
+    cwd = get_repo_dir(repo)
     if base:
         result = subprocess.run(
             ["git", "diff", f"{base}...{compare}"], capture_output=True, text=True, cwd=cwd

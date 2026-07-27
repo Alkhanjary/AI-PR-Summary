@@ -6,60 +6,66 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 0 1.5rem 3rem; color: #1a1a1a; background: #fafafa; }
-  header { padding: 2rem 0 1.5rem; border-bottom: 1px solid #e5e5e5; margin-bottom: 1.5rem; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .subtitle { font-size: 13px; color: #777; }
-  .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; }
-  input { flex: 1; padding: 9px 12px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #fff; }
-  input:focus { outline: none; border-color: #3266ad; }
-  button { padding: 9px 16px; border: 1px solid #d0d0d0; border-radius: 6px; background: #fff; cursor: pointer; font-size: 14px; font-weight: 500; }
-  button:hover { background: #f0f0f0; }
-  .status { font-size: 13px; color: #888; margin-bottom: 1rem; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 0 1.5rem 3rem; color: #1a1a1a; background: #f4f5fb; }
+  header { padding: 2rem 1.5rem; margin: 0 -1.5rem 1.5rem; background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; border-radius: 0 0 16px 16px; }
+  h1 { font-size: 24px; font-weight: 700; margin: 0 0 4px; }
+  .subtitle { font-size: 13px; color: rgba(255,255,255,0.85); }
+  .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
+  input, select { padding: 9px 12px; border: 1px solid #d0d0e0; border-radius: 8px; font-size: 14px; background: #fff; }
+  input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
+  button { padding: 9px 16px; border: none; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; }
+  button:hover { background: #4338ca; }
+  #load-repos-btn, #load-branches-btn { background: #0891b2; }
+  #load-repos-btn:hover, #load-branches-btn:hover { background: #0e7490; }
+  .status { font-size: 13px; color: #6b7280; margin-bottom: 1rem; }
 
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e5e5; margin-bottom: 1.5rem; }
-  .tab { padding: 10px 16px; font-size: 14px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; }
-  .tab.active { color: #1a1a1a; border-bottom-color: #3266ad; }
+  .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e5e5f0; margin-bottom: 1.5rem; }
+  .tab { padding: 10px 18px; font-size: 14px; font-weight: 600; color: #9ca3af; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+  .tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
   .panel { display: none; }
   .panel.active { display: block; }
 
   .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
-  .metric { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1.1rem; }
-  .metric-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.03em; }
-  .metric-value { font-size: 28px; font-weight: 600; margin-top: 6px; }
-  .chart-wrap { position: relative; width: 100%; height: 200px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1rem; margin-bottom: 1.5rem; }
+  .metric { border-radius: 12px; padding: 1.1rem; color: #fff; }
+  .metric:nth-child(1) { background: linear-gradient(135deg, #4f46e5, #6366f1); }
+  .metric:nth-child(2) { background: linear-gradient(135deg, #059669, #10b981); }
+  .metric:nth-child(3) { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+  .metric:nth-child(4) { background: linear-gradient(135deg, #dc2626, #ef4444); }
+  .metric-label { font-size: 12px; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.04em; }
+  .metric-value { font-size: 30px; font-weight: 700; margin-top: 6px; }
+  .chart-wrap { position: relative; width: 100%; height: 200px; background: #fff; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 
-  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 10px; }
+  .card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-left: 4px solid #4f46e5; }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  .card a.title { font-size: 15px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
-  .card a.title:hover { color: #3266ad; }
-  .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
-  .state-open { background: #e6f4ea; color: #1e7e34; }
-  .state-closed { background: #fde8e8; color: #a12525; }
-  .state-merged { background: #eee5fb; color: #6a3fc7; }
-  .risk-high { background: #fde8e8; color: #a12525; }
-  .risk-medium { background: #fdf3d8; color: #966917; }
-  .risk-low { background: #e6f4ea; color: #1e7e34; }
+  .card a.title { font-size: 15px; font-weight: 700; color: #1a1a1a; text-decoration: none; }
+  .card a.title:hover { color: #4f46e5; }
+  .badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+  .state-open { background: #d1fae5; color: #047857; }
+  .state-closed { background: #fee2e2; color: #b91c1c; }
+  .state-merged { background: #ede9fe; color: #6d28d9; }
+  .risk-high { background: #fee2e2; color: #b91c1c; }
+  .risk-medium { background: #fef3c7; color: #b45309; }
+  .risk-low { background: #d1fae5; color: #047857; }
 
-  .section-label { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
-  .section-body { font-size: 13px; color: #333; line-height: 1.6; }
+  .section-label { font-size: 12px; font-weight: 700; color: #4f46e5; text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
+  .section-body { font-size: 13px; color: #374151; line-height: 1.6; }
   .section-body ul { margin: 4px 0; padding-left: 18px; }
-  .meta-row { font-size: 12px; color: #999; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+  .meta-row { font-size: 12px; color: #9ca3af; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
 
-  .commit-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 10px; }
+  .commit-card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-left: 4px solid #0891b2; }
   .commit-head { display: flex; gap: 10px; align-items: flex-start; }
-  .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
-  .commit-msg { font-size: 14px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
-  .commit-msg:hover { color: #3266ad; }
-  .commit-body { font-size: 13px; color: #555; white-space: pre-wrap; margin-top: 4px; }
-  .commit-meta { font-size: 12px; color: #999; margin-top: 6px; }
-  .commit-files-btn { font-size: 12px; color: #3266ad; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 500; }
-  .commit-files-btn:hover { text-decoration: underline; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; border: 2px solid #e5e5f0; }
+  .commit-msg { font-size: 14px; font-weight: 700; color: #1a1a1a; text-decoration: none; }
+  .commit-msg:hover { color: #0891b2; }
+  .commit-body { font-size: 13px; color: #6b7280; white-space: pre-wrap; margin-top: 4px; }
+  .commit-meta { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+  .commit-files-btn { font-size: 12px; color: #0891b2; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 700; }
+  .commit-files-btn:hover { text-decoration: underline; background: none; }
   .file-list { margin-top: 6px; }
-  .file-row { font-size: 12px; color: #444; padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid #f0f0f0; padding-top: 5px; }
-  .file-add { color: #1e7e34; font-weight: 600; }
-  .file-del { color: #a12525; font-weight: 600; }
-  .file-status { font-size: 10px; text-transform: uppercase; color: #999; margin-right: 6px; }
+  .file-row { font-size: 12px; color: #374151; padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid #f0f0f5; padding-top: 5px; }
+  .file-add { color: #059669; font-weight: 700; }
+  .file-del { color: #dc2626; font-weight: 700; }
+  .file-status { font-size: 10px; text-transform: uppercase; color: #9ca3af; margin-right: 6px; }
 </style>
 </head>
 <body>
@@ -102,17 +108,12 @@
 
 <div class="panel" id="panel-run">
   <div class="row" style="align-items:center;">
-    <button id="load-branches-btn">Load branches</button>
-    <span style="font-size:13px;color:#666;">base:</span>
-    <select id="base-branch-select" style="max-width:180px;"><option>(click Load branches)</option></select>
-    <span style="font-size:13px;color:#666;">&#8592; compare:</span>
-    <select id="compare-branch-select" style="max-width:180px;"><option>(click Load branches)</option></select>
-    <button id="load-diff-btn">Load diff</button>
+    <span style="font-size:13px;color:#666;">Pull request:</span>
+    <select id="pr-select" style="max-width:320px;"><option>Loading...</option></select>
   </div>
   <textarea id="diff-input" placeholder="Paste a diff here, or click 'Load my current uncommitted diff' above" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
   <div class="row">
-    <button id="run-scan-btn">Run AI summary</button>
-    <button id="run-security-btn">Run security scan</button>
+    <button id="run-scan-btn">Run scan (AI summary + security)</button>
   </div>
   <div class="status" id="run-status"></div>
   <div class="card" id="run-result" style="display:none;"></div>
@@ -135,12 +136,22 @@ async function loadRepos() {
       return;
     }
     repoSelect.innerHTML = repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
-    statusEl.textContent = repos.length + ' repos loaded. Pick one and click Refresh.';
+    statusEl.textContent = repos.length + ' repos loaded.';
   } catch (e) {
     statusEl.textContent = 'Could not reach the local server. Is server.py running?';
   }
 }
 loadReposBtn.addEventListener('click', loadRepos);
+usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadReposAndRefresh(); });
+repoSelect.addEventListener('change', () => { loadDashboard(); loadPRsForScan(); });
+
+async function loadReposAndRefresh() {
+  await loadRepos();
+  if (repoSelect.options.length > 0 && repoSelect.value) {
+    loadDashboard();
+    loadPRsForScan();
+  }
+}
 const API_BASE = 'http://127.0.0.1:5000';
 function ghFetch(url) {
   return fetch(url);
@@ -379,44 +390,70 @@ const runSecurityBtn = document.getElementById('run-security-btn');
 const runStatus = document.getElementById('run-status');
 const runResult = document.getElementById('run-result');
 
-const baseSelect = document.getElementById('base-branch-select');
-const compareSelect = document.getElementById('compare-branch-select');
+const prSelect = document.getElementById('pr-select');
 
-async function loadBranches() {
+async function loadPRsForScan() {
+  const repo = repoSelect.value;
+  if (!repo) { prSelect.innerHTML = '<option>Pick a repo above first</option>'; return; }
+  prSelect.innerHTML = '<option>Loading...</option>';
   try {
-    const res = await fetch(API_BASE + '/api/branches');
-    const data = await res.json();
-    const branches = data.branches || [];
-    const opts = branches.map(b => {
-      const label = b.replace(/^origin\//, '');
-      return '<option value="' + b + '">' + label + '</option>';
-    }).join('');
-    baseSelect.innerHTML = opts;
-    compareSelect.innerHTML = opts;
-    if (branches.includes('origin/main')) baseSelect.value = 'origin/main';
-    if (data.current) {
-      const currentRemote = 'origin/' + data.current;
-      if (branches.includes(currentRemote)) compareSelect.value = currentRemote;
+    const res = await ghFetch(API_BASE + '/api/github/pulls?repo=' + encodeURIComponent(repo));
+    const prs = await res.json();
+    if (!Array.isArray(prs) || prs.length === 0) {
+      prSelect.innerHTML = '<option>No pull requests found</option>';
+      return;
     }
+    prSelect.innerHTML = prs.map(pr =>
+      '<option value="' + pr.number + '" data-base="' + pr.base.ref + '" data-head="' + pr.head.ref + '">' +
+      '#' + pr.number + ' ' + pr.title + '</option>'
+    ).join('');
+    await loadDiffForSelectedPR();
   } catch (e) {
-    runStatus.textContent = 'Could not load branches. Is server.py running?';
+    prSelect.innerHTML = '<option>Could not load pull requests</option>';
   }
 }
-document.getElementById('load-branches-btn').addEventListener('click', loadBranches);
 
-loadDiffBtn.addEventListener('click', async () => {
-  const base = baseSelect.value;
-  const compare = compareSelect.value;
-  runStatus.textContent = 'Loading diff: ' + base + ' \u2190 ' + compare + '...';
+async function loadDiffForSelectedPR() {
+  const opt = prSelect.options[prSelect.selectedIndex];
+  if (!opt || !opt.dataset.base) return;
+  const base = 'origin/' + opt.dataset.base;
+  const compare = 'origin/' + opt.dataset.head;
+  runStatus.textContent = 'Loading diff for PR #' + opt.value + '...';
   try {
-    const res = await fetch(API_BASE + '/api/current-diff?base=' + encodeURIComponent(base) + '&compare=' + encodeURIComponent(compare));
+    const res = await fetch(API_BASE + '/api/current-diff?repo=' + encodeURIComponent(repoSelect.value || '') + '&base=' + encodeURIComponent(base) + '&compare=' + encodeURIComponent(compare));
     const data = await res.json();
     diffInput.value = data.diff || '';
-    runStatus.textContent = data.diff ? 'Loaded diff: ' + base + ' \u2190 ' + compare + '.' : 'No differences found between ' + base + ' and ' + compare + '.';
+    runStatus.textContent = data.diff ? 'Loaded diff for PR #' + opt.value + '.' : 'No differences found for this PR.';
   } catch (e) {
     runStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
-});
+}
+
+prSelect.addEventListener('change', loadDiffForSelectedPR);
+
+function severityBadge(level) {
+  const lvl = level.toLowerCase();
+  const cls = lvl === 'high' ? 'risk-high' : lvl === 'medium' ? 'risk-medium' : 'risk-low';
+  return '<span class="badge ' + cls + '">' + lvl + '</span>';
+}
+
+function renderScanResult(markdown) {
+  const sections = extractSections(markdown);
+  let html = '';
+  for (const [heading, body] of Object.entries(sections)) {
+    let bodyHtml;
+    if (heading.toLowerCase() === 'risk') {
+      const m = body.match(/\w+/);
+      const level = m ? m[0].toLowerCase() : null;
+      bodyHtml = (level && ['high','medium','low'].includes(level) ? severityBadge(level) + ' ' : '') + body.replace(/^\w+\s*\|?\s*/, '');
+    } else {
+      bodyHtml = mdToHtml(body)
+        .replace(/\[(high|medium|low)\]/gi, (m, lvl) => severityBadge(lvl));
+    }
+    html += '<div class="section-label">' + heading + '</div><div class="section-body">' + bodyHtml + '</div>';
+  }
+  return html || '<div class="section-body">' + markdown.replace(/\n/g, '<br>') + '</div>';
+}
 
 async function runEndpoint(path) {
   const diff = diffInput.value.trim();
@@ -439,20 +476,58 @@ async function runEndpoint(path) {
     }
     runStatus.textContent = 'Done.';
     runResult.style.display = 'block';
-    runResult.innerHTML = mdToHtml(data.markdown.replace(/^## /gm, '<div class="section-label">').replace(/\n(?=<div)/g, ''))
-      .replace(/<div class="section-label">([^<]*)<\/div>/g, (m, p1) => '<div class="section-label">' + p1 + '</div>');
-    runResult.innerText = data.markdown;
+    runResult.innerHTML = renderScanResult(data.markdown);
   } catch (e) {
     runStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
 }
 
-runScanBtn.addEventListener('click', () => runEndpoint('/api/scan'));
-runSecurityBtn.addEventListener('click', () => runEndpoint('/api/security-scan'));
+async function runBothScans() {
+  const diff = diffInput.value.trim();
+  if (!diff) {
+    runStatus.textContent = 'Paste a diff or load a PR first.';
+    return;
+  }
+  runStatus.textContent = 'Running AI summary and security scan...';
+  runResult.style.display = 'none';
+  try {
+    const [summaryRes, securityRes] = await Promise.all([
+      fetch(API_BASE + '/api/scan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diff })
+      }),
+      fetch(API_BASE + '/api/security-scan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diff })
+      })
+    ]);
+    const summaryData = await summaryRes.json();
+    const securityData = await securityRes.json();
+
+    let html = '';
+    if (summaryRes.ok) {
+      html += renderScanResult(summaryData.markdown);
+    } else {
+      html += '<div class="section-body" style="color:#b91c1c;">AI summary failed: ' + (summaryData.error || 'unknown error') + '</div>';
+    }
+    html += '<div style="border-top:2px solid #e5e5f0;margin:16px 0;"></div>';
+    if (securityRes.ok) {
+      html += renderScanResult(securityData.markdown);
+    } else {
+      html += '<div class="section-body" style="color:#b91c1c;">Security scan failed: ' + (securityData.error || 'unknown error') + '</div>';
+    }
+
+    runStatus.textContent = 'Done.';
+    runResult.style.display = 'block';
+    runResult.innerHTML = html;
+  } catch (e) {
+    runStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  }
+}
+
+runScanBtn.addEventListener('click', runBothScans);
 
 refreshBtn.addEventListener('click', loadDashboard);
 repoInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDashboard(); });
-statusEl.textContent = 'Click Refresh to load data.';
+loadReposAndRefresh();
 </script>
 
 </body>
