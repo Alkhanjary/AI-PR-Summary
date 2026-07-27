@@ -210,7 +210,24 @@ def github_commit_detail(sha):
     return jsonify(r.json()), r.status_code
 
 
+OTHER_SCANNER_REPO = "https://github.com/Alkhanjary/security-scan.git"
 OTHER_SCANNER_PATH = Path(__file__).resolve().parent.parent / "security-scan" / "scanner.py"
+
+
+def ensure_scanner_available():
+    """If the security-scan tool isn't present locally, clone it fresh
+    from GitHub. Keeps the two tools in separate folders (never merged),
+    but self-heals if the local copy is missing (new machine, deleted
+    folder, etc.) instead of just failing."""
+    if OTHER_SCANNER_PATH.exists():
+        return True
+    scanner_dir = OTHER_SCANNER_PATH.parent
+    if not scanner_dir.exists():
+        subprocess.run(
+            ["git", "clone", OTHER_SCANNER_REPO, str(scanner_dir)],
+            capture_output=True, text=True,
+        )
+    return OTHER_SCANNER_PATH.exists()
 
 
 import threading
@@ -276,8 +293,8 @@ def vuln_scan_start():
     data = request.get_json(force=True)
     repo = data.get("repo", "").strip()
 
-    if not OTHER_SCANNER_PATH.exists():
-        return jsonify({"error": f"Scanner not found at {OTHER_SCANNER_PATH}"}), 500
+    if not ensure_scanner_available():
+        return jsonify({"error": f"Could not find or clone the scanner tool (expected at {OTHER_SCANNER_PATH})"}), 500
 
     job_id = str(uuid.uuid4())
     VULN_JOBS[job_id] = {"status": "running", "log": [], "result": None, "error": None, "started": time.time()}
