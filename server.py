@@ -104,13 +104,17 @@ def team_stats():
     commits = r.json()
 
     stats = {}
+    timeline = []
     for c in commits:
         author = c.get("author")
         login = author["login"] if author else (c["commit"]["author"]["name"] if c["commit"].get("author") else "unknown")
         avatar = author["avatar_url"] if author else None
+        date = c["commit"]["author"]["date"] if c["commit"].get("author") else None
         if login not in stats:
             stats[login] = {"login": login, "avatar_url": avatar, "commits": 0, "additions": 0, "deletions": 0}
         stats[login]["commits"] += 1
+        if date:
+            timeline.append({"login": login, "date": date[:10]})
 
         detail = requests.get(
             "https://api.github.com/repos/" + repo + "/commits/" + c["sha"],
@@ -125,7 +129,7 @@ def team_stats():
     for v in stats.values():
         v["avg_lines_per_commit"] = round((v["additions"] + v["deletions"]) / v["commits"], 1) if v["commits"] else 0
 
-    return jsonify({"contributors": sorted(stats.values(), key=lambda x: -x["commits"])})
+    return jsonify({"contributors": sorted(stats.values(), key=lambda x: -x["commits"]), "timeline": timeline})
 
 
 @app.route("/api/team-bugs")
@@ -135,6 +139,7 @@ def team_bugs():
     contributor whose commit introduced that line. Powers the per-person
     bug counts and risk level on the Monitor tab."""
     repo = request.args.get("repo", "").strip()
+    use_ai = request.args.get("ai", "false").lower() == "true"
     if not repo:
         return jsonify({"error": "repo required"}), 400
 
@@ -147,6 +152,8 @@ def team_bugs():
     with tempfile.TemporaryDirectory() as tmpdir:
         json_out = str(Path(tmpdir) / "report.json")
         cmd = ["py", str(OTHER_SCANNER_PATH), str(target_dir), "--json", json_out, "--scan", "code", "--fail-on", "none"]
+        if use_ai:
+            cmd.append("--ai")
         scan_env = os.environ.copy()
         scan_env["PYTHONIOENCODING"] = "utf-8"
         subprocess.run(cmd, cwd=OTHER_SCANNER_PATH.parent, capture_output=True, text=True, env=scan_env)
@@ -165,6 +172,10 @@ def team_bugs():
         line = finding.get("line")
         if not file_path or not line:
             continue
+        if file_path.lower().endswith((".md", ".rst", ".txt")):
+            continue  # docs describe vulnerability patterns in prose; not real code
+        if use_ai and finding.get("ai_verdict") == "false_positive":
+            continue  # AI reviewed this candidate and ruled it out
 
         blame = subprocess.run(
             ["git", "blame", "-L", f"{line},{line}", "--porcelain", "--", file_path],
