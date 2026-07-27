@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>AI PR Summary Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 20px; font-weight: 500; }
@@ -11,6 +12,11 @@
   button { padding: 8px 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
   button:hover { background: #f5f5f5; }
   .status { font-size: 13px; color: #666; margin-bottom: 1rem; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
+  .metric { background: #f7f7f5; border-radius: 8px; padding: 1rem; }
+  .metric-label { font-size: 13px; color: #666; }
+  .metric-value { font-size: 24px; font-weight: 500; margin-top: 4px; }
+  .chart-wrap { position: relative; width: 100%; height: 180px; margin-bottom: 1.5rem; }
   .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
   .card a { font-size: 14px; font-weight: 500; color: #111; text-decoration: none; }
   .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -32,18 +38,28 @@
   <button id="refresh-btn">Refresh</button>
 </div>
 <div class="status" id="status"></div>
+
+<div class="metrics" id="metrics"></div>
+<div class="chart-wrap">
+  <canvas id="riskChart" role="img" aria-label="Bar chart of pull request counts by risk level"></canvas>
+</div>
+
 <div id="list"></div>
 
 <script>
 const repoInput = document.getElementById('repo-input');
 const refreshBtn = document.getElementById('refresh-btn');
 const statusEl = document.getElementById('status');
+const metricsEl = document.getElementById('metrics');
 const listEl = document.getElementById('list');
+let chartInstance = null;
 
 function badge(text, cls) {
   return '<span class="badge ' + cls + '">' + text + '</span>';
 }
-
+function metricCard(label, value) {
+  return '<div class="metric"><div class="metric-label">' + label + '</div><div class="metric-value">' + value + '</div></div>';
+}
 function extractSummary(body) {
   const titleMatch = body.match(/## Suggested Title\s*\n+(.+)/);
   const riskMatch = body.match(/## Risk\s*\n+(\w+)/i);
@@ -51,6 +67,28 @@ function extractSummary(body) {
     title: titleMatch ? titleMatch[1].trim().replace(/[`*]/g, '') : null,
     risk: riskMatch ? riskMatch[1].toLowerCase() : null
   };
+}
+function renderChart(counts) {
+  const ctx = document.getElementById('riskChart');
+  const data = [counts.low, counts.medium, counts.high];
+  if (chartInstance) {
+    chartInstance.data.datasets[0].data = data;
+    chartInstance.update();
+    return;
+  }
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Low', 'Medium', 'High'],
+      datasets: [{ data: data, backgroundColor: ['#1e7e34', '#c99a2e', '#a12525'], borderRadius: 4, maxBarThickness: 40 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
 }
 
 async function loadDashboard() {
@@ -60,10 +98,11 @@ async function loadDashboard() {
     return;
   }
   listEl.innerHTML = '';
+  metricsEl.innerHTML = '';
   statusEl.textContent = 'Loading recent pull requests...';
 
   try {
-    const prRes = await fetch('https://api.github.com/repos/' + repo + '/pulls?state=all&per_page=6&sort=updated&direction=desc');
+    const prRes = await fetch('https://api.github.com/repos/' + repo + '/pulls?state=all&per_page=10&sort=updated&direction=desc');
     if (!prRes.ok) throw new Error('Could not reach ' + repo + ' (' + prRes.status + ')');
     const prs = await prRes.json();
 
@@ -72,6 +111,17 @@ async function loadDashboard() {
       return;
     }
     statusEl.textContent = prs.length + ' recent pull requests';
+
+    const merged = prs.filter(p => p.merged_at).length;
+    const open = prs.filter(p => p.state === 'open').length;
+    metricsEl.innerHTML =
+      metricCard('Total PRs', prs.length) +
+      metricCard('Open', open) +
+      metricCard('Merged', merged) +
+      metricCard('Closed', prs.length - open - merged);
+
+    const riskCounts = { high: 0, medium: 0, low: 0 };
+    renderChart(riskCounts);
 
     for (const pr of prs) {
       const state = pr.merged_at ? 'merged' : pr.state;
@@ -95,6 +145,10 @@ async function loadDashboard() {
             return;
           }
           const parsed = extractSummary(botComment.body);
+          if (parsed.risk && riskCounts.hasOwnProperty(parsed.risk)) {
+            riskCounts[parsed.risk]++;
+            renderChart(riskCounts);
+          }
           detailEl.innerHTML =
             (parsed.title ? parsed.title : 'Summary posted') +
             (parsed.risk ? ' &nbsp; ' + badge(parsed.risk, 'risk-' + parsed.risk) : '');
