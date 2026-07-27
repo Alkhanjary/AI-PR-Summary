@@ -86,10 +86,10 @@ def security_scan():
     if not diff_text.strip():
         return jsonify({"error": "Diff is empty."}), 400
 
-    findings = scan_security(diff_text)
-    report = format_security_report(findings)
+    findings, baselined = scan_security(diff_text)
+    report = format_security_report(findings, baselined)
 
-    return jsonify({"markdown": report, "findings": findings})
+    return jsonify({"markdown": report, "findings": findings, "baselined": baselined})
 
 
 def gh_headers():
