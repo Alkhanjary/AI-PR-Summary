@@ -90,9 +90,12 @@ def team_stats():
     if not repo:
         return jsonify({"error": "repo required"}), 400
 
+    until = request.args.get("until", "").strip()
     params = {"per_page": min(limit, 100)}
     if since:
         params["since"] = since
+    if until:
+        params["until"] = until
 
     r = requests.get(
         "https://api.github.com/repos/" + repo + "/commits",
@@ -111,23 +114,35 @@ def team_stats():
         avatar = author["avatar_url"] if author else None
         date = c["commit"]["author"]["date"] if c["commit"].get("author") else None
         if login not in stats:
-            stats[login] = {"login": login, "avatar_url": avatar, "commits": 0, "additions": 0, "deletions": 0}
+            stats[login] = {"login": login, "avatar_url": avatar, "commits": 0, "additions": 0, "deletions": 0, "test_commits": 0, "active_days": set()}
         stats[login]["commits"] += 1
         if date:
-            timeline.append({"login": login, "date": date[:10]})
+            stats[login]["active_days"].add(date[:10])
 
         detail = requests.get(
             "https://api.github.com/repos/" + repo + "/commits/" + c["sha"],
             headers=gh_headers(),
         )
+        commit_additions = commit_deletions = 0
         if detail.status_code == 200:
             d = detail.json()
             s = d.get("stats", {})
-            stats[login]["additions"] += s.get("additions", 0)
-            stats[login]["deletions"] += s.get("deletions", 0)
+            commit_additions = s.get("additions", 0)
+            commit_deletions = s.get("deletions", 0)
+            stats[login]["additions"] += commit_additions
+            stats[login]["deletions"] += commit_deletions
+            touched_files = [f.get("filename", "") for f in d.get("files", [])]
+            if any("test" in fn.lower() for fn in touched_files):
+                stats[login]["test_commits"] += 1
+
+        if date:
+            timeline.append({"login": login, "date": date[:10], "additions": commit_additions, "deletions": commit_deletions})
 
     for v in stats.values():
         v["avg_lines_per_commit"] = round((v["additions"] + v["deletions"]) / v["commits"], 1) if v["commits"] else 0
+        v["test_coverage_pct"] = round(100 * v["test_commits"] / v["commits"], 1) if v["commits"] else 0
+        v["active_days_count"] = len(v["active_days"])
+        del v["active_days"]
 
     return jsonify({"contributors": sorted(stats.values(), key=lambda x: -x["commits"]), "timeline": timeline})
 
@@ -213,6 +228,35 @@ def run_team_bugs_job(job_id, repo, use_ai):
     except Exception as e:
         job["status"] = "error"
         job["error"] = str(e)
+
+
+@app.route("/api/team-summary", methods=["POST"])
+def team_summary():
+    """Generates a short, plain-English executive summary from
+    aggregated team stats, using the same LLM setup as the rest of
+    this tool. Purely descriptive; never used for any gating."""
+    data = request.get_json(force=True)
+    client, model = get_client()
+    if not client:
+        return jsonify({"error": "LLM_API_KEY not configured on the server."}), 400
+
+    prompt = (
+        "You are summarizing a software team's activity for a manager/executive. "
+        "Write 2-3 short sentences, plain English, no markdown headers, no bullet points. "
+        "Be factual and neutral, note both progress and any risk. Here is the data:\n\n"
+        + json.dumps(data, indent=2)
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You write brief, factual team-activity summaries for a manager. 2-3 sentences max, no formatting."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        return jsonify({"summary": response.choices[0].message.content})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.route("/api/team-bugs/start", methods=["POST"])
