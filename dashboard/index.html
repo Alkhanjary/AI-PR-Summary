@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AI PR Summary Dashboard</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 20px; font-weight: 500; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 1rem; }
+  input { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  button { padding: 8px 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+  button:hover { background: #f5f5f5; }
+  .status { font-size: 13px; color: #666; margin-bottom: 1rem; }
+  .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
+  .card a { font-size: 14px; font-weight: 500; color: #111; text-decoration: none; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  .state-open { background: #e6f4ea; color: #1e7e34; }
+  .state-closed { background: #fde8e8; color: #a12525; }
+  .state-merged { background: #eee5fb; color: #6a3fc7; }
+  .risk-high { background: #fde8e8; color: #a12525; }
+  .risk-medium { background: #fdf3d8; color: #966917; }
+  .risk-low { background: #e6f4ea; color: #1e7e34; }
+  .detail { font-size: 13px; color: #666; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>AI PR Summary Dashboard</h1>
+<div class="row">
+  <input id="repo-input" type="text" value="Alkhanjary/AI-PR-Summary" placeholder="owner/repo">
+  <button id="refresh-btn">Refresh</button>
+</div>
+<div class="status" id="status"></div>
+<div id="list"></div>
+
+<script>
+const repoInput = document.getElementById('repo-input');
+const refreshBtn = document.getElementById('refresh-btn');
+const statusEl = document.getElementById('status');
+const listEl = document.getElementById('list');
+
+function badge(text, cls) {
+  return '<span class="badge ' + cls + '">' + text + '</span>';
+}
+
+function extractSummary(body) {
+  const titleMatch = body.match(/## Suggested Title\s*\n+(.+)/);
+  const riskMatch = body.match(/## Risk\s*\n+(\w+)/i);
+  return {
+    title: titleMatch ? titleMatch[1].trim().replace(/[`*]/g, '') : null,
+    risk: riskMatch ? riskMatch[1].toLowerCase() : null
+  };
+}
+
+async function loadDashboard() {
+  const repo = repoInput.value.trim();
+  if (!repo.includes('/')) {
+    statusEl.textContent = 'Enter a repo as owner/repo';
+    return;
+  }
+  listEl.innerHTML = '';
+  statusEl.textContent = 'Loading recent pull requests...';
+
+  try {
+    const prRes = await fetch('https://api.github.com/repos/' + repo + '/pulls?state=all&per_page=6&sort=updated&direction=desc');
+    if (!prRes.ok) throw new Error('Could not reach ' + repo + ' (' + prRes.status + ')');
+    const prs = await prRes.json();
+
+    if (prs.length === 0) {
+      statusEl.textContent = 'No pull requests found.';
+      return;
+    }
+    statusEl.textContent = prs.length + ' recent pull requests';
+
+    for (const pr of prs) {
+      const state = pr.merged_at ? 'merged' : pr.state;
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="top">' +
+        '<a href="' + pr.html_url + '" target="_blank">#' + pr.number + ' ' + pr.title + '</a>' +
+        badge(state, 'state-' + state) +
+        '</div>' +
+        '<div class="detail" id="detail-' + pr.number + '">Loading AI summary...</div>';
+      listEl.appendChild(card);
+
+      fetch('https://api.github.com/repos/' + repo + '/issues/' + pr.number + '/comments?per_page=20')
+        .then(r => r.ok ? r.json() : [])
+        .then(comments => {
+          const botComment = comments.find(c => c.body && c.body.includes('<!-- ai-pr-summary -->'));
+          const detailEl = document.getElementById('detail-' + pr.number);
+          if (!botComment) {
+            detailEl.textContent = 'No AI summary comment yet';
+            return;
+          }
+          const parsed = extractSummary(botComment.body);
+          detailEl.innerHTML =
+            (parsed.title ? parsed.title : 'Summary posted') +
+            (parsed.risk ? ' &nbsp; ' + badge(parsed.risk, 'risk-' + parsed.risk) : '');
+        })
+        .catch(() => {
+          const detailEl = document.getElementById('detail-' + pr.number);
+          if (detailEl) detailEl.textContent = 'Could not load comment';
+        });
+    }
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
+}
+
+refreshBtn.addEventListener('click', loadDashboard);
+repoInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDashboard(); });
+loadDashboard();
+</script>
+
+</body>
+</html>
