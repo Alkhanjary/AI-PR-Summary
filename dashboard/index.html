@@ -5,46 +5,110 @@
 <title>AI PR Summary Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
-  body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; color: #222; }
-  h1 { font-size: 20px; font-weight: 500; }
-  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 1rem; }
-  input { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-  button { padding: 8px 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
-  button:hover { background: #f5f5f5; }
-  .status { font-size: 13px; color: #666; margin-bottom: 1rem; }
-  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
-  .metric { background: #f7f7f5; border-radius: 8px; padding: 1rem; }
-  .metric-label { font-size: 13px; color: #666; }
-  .metric-value { font-size: 24px; font-weight: 500; margin-top: 4px; }
-  .chart-wrap { position: relative; width: 100%; height: 180px; margin-bottom: 1.5rem; }
-  .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
-  .card a { font-size: 14px; font-weight: 500; color: #111; text-decoration: none; }
-  .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .badge { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 0 1.5rem 3rem; color: #1a1a1a; background: #fafafa; }
+  header { padding: 2rem 0 1.5rem; border-bottom: 1px solid #e5e5e5; margin-bottom: 1.5rem; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .subtitle { font-size: 13px; color: #777; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; }
+  input { flex: 1; padding: 9px 12px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #fff; }
+  input:focus { outline: none; border-color: #3266ad; }
+  button { padding: 9px 16px; border: 1px solid #d0d0d0; border-radius: 6px; background: #fff; cursor: pointer; font-size: 14px; font-weight: 500; }
+  button:hover { background: #f0f0f0; }
+  .status { font-size: 13px; color: #888; margin-bottom: 1rem; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e5e5; margin-bottom: 1.5rem; }
+  .tab { padding: 10px 16px; font-size: 14px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab.active { color: #1a1a1a; border-bottom-color: #3266ad; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
+  .metric { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1.1rem; }
+  .metric-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric-value { font-size: 28px; font-weight: 600; margin-top: 6px; }
+  .chart-wrap { position: relative; width: 100%; height: 200px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1rem; margin-bottom: 1.5rem; }
+
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 10px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card a.title { font-size: 15px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
+  .card a.title:hover { color: #3266ad; }
+  .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
   .state-open { background: #e6f4ea; color: #1e7e34; }
   .state-closed { background: #fde8e8; color: #a12525; }
   .state-merged { background: #eee5fb; color: #6a3fc7; }
   .risk-high { background: #fde8e8; color: #a12525; }
   .risk-medium { background: #fdf3d8; color: #966917; }
   .risk-low { background: #e6f4ea; color: #1e7e34; }
-  .detail { font-size: 13px; color: #666; margin-top: 6px; }
+
+  .section-label { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
+  .section-body { font-size: 13px; color: #333; line-height: 1.6; }
+  .section-body ul { margin: 4px 0; padding-left: 18px; }
+  .meta-row { font-size: 12px; color: #999; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+
+  .commit-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 10px; }
+  .commit-head { display: flex; gap: 10px; align-items: flex-start; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
+  .commit-msg { font-size: 14px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
+  .commit-msg:hover { color: #3266ad; }
+  .commit-body { font-size: 13px; color: #555; white-space: pre-wrap; margin-top: 4px; }
+  .commit-meta { font-size: 12px; color: #999; margin-top: 6px; }
+  .commit-files-btn { font-size: 12px; color: #3266ad; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 500; }
+  .commit-files-btn:hover { text-decoration: underline; }
+  .file-list { margin-top: 6px; }
+  .file-row { font-size: 12px; color: #444; padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid #f0f0f0; padding-top: 5px; }
+  .file-add { color: #1e7e34; font-weight: 600; }
+  .file-del { color: #a12525; font-weight: 600; }
+  .file-status { font-size: 10px; text-transform: uppercase; color: #999; margin-right: 6px; }
 </style>
 </head>
 <body>
 
-<h1>AI PR Summary Dashboard</h1>
+<header>
+  <h1>AI PR Summary Dashboard</h1>
+  <div class="subtitle">Live activity, risk trends, and commit history from GitHub</div>
+</header>
+
 <div class="row">
   <input id="repo-input" type="text" value="Alkhanjary/AI-PR-Summary" placeholder="owner/repo">
   <button id="refresh-btn">Refresh</button>
 </div>
 <div class="status" id="status"></div>
 
-<div class="metrics" id="metrics"></div>
-<div class="chart-wrap">
-  <canvas id="riskChart" role="img" aria-label="Bar chart of pull request counts by risk level"></canvas>
+<div class="tabs">
+  <div class="tab active" data-panel="overview">Overview</div>
+  <div class="tab" data-panel="prs">Pull requests</div>
+  <div class="tab" data-panel="commits">Commits</div>
+  <div class="tab" data-panel="run">Run scan</div>
 </div>
 
-<div id="list"></div>
+<div class="panel active" id="panel-overview">
+  <div class="metrics" id="metrics"></div>
+  <div class="chart-wrap">
+    <canvas id="riskChart" role="img" aria-label="Bar chart of pull request counts by risk level"></canvas>
+  </div>
+</div>
+
+<div class="panel" id="panel-prs">
+  <div id="list"></div>
+</div>
+
+<div class="panel" id="panel-commits">
+  <div id="commits"></div>
+</div>
+
+<div class="panel" id="panel-run">
+  <div class="row">
+    <button id="load-diff-btn">Load my current uncommitted diff</button>
+  </div>
+  <textarea id="diff-input" placeholder="Paste a diff here, or click 'Load my current uncommitted diff' above" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
+  <div class="row">
+    <button id="run-scan-btn">Run AI summary</button>
+    <button id="run-security-btn">Run security scan</button>
+  </div>
+  <div class="status" id="run-status"></div>
+  <div class="card" id="run-result" style="display:none;"></div>
+</div>
 
 <script>
 const repoInput = document.getElementById('repo-input');
@@ -52,7 +116,17 @@ const refreshBtn = document.getElementById('refresh-btn');
 const statusEl = document.getElementById('status');
 const metricsEl = document.getElementById('metrics');
 const listEl = document.getElementById('list');
+const commitsEl = document.getElementById('commits');
 let chartInstance = null;
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+  });
+});
 
 function badge(text, cls) {
   return '<span class="badge ' + cls + '">' + text + '</span>';
@@ -60,13 +134,28 @@ function badge(text, cls) {
 function metricCard(label, value) {
   return '<div class="metric"><div class="metric-label">' + label + '</div><div class="metric-value">' + value + '</div></div>';
 }
-function extractSummary(body) {
-  const titleMatch = body.match(/## Suggested Title\s*\n+(.+)/);
-  const riskMatch = body.match(/## Risk\s*\n+(\w+)/i);
-  return {
-    title: titleMatch ? titleMatch[1].trim().replace(/[`*]/g, '') : null,
-    risk: riskMatch ? riskMatch[1].toLowerCase() : null
-  };
+function mdToHtml(text) {
+  return text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => line.startsWith('-') ? '<li>' + line.slice(1).trim() + '</li>' : '<p>' + line + '</p>')
+    .join('')
+    .replace(/(<li>.*<\/li>)+/gs, m => '<ul>' + m + '</ul>');
+}
+function extractSections(body) {
+  const sections = {};
+  const parts = body.split(/^## /m).slice(1);
+  for (const part of parts) {
+    const [heading, ...rest] = part.split('\n');
+    sections[heading.trim()] = rest.join('\n').trim();
+  }
+  return sections;
+}
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' at ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 function renderChart(counts) {
   const ctx = document.getElementById('riskChart');
@@ -80,7 +169,7 @@ function renderChart(counts) {
     type: 'bar',
     data: {
       labels: ['Low', 'Medium', 'High'],
-      datasets: [{ data: data, backgroundColor: ['#1e7e34', '#c99a2e', '#a12525'], borderRadius: 4, maxBarThickness: 40 }]
+      datasets: [{ data: data, backgroundColor: ['#1e7e34', '#c99a2e', '#a12525'], borderRadius: 4, maxBarThickness: 44 }]
     },
     options: {
       responsive: true,
@@ -89,6 +178,71 @@ function renderChart(counts) {
       scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
     }
   });
+}
+
+async function loadCommits(repo) {
+  commitsEl.innerHTML = 'Loading commits...';
+  try {
+    const res = await fetch('https://api.github.com/repos/' + repo + '/commits?per_page=10');
+    if (!res.ok) throw new Error('Could not load commits (' + res.status + ')');
+    const commits = await res.json();
+    commitsEl.innerHTML = '';
+
+    for (const c of commits) {
+      const sha = c.sha;
+      const authorLogin = c.author ? c.author.login : null;
+      const authorName = c.commit.author ? c.commit.author.name : 'Unknown';
+      const avatarUrl = c.author ? c.author.avatar_url : 'https://github.com/identicons/' + authorName + '.png';
+      const date = c.commit.author ? c.commit.author.date : null;
+      const lines = c.commit.message.split('\n');
+      const subject = lines[0];
+      const bodyText = lines.slice(1).join('\n').trim();
+
+      const card = document.createElement('div');
+      card.className = 'commit-card';
+      card.innerHTML =
+        '<div class="commit-head">' +
+        '<img class="avatar" src="' + avatarUrl + '" alt="">' +
+        '<div style="flex:1;">' +
+        '<a href="' + c.html_url + '" target="_blank" class="commit-msg">' + subject + '</a>' +
+        (bodyText ? '<div class="commit-body">' + bodyText + '</div>' : '') +
+        '<div class="commit-meta">' + (authorLogin ? '@' + authorLogin : authorName) + ' &middot; ' + (date ? formatDate(date) : '') + ' &middot; <code style="font-size:11px;">' + sha.slice(0, 7) + '</code></div>' +
+        '<button class="commit-files-btn" data-sha="' + sha + '">Show files changed</button>' +
+        '<div class="file-list" id="files-' + sha + '"></div>' +
+        '</div></div>';
+      commitsEl.appendChild(card);
+    }
+
+    commitsEl.querySelectorAll('.commit-files-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const sha = btn.getAttribute('data-sha');
+        const container = document.getElementById('files-' + sha);
+        if (container.dataset.loaded === 'true') {
+          const hidden = container.style.display === 'none';
+          container.style.display = hidden ? 'block' : 'none';
+          btn.textContent = hidden ? 'Hide files changed' : 'Show files changed';
+          return;
+        }
+        btn.textContent = 'Loading...';
+        try {
+          const res = await fetch('https://api.github.com/repos/' + repo + '/commits/' + sha);
+          const data = await res.json();
+          const files = data.files || [];
+          container.innerHTML = files.map(f =>
+            '<div class="file-row"><span><span class="file-status">' + f.status + '</span>' + f.filename + '</span>' +
+            '<span><span class="file-add">+' + f.additions + '</span> <span class="file-del">-' + f.deletions + '</span></span></div>'
+          ).join('');
+          container.dataset.loaded = 'true';
+          btn.textContent = 'Hide files changed';
+        } catch (e) {
+          container.textContent = 'Could not load file changes';
+          btn.textContent = 'Show files changed';
+        }
+      });
+    });
+  } catch (err) {
+    commitsEl.textContent = err.message;
+  }
 }
 
 async function loadDashboard() {
@@ -106,11 +260,7 @@ async function loadDashboard() {
     if (!prRes.ok) throw new Error('Could not reach ' + repo + ' (' + prRes.status + ')');
     const prs = await prRes.json();
 
-    if (prs.length === 0) {
-      statusEl.textContent = 'No pull requests found.';
-      return;
-    }
-    statusEl.textContent = prs.length + ' recent pull requests';
+    statusEl.textContent = prs.length === 0 ? 'No pull requests found.' : prs.length + ' recent pull requests';
 
     const merged = prs.filter(p => p.merged_at).length;
     const open = prs.filter(p => p.state === 'open').length;
@@ -129,10 +279,11 @@ async function loadDashboard() {
       card.className = 'card';
       card.innerHTML =
         '<div class="top">' +
-        '<a href="' + pr.html_url + '" target="_blank">#' + pr.number + ' ' + pr.title + '</a>' +
+        '<a href="' + pr.html_url + '" target="_blank" class="title">#' + pr.number + ' ' + pr.title + '</a>' +
         badge(state, 'state-' + state) +
         '</div>' +
-        '<div class="detail" id="detail-' + pr.number + '">Loading AI summary...</div>';
+        '<div class="meta-row">Opened by ' + pr.user.login + ' &middot; ' + formatDate(pr.created_at) + '</div>' +
+        '<div id="detail-' + pr.number + '">Loading AI summary...</div>';
       listEl.appendChild(card);
 
       fetch('https://api.github.com/repos/' + repo + '/issues/' + pr.number + '/comments?per_page=20')
@@ -141,27 +292,104 @@ async function loadDashboard() {
           const botComment = comments.find(c => c.body && c.body.includes('<!-- ai-pr-summary -->'));
           const detailEl = document.getElementById('detail-' + pr.number);
           if (!botComment) {
-            detailEl.textContent = 'No AI summary comment yet';
+            detailEl.innerHTML = '<div class="section-body" style="color:#999;">No AI summary comment yet</div>';
             return;
           }
-          const parsed = extractSummary(botComment.body);
-          if (parsed.risk && riskCounts.hasOwnProperty(parsed.risk)) {
-            riskCounts[parsed.risk]++;
+          const sections = extractSections(botComment.body);
+          const risk = (sections['Risk'] || '').match(/\w+/);
+          const riskLevel = risk ? risk[0].toLowerCase() : null;
+          if (riskLevel && riskCounts.hasOwnProperty(riskLevel)) {
+            riskCounts[riskLevel]++;
             renderChart(riskCounts);
           }
-          detailEl.innerHTML =
-            (parsed.title ? parsed.title : 'Summary posted') +
-            (parsed.risk ? ' &nbsp; ' + badge(parsed.risk, 'risk-' + parsed.risk) : '');
+
+          let html = '';
+          if (sections['Suggested Title']) {
+            html += '<div class="section-label">Suggested title</div><div class="section-body">' + sections['Suggested Title'].replace(/[`*]/g, '') + '</div>';
+          }
+          if (sections['Summary']) {
+            html += '<div class="section-label">Summary</div><div class="section-body">' + mdToHtml(sections['Summary']) + '</div>';
+          }
+          if (sections['Impact']) {
+            html += '<div class="section-label">Impact</div><div class="section-body">' + mdToHtml(sections['Impact']) + '</div>';
+          }
+          if (sections['Risk']) {
+            html += '<div class="section-label">Risk</div><div class="section-body">' + badge(riskLevel || 'unknown', 'risk-' + (riskLevel || 'low')) + ' ' + sections['Risk'].replace(/^\w+\s*\|?\s*/, '') + '</div>';
+          }
+          if (sections['Flags']) {
+            html += '<div class="section-label">Flags</div><div class="section-body">' + mdToHtml(sections['Flags']) + '</div>';
+          }
+          if (sections['Suggested Tests']) {
+            html += '<div class="section-label">Suggested tests</div><div class="section-body">' + mdToHtml(sections['Suggested Tests']) + '</div>';
+          }
+          if (sections['Files']) {
+            html += '<div class="section-label">Files</div><div class="section-body">' + mdToHtml(sections['Files']) + '</div>';
+          }
+          detailEl.innerHTML = html || '<div class="section-body" style="color:#999;">Summary posted</div>';
         })
         .catch(() => {
           const detailEl = document.getElementById('detail-' + pr.number);
-          if (detailEl) detailEl.textContent = 'Could not load comment';
+          if (detailEl) detailEl.innerHTML = '<div class="section-body" style="color:#999;">Could not load comment</div>';
         });
     }
+
+    await loadCommits(repo);
   } catch (err) {
     statusEl.textContent = err.message;
   }
 }
+
+const API_BASE = 'http://127.0.0.1:5000';
+const diffInput = document.getElementById('diff-input');
+const loadDiffBtn = document.getElementById('load-diff-btn');
+const runScanBtn = document.getElementById('run-scan-btn');
+const runSecurityBtn = document.getElementById('run-security-btn');
+const runStatus = document.getElementById('run-status');
+const runResult = document.getElementById('run-result');
+
+loadDiffBtn.addEventListener('click', async () => {
+  runStatus.textContent = 'Loading current diff...';
+  try {
+    const res = await fetch(API_BASE + '/api/current-diff');
+    const data = await res.json();
+    diffInput.value = data.diff || '';
+    runStatus.textContent = data.diff ? 'Loaded.' : 'No uncommitted changes found.';
+  } catch (e) {
+    runStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  }
+});
+
+async function runEndpoint(path) {
+  const diff = diffInput.value.trim();
+  if (!diff) {
+    runStatus.textContent = 'Paste a diff or load your current changes first.';
+    return;
+  }
+  runStatus.textContent = 'Running...';
+  runResult.style.display = 'none';
+  try {
+    const res = await fetch(API_BASE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ diff: diff })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      runStatus.textContent = data.error || 'Scan failed.';
+      return;
+    }
+    runStatus.textContent = 'Done.';
+    runResult.style.display = 'block';
+    runResult.innerHTML = mdToHtml(data.markdown.replace(/^## /gm, '<div class="section-label">').replace(/\n(?=<div)/g, ''))
+      .replace(/<div class="section-label">([^<]*)<\/div>/g, (m, p1) => '<div class="section-label">' + p1 + '</div>');
+    runResult.innerText = data.markdown;
+  } catch (e) {
+    runStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  }
+}
+
+runScanBtn.addEventListener('click', () => runEndpoint('/api/scan'));
+runSecurityBtn.addEventListener('click', () => runEndpoint('/api/security-scan'));
 
 refreshBtn.addEventListener('click', loadDashboard);
 repoInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDashboard(); });
