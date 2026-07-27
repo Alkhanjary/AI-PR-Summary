@@ -100,7 +100,8 @@
 
 <div class="panel" id="panel-run">
   <div class="row">
-    <button id="load-diff-btn">Load my current uncommitted diff</button>
+    <input id="base-branch-input" type="text" value="main" placeholder="base branch" style="max-width:140px;">
+    <button id="load-diff-btn">Load full PR diff (vs base branch)</button>
   </div>
   <textarea id="diff-input" placeholder="Paste a diff here, or click 'Load my current uncommitted diff' above" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
   <div class="row">
@@ -351,13 +352,16 @@ const runSecurityBtn = document.getElementById('run-security-btn');
 const runStatus = document.getElementById('run-status');
 const runResult = document.getElementById('run-result');
 
+const baseBranchInput = document.getElementById('base-branch-input');
+
 loadDiffBtn.addEventListener('click', async () => {
-  runStatus.textContent = 'Loading current diff...';
+  const base = baseBranchInput.value.trim();
+  runStatus.textContent = 'Loading PR diff vs ' + base + '...';
   try {
-    const res = await fetch(API_BASE + '/api/current-diff');
+    const res = await fetch(API_BASE + '/api/current-diff?base=' + encodeURIComponent(base));
     const data = await res.json();
     diffInput.value = data.diff || '';
-    runStatus.textContent = data.diff ? 'Loaded.' : 'No uncommitted changes found.';
+    runStatus.textContent = data.diff ? 'Loaded full diff vs ' + base + '.' : 'No differences from ' + base + ' found.';
   } catch (e) {
     runStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }

@@ -44,9 +44,18 @@ def health():
 @app.route("/api/current-diff")
 def current_diff():
     """Runs git diff in this repo and returns it, so the dashboard can
-    offer 'load my current uncommitted changes' without the browser
-    needing filesystem/git access itself."""
-    result = subprocess.run(["git", "diff"], capture_output=True, text=True, cwd=Path(__file__).resolve().parent)
+    get a diff without the browser needing filesystem/git access itself.
+    With no ?base=, returns uncommitted changes only.
+    With ?base=main, returns the full PR diff (everything on this branch
+    vs the base branch), matching what a real PR would actually contain."""
+    base = request.args.get("base", "").strip()
+    cwd = Path(__file__).resolve().parent
+    if base:
+        result = subprocess.run(
+            ["git", "diff", f"{base}...HEAD"], capture_output=True, text=True, cwd=cwd
+        )
+    else:
+        result = subprocess.run(["git", "diff"], capture_output=True, text=True, cwd=cwd)
     return jsonify({"diff": result.stdout})
 
 
