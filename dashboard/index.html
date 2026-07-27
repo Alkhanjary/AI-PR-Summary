@@ -149,7 +149,11 @@
 </div>
 
 <div class="panel" id="panel-monitor">
-  <div class="row" style="align-items:center;">
+  <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:12px;padding:1.25rem 1.5rem;margin-bottom:1.25rem;color:#fff;">
+    <div style="font-size:16px;font-weight:700;">Team Performance</div>
+    <div style="font-size:13px;opacity:0.85;">Commit activity, code quality, and bug attribution per contributor</div>
+  </div>
+  <div class="row" style="align-items:center;flex-wrap:wrap;">
     <span style="font-size:13px;color:#666;">Range:</span>
     <select id="monitor-range" style="max-width:140px;">
       <option value="day">Today</option>
@@ -157,13 +161,29 @@
       <option value="month">This month</option>
       <option value="all">All time</option>
     </select>
+    <label style="font-size:13px;"><input type="checkbox" id="monitor-ai"> AI-verified bugs (slower, more accurate)</label>
     <button id="run-monitor-btn">Load team activity</button>
   </div>
   <div class="status" id="monitor-status"></div>
+  <div id="monitor-progress-wrap" style="display:none;" class="card">
+    <div class="section-label">Progress</div>
+    <div id="monitor-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
+  </div>
+
   <div class="chart-wrap" id="monitor-chart-wrap" style="display:none;">
     <canvas id="monitorChart" role="img" aria-label="Bar chart of commits per contributor"></canvas>
   </div>
-  <div id="monitor-results"></div>
+  <div class="chart-wrap" id="monitor-severity-chart-wrap" style="display:none;">
+    <canvas id="monitorSeverityChart" role="img" aria-label="Stacked bar chart of bugs by severity per contributor"></canvas>
+  </div>
+  <div class="chart-wrap" id="monitor-timeline-chart-wrap" style="display:none;">
+    <canvas id="monitorTimelineChart" role="img" aria-label="Line chart of commits over time per contributor"></canvas>
+  </div>
+  <div class="chart-wrap" id="monitor-scatter-chart-wrap" style="display:none;">
+    <canvas id="monitorScatterChart" role="img" aria-label="Scatter chart comparing lines changed to bugs found per contributor"></canvas>
+  </div>
+
+  <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
 </div>
 
 <script>
