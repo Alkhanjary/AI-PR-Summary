@@ -132,74 +132,124 @@ def team_stats():
     return jsonify({"contributors": sorted(stats.values(), key=lambda x: -x["commits"]), "timeline": timeline})
 
 
-@app.route("/api/team-bugs")
-def team_bugs():
-    """Runs a quick (regex-only, no AI, for speed) vulnerability scan on
-    the given repo, then uses git blame to attribute each finding to the
-    contributor whose commit introduced that line. Powers the per-person
-    bug counts and risk level on the Monitor tab."""
-    repo = request.args.get("repo", "").strip()
-    use_ai = request.args.get("ai", "false").lower() == "true"
-    if not repo:
-        return jsonify({"error": "repo required"}), 400
+TEAM_BUG_JOBS = {}
 
-    if not ensure_scanner_available():
-        return jsonify({"error": f"Could not find or clone the scanner tool"}), 500
 
-    target_dir = get_repo_dir(repo)
+def run_team_bugs_job(job_id, repo, use_ai):
+    job = TEAM_BUG_JOBS[job_id]
+    try:
+        if not ensure_scanner_available():
+            job["status"] = "error"
+            job["error"] = "Could not find or clone the scanner tool"
+            return
 
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmpdir:
+        target_dir = get_repo_dir(repo)
+        job["log"].append(f"Target ready: {target_dir}")
+
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
         json_out = str(Path(tmpdir) / "report.json")
         cmd = ["py", str(OTHER_SCANNER_PATH), str(target_dir), "--json", json_out, "--scan", "code", "--fail-on", "none"]
         if use_ai:
             cmd.append("--ai")
+
         scan_env = os.environ.copy()
         scan_env["PYTHONIOENCODING"] = "utf-8"
-        subprocess.run(cmd, cwd=OTHER_SCANNER_PATH.parent, capture_output=True, text=True, env=scan_env)
+        proc = subprocess.Popen(
+            cmd, cwd=OTHER_SCANNER_PATH.parent,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, encoding="utf-8", errors="replace",
+            env=scan_env,
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                job["log"].append(line)
+        proc.wait()
 
         try:
             with open(json_out, "r", encoding="utf-8") as f:
                 report = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return jsonify({"error": "Scan did not produce a valid report."}), 500
+            job["status"] = "error"
+            job["error"] = "Scan did not produce a valid report."
+            return
 
-    severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
-    contributors = {}
+        job["log"].append("Attributing findings via git blame...")
+        severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+        contributors = {}
+        for finding in report.get("findings", []):
+            file_path = finding.get("file", "")
+            fline = finding.get("line")
+            if not file_path or not fline:
+                continue
+            if file_path.lower().endswith((".md", ".rst", ".txt")):
+                continue
+            if use_ai and finding.get("ai_verdict") == "false_positive":
+                continue
 
-    for finding in report.get("findings", []):
-        file_path = finding.get("file", "")
-        line = finding.get("line")
-        if not file_path or not line:
-            continue
-        if file_path.lower().endswith((".md", ".rst", ".txt")):
-            continue  # docs describe vulnerability patterns in prose; not real code
-        if use_ai and finding.get("ai_verdict") == "false_positive":
-            continue  # AI reviewed this candidate and ruled it out
+            blame = subprocess.run(
+                ["git", "blame", "-L", f"{fline},{fline}", "--porcelain", "--", file_path],
+                cwd=target_dir, capture_output=True, text=True,
+            )
+            author = "unknown"
+            for bline in blame.stdout.splitlines():
+                if bline.startswith("author "):
+                    author = bline[len("author "):].strip()
+                    break
 
-        blame = subprocess.run(
-            ["git", "blame", "-L", f"{line},{line}", "--porcelain", "--", file_path],
-            cwd=target_dir, capture_output=True, text=True,
-        )
-        author = "unknown"
-        for bline in blame.stdout.splitlines():
-            if bline.startswith("author "):
-                author = bline[len("author "):].strip()
-                break
+            if author not in contributors:
+                contributors[author] = {"author": author, "total_bugs": 0, "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}, "worst": "low"}
+            c = contributors[author]
+            c["total_bugs"] += 1
+            sev = finding.get("severity", "low")
+            if sev in c["by_severity"]:
+                c["by_severity"][sev] += 1
+            if severity_rank.get(sev, 0) > severity_rank.get(c["worst"], 0):
+                c["worst"] = sev
 
-        if author not in contributors:
-            contributors[author] = {"author": author, "total_bugs": 0, "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}, "worst": "low"}
-        c = contributors[author]
-        c["total_bugs"] += 1
-        sev = finding.get("severity", "low")
-        if sev in c["by_severity"]:
-            c["by_severity"][sev] += 1
-        if severity_rank.get(sev, 0) > severity_rank.get(c["worst"], 0):
-            c["worst"] = sev
-
-    return jsonify({"contributors": sorted(contributors.values(), key=lambda x: -x["total_bugs"])})
+        job["status"] = "done"
+        job["result"] = sorted(contributors.values(), key=lambda x: -x["total_bugs"])
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)
 
 
+@app.route("/api/team-bugs/start", methods=["POST"])
+def team_bugs_start():
+    """Starts the bug-attribution scan as a background job (mirrors
+    /api/vuln-scan/start), so the Monitor tab can show live progress
+    instead of blocking, especially when AI verification is enabled."""
+    data = request.get_json(force=True)
+    repo = data.get("repo", "").strip()
+    use_ai = data.get("ai", False)
+    if not repo:
+        return jsonify({"error": "repo required"}), 400
+
+    job_id = str(uuid.uuid4())
+    TEAM_BUG_JOBS[job_id] = {"status": "running", "log": [], "result": None, "error": None, "started": time.time()}
+
+    thread = threading.Thread(target=run_team_bugs_job, args=(job_id, repo, use_ai), daemon=True)
+    thread.start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/team-bugs/status/<job_id>")
+def team_bugs_status(job_id):
+    job = TEAM_BUG_JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "Unknown job_id"}), 404
+    return jsonify({
+        "status": job["status"],
+        "log": job["log"],
+        "result": job["result"],
+        "error": job["error"],
+        "elapsed": round(time.time() - job["started"], 1),
+    })
+
+
+@app.route("/api/branches")
 @app.route("/api/branches")
 def branches():
     """Lists ALL remote branches for the given repo (cloning/fetching it
