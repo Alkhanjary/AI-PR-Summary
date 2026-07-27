@@ -183,6 +183,12 @@
     <canvas id="monitorScatterChart" role="img" aria-label="Scatter chart comparing lines changed to bugs found per contributor"></canvas>
   </div>
 
+  <div id="monitor-summary-card" class="card" style="display:none;font-size:14px;line-height:1.6;color:#374151;"></div>
+
+  <div class="metrics" id="monitor-health-metrics" style="display:none;"></div>
+
+  <div id="monitor-mvp-card" style="display:none;background:linear-gradient(135deg,#059669,#10b981);border-radius:12px;padding:1rem 1.25rem;margin-bottom:1rem;color:#fff;"></div>
+
   <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
 </div>
 
@@ -703,24 +709,45 @@ const monitorSeverityChartWrap = document.getElementById('monitor-severity-chart
 const monitorTimelineChartWrap = document.getElementById('monitor-timeline-chart-wrap');
 const monitorScatterChartWrap = document.getElementById('monitor-scatter-chart-wrap');
 const monitorTableWrap = document.getElementById('monitor-table-wrap');
+const monitorSummaryCard = document.getElementById('monitor-summary-card');
+const monitorHealthMetrics = document.getElementById('monitor-health-metrics');
+const monitorMvpCard = document.getElementById('monitor-mvp-card');
 let monitorChartInstance = null;
 let monitorSeverityChartInstance = null;
 let monitorTimelineChartInstance = null;
-let monitorScatterChartInstance = null;
+let monitorLinesChartInstance = null;
+let monitorTableData = [];
+let monitorSortKey = 'commits';
+let monitorSortDir = -1;
 
-function rangeToSince(range) {
+function rangeToDates(range) {
   const now = new Date();
-  if (range === 'day') now.setDate(now.getDate() - 1);
-  else if (range === 'week') now.setDate(now.getDate() - 7);
-  else if (range === 'month') now.setMonth(now.getMonth() - 1);
-  else return '';
-  return now.toISOString();
+  const cur = new Date(now);
+  if (range === 'day') cur.setDate(cur.getDate() - 1);
+  else if (range === 'week') cur.setDate(cur.getDate() - 7);
+  else if (range === 'month') cur.setMonth(cur.getMonth() - 1);
+  else return { since: '', prevSince: '', prevUntil: '' };
+
+  const prevUntil = new Date(cur);
+  const prev = new Date(cur);
+  if (range === 'day') prev.setDate(prev.getDate() - 1);
+  else if (range === 'week') prev.setDate(prev.getDate() - 7);
+  else if (range === 'month') prev.setMonth(prev.getMonth() - 1);
+
+  return { since: cur.toISOString(), prevSince: prev.toISOString(), prevUntil: prevUntil.toISOString() };
 }
 
 function riskBadgeFor(level) {
   const lvl = (level || 'low').toLowerCase();
   const cls = lvl === 'critical' || lvl === 'high' ? 'risk-high' : lvl === 'medium' ? 'risk-medium' : 'risk-low';
   return '<span class="badge ' + cls + '">' + lvl + '</span>';
+}
+
+function trendArrow(current, previous) {
+  if (previous === null || previous === undefined) return '';
+  if (current > previous) return ' <span style="color:#dc2626;">&#9650; ' + (current - previous) + '</span>';
+  if (current < previous) return ' <span style="color:#059669;">&#9660; ' + (previous - current) + '</span>';
+  return ' <span style="color:#9ca3af;">&#8213; no change</span>';
 }
 
 function renderMonitorCommitsChart(contributors) {
@@ -756,20 +783,12 @@ function renderTimelineChart(contributors, timeline) {
   const ctx = document.getElementById('monitorTimelineChart');
   if (monitorTimelineChartInstance) monitorTimelineChartInstance.destroy();
   monitorTimelineChartWrap.style.display = 'block';
-
   const allDates = [...new Set(timeline.map(t => t.date))].sort();
   const colors = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#7c3aed'];
   const datasets = contributors.map((c, idx) => {
     const counts = {};
     timeline.filter(t => t.login === c.login).forEach(t => { counts[t.date] = (counts[t.date] || 0) + 1; });
-    return {
-      label: c.login,
-      data: allDates.map(d => counts[d] || 0),
-      borderColor: colors[idx % colors.length],
-      backgroundColor: colors[idx % colors.length],
-      tension: 0.3,
-      fill: false,
-    };
+    return { label: c.login, data: allDates.map(d => counts[d] || 0), borderColor: colors[idx % colors.length], backgroundColor: colors[idx % colors.length], tension: 0.3, fill: false };
   });
   monitorTimelineChartInstance = new Chart(ctx, {
     type: 'line',
@@ -778,54 +797,107 @@ function renderTimelineChart(contributors, timeline) {
   });
 }
 
-function renderScatterChart(contributors, bugsByAuthor) {
+function renderLinesOverTimeChart(contributors, timeline) {
   const ctx = document.getElementById('monitorScatterChart');
-  if (monitorScatterChartInstance) monitorScatterChartInstance.destroy();
+  if (monitorLinesChartInstance) monitorLinesChartInstance.destroy();
   monitorScatterChartWrap.style.display = 'block';
-  const points = contributors.map(c => ({
-    x: c.additions + c.deletions,
-    y: bugsByAuthor[c.login] ? bugsByAuthor[c.login].total_bugs : 0,
-    label: c.login,
-  }));
-  monitorScatterChartInstance = new Chart(ctx, {
-    type: 'scatter',
-    data: { datasets: [{ label: 'Contributors', data: points, backgroundColor: '#7c3aed', pointRadius: 8 }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        title: { display: true, text: 'Code volume vs. bugs found' },
-        tooltip: { callbacks: { label: (ctx) => points[ctx.dataIndex].label + ': ' + ctx.parsed.x + ' lines, ' + ctx.parsed.y + ' bugs' } },
-        legend: { display: false },
-      },
-      scales: { x: { title: { display: true, text: 'Lines changed' } }, y: { title: { display: true, text: 'Bugs found' }, beginAtZero: true, ticks: { precision: 0 } } }
-    }
+  const allDates = [...new Set(timeline.map(t => t.date))].sort();
+  const colors = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#7c3aed'];
+  const datasets = contributors.map((c, idx) => {
+    const lines = {};
+    timeline.filter(t => t.login === c.login).forEach(t => { lines[t.date] = (lines[t.date] || 0) + t.additions + t.deletions; });
+    return { label: c.login, data: allDates.map(d => lines[d] || 0), borderColor: colors[idx % colors.length], backgroundColor: colors[idx % colors.length], tension: 0.3, fill: false };
+  });
+  monitorLinesChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: allDates, datasets },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Lines written over time' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 }
 
-function renderMonitorTable(contributors, bugsByAuthor) {
-  const rows = contributors.map(c => {
+function computeRowData(contributors, bugsByAuthor) {
+  return contributors.map(c => {
     const bugInfo = bugsByAuthor[c.login] || { total_bugs: 0, worst: 'low' };
-    return '<tr>' +
-      '<td style="padding:10px;display:flex;align-items:center;gap:8px;">' +
-      (c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:28px;height:28px;border-radius:50%;">' : '') +
-      '<b>' + c.login + '</b></td>' +
-      '<td style="padding:10px;text-align:right;">' + c.commits + '</td>' +
-      '<td style="padding:10px;text-align:right;"><span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></td>' +
-      '<td style="padding:10px;text-align:right;">' + c.avg_lines_per_commit + '</td>' +
-      '<td style="padding:10px;text-align:right;">' + bugInfo.total_bugs + '</td>' +
-      '<td style="padding:10px;text-align:center;">' + riskBadgeFor(bugInfo.worst) + '</td>' +
-      '</tr>';
-  }).join('');
+    const churn = c.additions > 0 ? Math.round((c.deletions / c.additions) * 100) : 0;
+    return {
+      login: c.login, avatar_url: c.avatar_url, commits: c.commits, additions: c.additions, deletions: c.deletions,
+      avg_lines_per_commit: c.avg_lines_per_commit, test_coverage_pct: c.test_coverage_pct || 0,
+      active_days_count: c.active_days_count || 0, churn_pct: churn, total_bugs: bugInfo.total_bugs, worst: bugInfo.worst,
+      quality_score: c.commits > 0 ? (c.commits / (1 + bugInfo.total_bugs)) : 0,
+    };
+  });
+}
+
+function renderMonitorTable() {
+  const sorted = [...monitorTableData].sort((a, b) => (a[monitorSortKey] > b[monitorSortKey] ? 1 : -1) * monitorSortDir);
+  const cols = [
+    { key: 'login', label: 'Contributor' },
+    { key: 'commits', label: 'Commits' },
+    { key: 'additions', label: 'Lines' },
+    { key: 'churn_pct', label: 'Churn %' },
+    { key: 'avg_lines_per_commit', label: 'Avg/commit' },
+    { key: 'test_coverage_pct', label: 'Test %' },
+    { key: 'active_days_count', label: 'Active days' },
+    { key: 'total_bugs', label: 'Bugs' },
+    { key: 'worst', label: 'Risk' },
+  ];
+  const head = cols.map(col =>
+    '<th data-key="' + col.key + '" style="padding:10px;text-align:right;cursor:pointer;user-select:none;">' + col.label + (monitorSortKey === col.key ? (monitorSortDir === -1 ? ' \u25bc' : ' \u25b2') : '') + '</th>'
+  ).join('');
+  const rows = sorted.map(c => '<tr>' +
+    '<td style="padding:10px;display:flex;align-items:center;gap:8px;">' +
+    (c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:28px;height:28px;border-radius:50%;">' : '') +
+    '<b>' + c.login + '</b></td>' +
+    '<td style="padding:10px;text-align:right;">' + c.commits + '</td>' +
+    '<td style="padding:10px;text-align:right;"><span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></td>' +
+    '<td style="padding:10px;text-align:right;">' + c.churn_pct + '%</td>' +
+    '<td style="padding:10px;text-align:right;">' + c.avg_lines_per_commit + '</td>' +
+    '<td style="padding:10px;text-align:right;">' + c.test_coverage_pct + '%</td>' +
+    '<td style="padding:10px;text-align:right;">' + c.active_days_count + '</td>' +
+    '<td style="padding:10px;text-align:right;">' + c.total_bugs + '</td>' +
+    '<td style="padding:10px;text-align:center;">' + riskBadgeFor(c.worst) + '</td>' +
+    '</tr>'
+  ).join('');
   monitorTableWrap.innerHTML =
     '<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);">' +
-    '<thead><tr style="background:#f4f5fb;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">' +
-    '<th style="padding:10px;text-align:left;">Contributor</th>' +
-    '<th style="padding:10px;text-align:right;">Commits</th>' +
-    '<th style="padding:10px;text-align:right;">Lines</th>' +
-    '<th style="padding:10px;text-align:right;">Avg/commit</th>' +
-    '<th style="padding:10px;text-align:right;">Bugs</th>' +
-    '<th style="padding:10px;text-align:center;">Risk</th>' +
-    '</tr></thead><tbody>' + rows + '</tbody></table>';
+    '<thead><tr style="background:#f4f5fb;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+  monitorTableWrap.querySelectorAll('th[data-key]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.key;
+      if (monitorSortKey === key) monitorSortDir *= -1;
+      else { monitorSortKey = key; monitorSortDir = -1; }
+      renderMonitorTable();
+    });
+  });
+}
+
+function renderMvpCard(rows) {
+  if (rows.length === 0) { monitorMvpCard.style.display = 'none'; return; }
+  const mvp = [...rows].sort((a, b) => b.quality_score - a.quality_score)[0];
+  monitorMvpCard.style.display = 'block';
+  monitorMvpCard.innerHTML =
+    '<div style="font-size:12px;opacity:0.85;text-transform:uppercase;letter-spacing:0.03em;">Top performer this period</div>' +
+    '<div style="font-size:20px;font-weight:700;margin-top:4px;">' + mvp.login + '</div>' +
+    '<div style="font-size:13px;opacity:0.9;margin-top:2px;">' + mvp.commits + ' commits, ' + mvp.total_bugs + ' bug(s) found \u2014 best commits-to-issues ratio on the team</div>';
+}
+
+async function computePrTurnaround(repo) {
+  try {
+    const res = await ghFetch(API_BASE + '/api/github/pulls?repo=' + encodeURIComponent(repo));
+    const prs = await res.json();
+    if (!Array.isArray(prs)) return null;
+    const merged = prs.filter(pr => pr.merged_at);
+    if (merged.length === 0) return null;
+    const totalHours = merged.reduce((sum, pr) => {
+      const created = new Date(pr.created_at);
+      const mergedAt = new Date(pr.merged_at);
+      return sum + (mergedAt - created) / (1000 * 60 * 60);
+    }, 0);
+    return Math.round((totalHours / merged.length) * 10) / 10;
+  } catch (e) {
+    return null;
+  }
 }
 
 runMonitorBtn.addEventListener('click', async () => {
@@ -833,20 +905,41 @@ runMonitorBtn.addEventListener('click', async () => {
   if (!repo) { monitorStatus.textContent = 'Pick a repo above first.'; return; }
 
   monitorTableWrap.innerHTML = '';
+  monitorSummaryCard.style.display = 'none';
+  monitorHealthMetrics.style.display = 'none';
+  monitorMvpCard.style.display = 'none';
   [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap].forEach(w => w.style.display = 'none');
   monitorProgressWrap.style.display = 'block';
   monitorProgressLog.textContent = '';
   monitorStatus.textContent = 'Loading commit activity...';
 
   try {
-    const since = rangeToSince(monitorRange.value);
+    const { since, prevSince, prevUntil } = rangeToDates(monitorRange.value);
     const statsUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo) + (since ? '&since=' + encodeURIComponent(since) : '');
     const statsRes = await fetch(statsUrl);
     const statsData = await statsRes.json();
-    if (!statsRes.ok) { monitorStatus.textContent = statsData.error || 'Could not load team activity.'; return; }
+    if (!statsRes.ok) { monitorStatus.textContent = statsData.error || 'Could not load team activity.'; monitorProgressWrap.style.display = 'none'; return; }
     const contributors = statsData.contributors || [];
     const timeline = statsData.timeline || [];
-    if (contributors.length === 0) { monitorStatus.textContent = 'No commit activity found for this range.'; return; }
+    if (contributors.length === 0) { monitorStatus.textContent = 'No commit activity found for this range.'; monitorProgressWrap.style.display = 'none'; return; }
+
+    let prevTotals = null;
+    if (prevSince) {
+      const prevUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo) + '&since=' + encodeURIComponent(prevSince) + '&until=' + encodeURIComponent(prevUntil);
+      try {
+        const prevRes = await fetch(prevUrl);
+        const prevData = await prevRes.json();
+        if (prevRes.ok) {
+          const prevContribs = prevData.contributors || [];
+          prevTotals = {
+            commits: prevContribs.reduce((s, c) => s + c.commits, 0),
+            lines: prevContribs.reduce((s, c) => s + c.additions + c.deletions, 0),
+          };
+        }
+      } catch (e) {}
+    }
+
+    const prTurnaround = await computePrTurnaround(repo);
 
     const useAi = monitorAi.checked;
     monitorStatus.textContent = 'Scanning for bugs' + (useAi ? ' with AI verification (this can take a while)...' : '...');
@@ -856,7 +949,7 @@ runMonitorBtn.addEventListener('click', async () => {
       body: JSON.stringify({ repo, ai: useAi })
     });
     const startData = await startRes.json();
-    if (!startRes.ok) { monitorStatus.textContent = startData.error || 'Could not start bug scan.'; return; }
+    if (!startRes.ok) { monitorStatus.textContent = startData.error || 'Could not start bug scan.'; monitorProgressWrap.style.display = 'none'; return; }
     const jobId = startData.job_id;
 
     let bugsByAuthor = {};
@@ -867,16 +960,8 @@ runMonitorBtn.addEventListener('click', async () => {
       monitorStatus.textContent = 'Scanning... (' + pollData.elapsed + 's elapsed)';
       monitorProgressLog.textContent = pollData.log.join('\n');
       monitorProgressLog.scrollTop = monitorProgressLog.scrollHeight;
-
-      if (pollData.status === 'done') {
-        (pollData.result || []).forEach(b => { bugsByAuthor[b.author] = b; });
-        break;
-      }
-      if (pollData.status === 'error') {
-        monitorStatus.textContent = pollData.error || 'Bug scan failed.';
-        monitorProgressWrap.style.display = 'none';
-        return;
-      }
+      if (pollData.status === 'done') { (pollData.result || []).forEach(b => { bugsByAuthor[b.author] = b; }); break; }
+      if (pollData.status === 'error') { monitorStatus.textContent = pollData.error || 'Bug scan failed.'; monitorProgressWrap.style.display = 'none'; return; }
     }
 
     monitorProgressWrap.style.display = 'none';
@@ -884,17 +969,41 @@ runMonitorBtn.addEventListener('click', async () => {
 
     renderMonitorCommitsChart(contributors);
     renderTimelineChart(contributors, timeline);
+    renderLinesOverTimeChart(contributors, timeline);
     renderSeverityChart(contributors, bugsByAuthor);
-    renderScatterChart(contributors, bugsByAuthor);
-    renderMonitorTable(contributors, bugsByAuthor);
+
+    monitorTableData = computeRowData(contributors, bugsByAuthor);
+    renderMonitorTable();
+    renderMvpCard(monitorTableData);
+
+    const totalCommits = contributors.reduce((s, c) => s + c.commits, 0);
+    const totalLines = contributors.reduce((s, c) => s + c.additions + c.deletions, 0);
+    const totalBugs = monitorTableData.reduce((s, c) => s + c.total_bugs, 0);
+
+    monitorHealthMetrics.style.display = 'grid';
+    monitorHealthMetrics.innerHTML =
+      '<div class="metric"><div class="metric-label">Total Commits</div><div class="metric-value">' + totalCommits + trendArrow(totalCommits, prevTotals ? prevTotals.commits : null) + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Total Lines</div><div class="metric-value">' + totalLines + trendArrow(totalLines, prevTotals ? prevTotals.lines : null) + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Total Bugs</div><div class="metric-value">' + totalBugs + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Avg PR Turnaround</div><div class="metric-value">' + (prTurnaround !== null ? prTurnaround + 'h' : 'n/a') + '</div></div>';
+
+    monitorSummaryCard.style.display = 'block';
+    monitorSummaryCard.textContent = 'Generating executive summary...';
+    try {
+      const summaryRes = await fetch(API_BASE + '/api/team-summary', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ range: monitorRange.value, totalCommits, totalLines, totalBugs, prTurnaround, contributors: monitorTableData })
+      });
+      const summaryData = await summaryRes.json();
+      monitorSummaryCard.textContent = summaryRes.ok ? summaryData.summary : 'Could not generate summary.';
+    } catch (e) {
+      monitorSummaryCard.textContent = 'Could not generate summary.';
+    }
   } catch (e) {
     monitorProgressWrap.style.display = 'none';
     monitorStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
 });
-
-refreshBtn.addEventListener('click', loadDashboard);
-loadReposAndRefresh();
 </script>
 
 </body>
