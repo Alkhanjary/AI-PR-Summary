@@ -694,12 +694,19 @@ runVulnBtn.addEventListener('click', async () => {
 
 const runMonitorBtn = document.getElementById('run-monitor-btn');
 const monitorStatus = document.getElementById('monitor-status');
-const monitorResults = document.getElementById('monitor-results');
 const monitorRange = document.getElementById('monitor-range');
+const monitorAi = document.getElementById('monitor-ai');
+const monitorProgressWrap = document.getElementById('monitor-progress-wrap');
+const monitorProgressLog = document.getElementById('monitor-progress-log');
 const monitorChartWrap = document.getElementById('monitor-chart-wrap');
+const monitorSeverityChartWrap = document.getElementById('monitor-severity-chart-wrap');
+const monitorTimelineChartWrap = document.getElementById('monitor-timeline-chart-wrap');
+const monitorScatterChartWrap = document.getElementById('monitor-scatter-chart-wrap');
+const monitorTableWrap = document.getElementById('monitor-table-wrap');
 let monitorChartInstance = null;
-let lastTeamStats = null;
-let lastTeamBugs = null;
+let monitorSeverityChartInstance = null;
+let monitorTimelineChartInstance = null;
+let monitorScatterChartInstance = null;
 
 function rangeToSince(range) {
   const now = new Date();
@@ -716,71 +723,170 @@ function riskBadgeFor(level) {
   return '<span class="badge ' + cls + '">' + lvl + '</span>';
 }
 
-function renderMonitorChart(contributors) {
+function renderMonitorCommitsChart(contributors) {
   const ctx = document.getElementById('monitorChart');
-  const labels = contributors.map(c => c.login);
-  const data = contributors.map(c => c.commits);
-  if (monitorChartInstance) { monitorChartInstance.destroy(); }
+  if (monitorChartInstance) monitorChartInstance.destroy();
   monitorChartWrap.style.display = 'block';
   monitorChartInstance = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets: [{ label: 'Commits', data, backgroundColor: '#4f46e5', borderRadius: 4 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    data: { labels: contributors.map(c => c.login), datasets: [{ label: 'Commits', data: contributors.map(c => c.commits), backgroundColor: '#4f46e5', borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Commits per contributor' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
+}
+
+function renderSeverityChart(contributors, bugsByAuthor) {
+  const ctx = document.getElementById('monitorSeverityChart');
+  if (monitorSeverityChartInstance) monitorSeverityChartInstance.destroy();
+  monitorSeverityChartWrap.style.display = 'block';
+  const labels = contributors.map(c => c.login);
+  const sevColors = { critical: '#7f1d1d', high: '#dc2626', medium: '#d97706', low: '#059669' };
+  const datasets = ['critical', 'high', 'medium', 'low'].map(sev => ({
+    label: sev,
+    data: labels.map(login => (bugsByAuthor[login] ? bugsByAuthor[login].by_severity[sev] : 0)),
+    backgroundColor: sevColors[sev],
+  }));
+  monitorSeverityChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Bugs by severity per contributor' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+}
+
+function renderTimelineChart(contributors, timeline) {
+  const ctx = document.getElementById('monitorTimelineChart');
+  if (monitorTimelineChartInstance) monitorTimelineChartInstance.destroy();
+  monitorTimelineChartWrap.style.display = 'block';
+
+  const allDates = [...new Set(timeline.map(t => t.date))].sort();
+  const colors = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#7c3aed'];
+  const datasets = contributors.map((c, idx) => {
+    const counts = {};
+    timeline.filter(t => t.login === c.login).forEach(t => { counts[t.date] = (counts[t.date] || 0) + 1; });
+    return {
+      label: c.login,
+      data: allDates.map(d => counts[d] || 0),
+      borderColor: colors[idx % colors.length],
+      backgroundColor: colors[idx % colors.length],
+      tension: 0.3,
+      fill: false,
+    };
+  });
+  monitorTimelineChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: allDates, datasets },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Commits over time' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+}
+
+function renderScatterChart(contributors, bugsByAuthor) {
+  const ctx = document.getElementById('monitorScatterChart');
+  if (monitorScatterChartInstance) monitorScatterChartInstance.destroy();
+  monitorScatterChartWrap.style.display = 'block';
+  const points = contributors.map(c => ({
+    x: c.additions + c.deletions,
+    y: bugsByAuthor[c.login] ? bugsByAuthor[c.login].total_bugs : 0,
+    label: c.login,
+  }));
+  monitorScatterChartInstance = new Chart(ctx, {
+    type: 'scatter',
+    data: { datasets: [{ label: 'Contributors', data: points, backgroundColor: '#7c3aed', pointRadius: 8 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: 'Code volume vs. bugs found' },
+        tooltip: { callbacks: { label: (ctx) => points[ctx.dataIndex].label + ': ' + ctx.parsed.x + ' lines, ' + ctx.parsed.y + ' bugs' } },
+        legend: { display: false },
+      },
+      scales: { x: { title: { display: true, text: 'Lines changed' } }, y: { title: { display: true, text: 'Bugs found' }, beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+function renderMonitorTable(contributors, bugsByAuthor) {
+  const rows = contributors.map(c => {
+    const bugInfo = bugsByAuthor[c.login] || { total_bugs: 0, worst: 'low' };
+    return '<tr>' +
+      '<td style="padding:10px;display:flex;align-items:center;gap:8px;">' +
+      (c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:28px;height:28px;border-radius:50%;">' : '') +
+      '<b>' + c.login + '</b></td>' +
+      '<td style="padding:10px;text-align:right;">' + c.commits + '</td>' +
+      '<td style="padding:10px;text-align:right;"><span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></td>' +
+      '<td style="padding:10px;text-align:right;">' + c.avg_lines_per_commit + '</td>' +
+      '<td style="padding:10px;text-align:right;">' + bugInfo.total_bugs + '</td>' +
+      '<td style="padding:10px;text-align:center;">' + riskBadgeFor(bugInfo.worst) + '</td>' +
+      '</tr>';
+  }).join('');
+  monitorTableWrap.innerHTML =
+    '<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);">' +
+    '<thead><tr style="background:#f4f5fb;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">' +
+    '<th style="padding:10px;text-align:left;">Contributor</th>' +
+    '<th style="padding:10px;text-align:right;">Commits</th>' +
+    '<th style="padding:10px;text-align:right;">Lines</th>' +
+    '<th style="padding:10px;text-align:right;">Avg/commit</th>' +
+    '<th style="padding:10px;text-align:right;">Bugs</th>' +
+    '<th style="padding:10px;text-align:center;">Risk</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 runMonitorBtn.addEventListener('click', async () => {
   const repo = repoSelect.value;
   if (!repo) { monitorStatus.textContent = 'Pick a repo above first.'; return; }
-  monitorStatus.textContent = 'Loading team activity...';
-  monitorResults.innerHTML = '';
-  monitorChartWrap.style.display = 'none';
+
+  monitorStatus.textContent = 'Loading commit activity...';
+  monitorTableWrap.innerHTML = '';
+  monitorProgressWrap.style.display = 'none';
+  [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap].forEach(w => w.style.display = 'none');
 
   try {
     const since = rangeToSince(monitorRange.value);
     const statsUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo) + (since ? '&since=' + encodeURIComponent(since) : '');
-    const [statsRes, bugsRes] = await Promise.all([
-      fetch(statsUrl),
-      fetch(API_BASE + '/api/team-bugs?repo=' + encodeURIComponent(repo))
-    ]);
+    const statsRes = await fetch(statsUrl);
     const statsData = await statsRes.json();
-    const bugsData = await bugsRes.json();
-
-    if (!statsRes.ok) {
-      monitorStatus.textContent = statsData.error || 'Could not load team activity.';
-      return;
-    }
+    if (!statsRes.ok) { monitorStatus.textContent = statsData.error || 'Could not load team activity.'; return; }
     const contributors = statsData.contributors || [];
-    if (contributors.length === 0) {
-      monitorStatus.textContent = 'No commit activity found for this range.';
-      return;
-    }
-    lastTeamStats = { contributors };
+    const timeline = statsData.timeline || [];
+    if (contributors.length === 0) { monitorStatus.textContent = 'No commit activity found for this range.'; return; }
 
-    const bugsByAuthor = {};
-    if (bugsRes.ok) {
-      (bugsData.contributors || []).forEach(b => { bugsByAuthor[b.author] = b; });
-    }
-    lastTeamBugs = bugsByAuthor;
+    renderMonitorCommitsChart(contributors);
+    renderTimelineChart(contributors, timeline);
 
+    const useAi = monitorAi.checked;
+    monitorProgressWrap.style.display = 'block';
+    monitorProgressLog.textContent = '';
+    monitorStatus.textContent = 'Scanning for bugs' + (useAi ? ' with AI verification (this can take a while)...' : '...');
+
+    const startRes = await fetch(API_BASE + '/api/team-bugs/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, ai: useAi })
+    });
+    const startData = await startRes.json();
+    if (!startRes.ok) { monitorStatus.textContent = startData.error || 'Could not start bug scan.'; return; }
+    const jobId = startData.job_id;
+
+    let bugsByAuthor = {};
+    while (true) {
+      await new Promise(r => setTimeout(r, 1000));
+      const pollRes = await fetch(API_BASE + '/api/team-bugs/status/' + jobId);
+      const pollData = await pollRes.json();
+      monitorStatus.textContent = 'Scanning... (' + pollData.elapsed + 's elapsed)';
+      monitorProgressLog.textContent = pollData.log.join('\n');
+      monitorProgressLog.scrollTop = monitorProgressLog.scrollHeight;
+
+      if (pollData.status === 'done') {
+        (pollData.result || []).forEach(b => { bugsByAuthor[b.author] = b; });
+        break;
+      }
+      if (pollData.status === 'error') {
+        monitorStatus.textContent = pollData.error || 'Bug scan failed.';
+        break;
+      }
+    }
+
+    monitorProgressWrap.style.display = 'none';
     monitorStatus.textContent = contributors.length + ' contributor(s) \u2014 ' + monitorRange.options[monitorRange.selectedIndex].text.toLowerCase();
-    renderMonitorChart(contributors);
-
-    monitorResults.innerHTML = contributors.map(c => {
-      const bugInfo = bugsByAuthor[c.login] || { total_bugs: 0, worst: 'low' };
-      const avatarImg = c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:36px;height:36px;border-radius:50%;border:2px solid #e5e5f0;">' : '<div style="width:36px;height:36px;border-radius:50%;background:#e5e5f0;"></div>';
-      return '<div class="card" style="display:flex;align-items:center;gap:14px;">' +
-        avatarImg +
-        '<div style="flex:1;">' +
-        '<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:14px;">' + c.login + '</span>' + riskBadgeFor(bugInfo.worst) + '</div>' +
-        '<div style="font-size:12px;color:#9ca3af;margin-top:2px;">avg ' + c.avg_lines_per_commit + ' lines/commit</div>' +
-        '</div>' +
-        '<div style="text-align:right;font-size:13px;color:#374151;min-width:170px;">' +
-        '<div><b>' + c.commits + '</b> commits \u00b7 <span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></div>' +
-        '<div style="color:#9ca3af;">' + bugInfo.total_bugs + ' bug(s) found</div>' +
-        '</div>' +
-        '</div>';
-    }).join('');
+    renderSeverityChart(contributors, bugsByAuthor);
+    renderScatterChart(contributors, bugsByAuthor);
+    renderMonitorTable(contributors, bugsByAuthor);
   } catch (e) {
     monitorStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
