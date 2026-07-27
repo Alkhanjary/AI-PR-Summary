@@ -77,6 +77,47 @@ def get_repo_dir(repo):
     return local_path
 
 
+@app.route("/api/team-stats")
+def team_stats():
+    """Aggregates commit activity per contributor (commits, lines added,
+    lines deleted) for the given repo, using GitHub's API for the commit
+    list and per-commit stats. Powers the Monitor tab's team overview."""
+    repo = request.args.get("repo", "").strip()
+    limit = int(request.args.get("limit", 50))
+    if not repo:
+        return jsonify({"error": "repo required"}), 400
+
+    r = requests.get(
+        "https://api.github.com/repos/" + repo + "/commits",
+        params={"per_page": min(limit, 100)},
+        headers=gh_headers(),
+    )
+    if r.status_code != 200:
+        return jsonify(r.json()), r.status_code
+    commits = r.json()
+
+    stats = {}
+    for c in commits:
+        author = c.get("author")
+        login = author["login"] if author else (c["commit"]["author"]["name"] if c["commit"].get("author") else "unknown")
+        avatar = author["avatar_url"] if author else None
+        if login not in stats:
+            stats[login] = {"login": login, "avatar_url": avatar, "commits": 0, "additions": 0, "deletions": 0}
+        stats[login]["commits"] += 1
+
+        detail = requests.get(
+            "https://api.github.com/repos/" + repo + "/commits/" + c["sha"],
+            headers=gh_headers(),
+        )
+        if detail.status_code == 200:
+            d = detail.json()
+            s = d.get("stats", {})
+            stats[login]["additions"] += s.get("additions", 0)
+            stats[login]["deletions"] += s.get("deletions", 0)
+
+    return jsonify({"contributors": sorted(stats.values(), key=lambda x: -x["commits"])})
+
+
 @app.route("/api/branches")
 def branches():
     """Lists ALL remote branches for the given repo (cloning/fetching it
@@ -260,10 +301,13 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
 
         job["log"].append("Starting scan: " + " ".join(cmd))
 
+        scan_env = os.environ.copy()
+        scan_env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.Popen(
             cmd, cwd=OTHER_SCANNER_PATH.parent,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            text=True, bufsize=1, encoding="utf-8", errors="replace",
+            env=scan_env,
         )
         for line in proc.stdout:
             line = line.rstrip()
