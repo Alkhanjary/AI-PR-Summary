@@ -99,9 +99,12 @@
 </div>
 
 <div class="panel" id="panel-run">
-  <div class="row">
-    <input id="base-branch-input" type="text" value="main" placeholder="base branch" style="max-width:140px;">
-    <button id="load-diff-btn">Load full PR diff (vs base branch)</button>
+  <div class="row" style="align-items:center;">
+    <span style="font-size:13px;color:#666;">base:</span>
+    <select id="base-branch-select" style="max-width:180px;"></select>
+    <span style="font-size:13px;color:#666;">&#8592; compare:</span>
+    <select id="compare-branch-select" style="max-width:180px;"></select>
+    <button id="load-diff-btn">Load diff</button>
   </div>
   <textarea id="diff-input" placeholder="Paste a diff here, or click 'Load my current uncommitted diff' above" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
   <div class="row">
@@ -352,16 +355,33 @@ const runSecurityBtn = document.getElementById('run-security-btn');
 const runStatus = document.getElementById('run-status');
 const runResult = document.getElementById('run-result');
 
-const baseBranchInput = document.getElementById('base-branch-input');
+const baseSelect = document.getElementById('base-branch-select');
+const compareSelect = document.getElementById('compare-branch-select');
+
+async function loadBranches() {
+  try {
+    const res = await fetch(API_BASE + '/api/branches');
+    const data = await res.json();
+    const branches = data.branches || [];
+    baseSelect.innerHTML = branches.map(b => '<option value="' + b + '">' + b + '</option>').join('');
+    compareSelect.innerHTML = branches.map(b => '<option value="' + b + '">' + b + '</option>').join('');
+    if (branches.includes('main')) baseSelect.value = 'main';
+    if (data.current && branches.includes(data.current)) compareSelect.value = data.current;
+  } catch (e) {
+    runStatus.textContent = 'Could not load branches. Is server.py running?';
+  }
+}
+loadBranches();
 
 loadDiffBtn.addEventListener('click', async () => {
-  const base = baseBranchInput.value.trim();
-  runStatus.textContent = 'Loading PR diff vs ' + base + '...';
+  const base = baseSelect.value;
+  const compare = compareSelect.value;
+  runStatus.textContent = 'Loading diff: ' + base + ' \u2190 ' + compare + '...';
   try {
-    const res = await fetch(API_BASE + '/api/current-diff?base=' + encodeURIComponent(base));
+    const res = await fetch(API_BASE + '/api/current-diff?base=' + encodeURIComponent(base) + '&compare=' + encodeURIComponent(compare));
     const data = await res.json();
     diffInput.value = data.diff || '';
-    runStatus.textContent = data.diff ? 'Loaded full diff vs ' + base + '.' : 'No differences from ' + base + ' found.';
+    runStatus.textContent = data.diff ? 'Loaded diff: ' + base + ' \u2190 ' + compare + '.' : 'No differences found between ' + base + ' and ' + compare + '.';
   } catch (e) {
     runStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }

@@ -41,18 +41,30 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/branches")
+def branches():
+    """Lists local git branches so the dashboard can offer a GitHub-style
+    base/compare selector instead of free-typed branch names."""
+    cwd = Path(__file__).resolve().parent
+    result = subprocess.run(["git", "branch", "--format=%(refname:short)"], capture_output=True, text=True, cwd=cwd)
+    current = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=cwd)
+    branch_list = [b for b in result.stdout.splitlines() if b.strip()]
+    return jsonify({"branches": branch_list, "current": current.stdout.strip()})
+
+
 @app.route("/api/current-diff")
 def current_diff():
     """Runs git diff in this repo and returns it, so the dashboard can
     get a diff without the browser needing filesystem/git access itself.
     With no ?base=, returns uncommitted changes only.
-    With ?base=main, returns the full PR diff (everything on this branch
-    vs the base branch), matching what a real PR would actually contain."""
+    With ?base=main&compare=my-branch, returns the full diff between the
+    two named branches, matching what a real PR would actually contain."""
     base = request.args.get("base", "").strip()
+    compare = request.args.get("compare", "HEAD").strip() or "HEAD"
     cwd = Path(__file__).resolve().parent
     if base:
         result = subprocess.run(
-            ["git", "diff", f"{base}...HEAD"], capture_output=True, text=True, cwd=cwd
+            ["git", "diff", f"{base}...{compare}"], capture_output=True, text=True, cwd=cwd
         )
     else:
         result = subprocess.run(["git", "diff"], capture_output=True, text=True, cwd=cwd)
