@@ -41,14 +41,34 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/github/repos")
+def github_repos():
+    username = request.args.get("username", "")
+    if not username:
+        return jsonify({"error": "username required"}), 400
+    r = requests.get(
+        "https://api.github.com/users/" + username + "/repos",
+        params={"per_page": 100, "sort": "updated", "direction": "desc"},
+        headers=gh_headers(),
+    )
+    return jsonify(r.json()), r.status_code
+
+
 @app.route("/api/branches")
 def branches():
-    """Lists local git branches so the dashboard can offer a GitHub-style
-    base/compare selector instead of free-typed branch names."""
+    """Fetches fresh from origin, then lists ALL remote branches (from
+    GitHub) so the dashboard can offer a GitHub-style base/compare
+    selector that reflects reality, not just what's checked out locally."""
     cwd = Path(__file__).resolve().parent
-    result = subprocess.run(["git", "branch", "--format=%(refname:short)"], capture_output=True, text=True, cwd=cwd)
+    subprocess.run(["git", "fetch", "origin", "--quiet"], capture_output=True, text=True, cwd=cwd)
+    result = subprocess.run(
+        ["git", "branch", "-r", "--format=%(refname:short)"], capture_output=True, text=True, cwd=cwd
+    )
     current = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=cwd)
-    branch_list = [b for b in result.stdout.splitlines() if b.strip()]
+    branch_list = [
+        b.strip() for b in result.stdout.splitlines()
+        if b.strip() and not b.strip().endswith("HEAD")
+    ]
     return jsonify({"branches": branch_list, "current": current.stdout.strip()})
 
 

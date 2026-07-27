@@ -70,7 +70,9 @@
 </header>
 
 <div class="row">
-  <input id="repo-input" type="text" value="Alkhanjary/AI-PR-Summary" placeholder="owner/repo">
+  <input id="username-input" type="text" value="Alkhanjary" placeholder="GitHub username">
+  <button id="load-repos-btn">Load repos</button>
+  <select id="repo-select" style="max-width:220px;"><option>(click Load repos)</option></select>
   <button id="refresh-btn">Refresh</button>
 </div>
 
@@ -100,10 +102,11 @@
 
 <div class="panel" id="panel-run">
   <div class="row" style="align-items:center;">
+    <button id="load-branches-btn">Load branches</button>
     <span style="font-size:13px;color:#666;">base:</span>
-    <select id="base-branch-select" style="max-width:180px;"></select>
+    <select id="base-branch-select" style="max-width:180px;"><option>(click Load branches)</option></select>
     <span style="font-size:13px;color:#666;">&#8592; compare:</span>
-    <select id="compare-branch-select" style="max-width:180px;"></select>
+    <select id="compare-branch-select" style="max-width:180px;"><option>(click Load branches)</option></select>
     <button id="load-diff-btn">Load diff</button>
   </div>
   <textarea id="diff-input" placeholder="Paste a diff here, or click 'Load my current uncommitted diff' above" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
@@ -116,7 +119,28 @@
 </div>
 
 <script>
-const repoInput = document.getElementById('repo-input');
+const usernameInput = document.getElementById('username-input');
+const loadReposBtn = document.getElementById('load-repos-btn');
+const repoSelect = document.getElementById('repo-select');
+
+async function loadRepos() {
+  const username = usernameInput.value.trim();
+  if (!username) { statusEl.textContent = 'Enter a GitHub username'; return; }
+  statusEl.textContent = 'Loading repos for ' + username + '...';
+  try {
+    const res = await fetch(API_BASE + '/api/github/repos?username=' + encodeURIComponent(username));
+    const repos = await res.json();
+    if (!Array.isArray(repos)) {
+      statusEl.textContent = repos.message || 'Could not load repos.';
+      return;
+    }
+    repoSelect.innerHTML = repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
+    statusEl.textContent = repos.length + ' repos loaded. Pick one and click Refresh.';
+  } catch (e) {
+    statusEl.textContent = 'Could not reach the local server. Is server.py running?';
+  }
+}
+loadReposBtn.addEventListener('click', loadRepos);
 const API_BASE = 'http://127.0.0.1:5000';
 function ghFetch(url) {
   return fetch(url);
@@ -255,7 +279,7 @@ async function loadCommits(repo) {
 }
 
 async function loadDashboard() {
-  const repo = repoInput.value.trim();
+  const repo = repoSelect.value;
   if (!repo.includes('/')) {
     statusEl.textContent = 'Enter a repo as owner/repo';
     return;
@@ -363,15 +387,22 @@ async function loadBranches() {
     const res = await fetch(API_BASE + '/api/branches');
     const data = await res.json();
     const branches = data.branches || [];
-    baseSelect.innerHTML = branches.map(b => '<option value="' + b + '">' + b + '</option>').join('');
-    compareSelect.innerHTML = branches.map(b => '<option value="' + b + '">' + b + '</option>').join('');
-    if (branches.includes('main')) baseSelect.value = 'main';
-    if (data.current && branches.includes(data.current)) compareSelect.value = data.current;
+    const opts = branches.map(b => {
+      const label = b.replace(/^origin\//, '');
+      return '<option value="' + b + '">' + label + '</option>';
+    }).join('');
+    baseSelect.innerHTML = opts;
+    compareSelect.innerHTML = opts;
+    if (branches.includes('origin/main')) baseSelect.value = 'origin/main';
+    if (data.current) {
+      const currentRemote = 'origin/' + data.current;
+      if (branches.includes(currentRemote)) compareSelect.value = currentRemote;
+    }
   } catch (e) {
     runStatus.textContent = 'Could not load branches. Is server.py running?';
   }
 }
-loadBranches();
+document.getElementById('load-branches-btn').addEventListener('click', loadBranches);
 
 loadDiffBtn.addEventListener('click', async () => {
   const base = baseSelect.value;
@@ -421,7 +452,7 @@ runSecurityBtn.addEventListener('click', () => runEndpoint('/api/security-scan')
 
 refreshBtn.addEventListener('click', loadDashboard);
 repoInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDashboard(); });
-loadDashboard();
+statusEl.textContent = 'Click Refresh to load data.';
 </script>
 
 </body>
