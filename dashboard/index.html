@@ -122,6 +122,14 @@
 </div>
 
 <div class="panel" id="panel-vuln">
+  <div class="row" style="align-items:center;">
+    <label style="font-size:13px;"><input type="radio" name="vuln-source" id="vuln-source-repo" value="repo" checked> Scan selected repo</label>
+    <label style="font-size:13px;"><input type="radio" name="vuln-source" id="vuln-source-upload" value="upload"> Upload folder from my computer</label>
+  </div>
+  <div class="row" id="vuln-upload-row" style="display:none;">
+    <input type="file" id="vuln-folder-input" webkitdirectory directory multiple>
+    <span id="vuln-upload-count" style="font-size:12px;color:#9ca3af;"></span>
+  </div>
   <div class="row" style="align-items:center;flex-wrap:wrap;">
     <span style="font-size:13px;color:#666;">Scan:</span>
     <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-code" checked> code</label>
@@ -610,9 +618,52 @@ function vulnSeverityBadge(level) {
   return '<span class="badge ' + cls + '">' + lvl + '</span>';
 }
 
+const vulnSourceRepo = document.getElementById('vuln-source-repo');
+const vulnSourceUpload = document.getElementById('vuln-source-upload');
+const vulnUploadRow = document.getElementById('vuln-upload-row');
+const vulnFolderInput = document.getElementById('vuln-folder-input');
+const vulnUploadCount = document.getElementById('vuln-upload-count');
+
+function toggleVulnSource() {
+  vulnUploadRow.style.display = vulnSourceUpload.checked ? 'flex' : 'none';
+}
+vulnSourceRepo.addEventListener('change', toggleVulnSource);
+vulnSourceUpload.addEventListener('change', toggleVulnSource);
+
+vulnFolderInput.addEventListener('change', () => {
+  vulnUploadCount.textContent = vulnFolderInput.files.length + ' file(s) selected';
+});
+
+function readFileAsText(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve('');
+    reader.readAsText(file);
+  });
+}
+
+const SKIP_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.exe', '.dll', '.pyc', '.ico', '.woff', '.woff2', '.ttf'];
+
+async function collectUploadedFiles() {
+  const fileList = Array.from(vulnFolderInput.files);
+  const files = [];
+  for (const file of fileList) {
+    const path = file.webkitRelativePath || file.name;
+    if (path.includes('/.git/') || path.includes('/node_modules/')) continue;
+    if (SKIP_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext))) continue;
+    const content = await readFileAsText(file);
+    files.push({ path, content });
+  }
+  return files;
+}
+
 runVulnBtn.addEventListener('click', async () => {
+  const useUpload = vulnSourceUpload.checked;
   const repo = repoSelect.value;
-  if (!repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
+
+  if (!useUpload && !repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
+  if (useUpload && vulnFolderInput.files.length === 0) { vulnStatus.textContent = 'Choose a folder to upload first.'; return; }
 
   const scanTypes = [];
   if (document.getElementById('vuln-scan-code').checked) scanTypes.push('code');
@@ -620,12 +671,17 @@ runVulnBtn.addEventListener('click', async () => {
   if (document.getElementById('vuln-scan-network').checked) scanTypes.push('network');
 
   const body = {
-    repo: repo,
+    repo: useUpload ? '' : repo,
     ai: document.getElementById('vuln-ai').checked,
     scan_types: scanTypes,
     fail_on: document.getElementById('vuln-fail-on').value,
     include_test_files: document.getElementById('vuln-include-tests').checked,
   };
+
+  if (useUpload) {
+    vulnStatus.textContent = 'Reading uploaded files...';
+    body.files = await collectUploadedFiles();
+  }
 
   vulnSummary.innerHTML = '';
   vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
