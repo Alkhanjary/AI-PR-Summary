@@ -463,13 +463,25 @@ import uuid
 VULN_JOBS = {}
 
 
-def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files):
+def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None):
     job = VULN_JOBS[job_id]
     try:
-        target_dir = get_repo_dir(repo)
-        job["log"].append(f"Target ready: {target_dir}")
-
         import tempfile
+        if files:
+            upload_dir = Path(tempfile.mkdtemp())
+            for f in files:
+                rel_path = f.get("path", "").lstrip("/\\")
+                if not rel_path:
+                    continue
+                dest = upload_dir / rel_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(f.get("content", ""), encoding="utf-8", errors="replace")
+            target_dir = upload_dir
+            job["log"].append(f"Uploaded {len(files)} file(s) to scan: {target_dir}")
+        else:
+            target_dir = get_repo_dir(repo)
+            job["log"].append(f"Target ready: {target_dir}")
+
         tmpdir = tempfile.mkdtemp()
         json_out = str(Path(tmpdir) / "report.json")
         scan_arg = ",".join(scan_types) if scan_types else "code"
@@ -521,13 +533,11 @@ def vuln_scan_start():
     can take a while)."""
     data = request.get_json(force=True)
     repo = data.get("repo", "").strip()
-
+    files = data.get("files")
     if not ensure_scanner_available():
         return jsonify({"error": f"Could not find or clone the scanner tool (expected at {OTHER_SCANNER_PATH})"}), 500
-
     job_id = str(uuid.uuid4())
     VULN_JOBS[job_id] = {"status": "running", "log": [], "result": None, "error": None, "started": time.time()}
-
     thread = threading.Thread(
         target=run_vuln_scan_job,
         args=(
@@ -536,6 +546,7 @@ def vuln_scan_start():
             data.get("scan_types", ["code"]),
             data.get("fail_on", "high"),
             data.get("include_test_files", False),
+            files,
         ),
         daemon=True,
     )
