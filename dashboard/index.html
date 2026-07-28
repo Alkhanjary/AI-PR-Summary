@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AI PR Summary Dashboard</title>
+<title>AI PR &amp; Security Insights Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -10,11 +10,13 @@
   html, body { margin: 0; padding: 0; }
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a1a1a;
-    background:
-      radial-gradient(circle at 12% 0%, rgba(124,58,237,0.07), transparent 42%),
-      radial-gradient(circle at 88% 12%, rgba(79,70,229,0.06), transparent 38%),
+    background-color: #f4f5fb;
+    background-image:
+      radial-gradient(circle at 12% 0%, rgba(124,58,237,0.08), transparent 42%),
+      radial-gradient(circle at 88% 8%, rgba(79,70,229,0.07), transparent 38%),
       radial-gradient(circle at 50% 100%, rgba(168,85,247,0.05), transparent 45%),
-      #f4f5fb;
+      radial-gradient(rgba(79,70,229,0.09) 1px, transparent 1.4px);
+    background-size: auto, auto, auto, 26px 26px;
     background-attachment: fixed;
   }
 
@@ -44,6 +46,14 @@
   .username-suggestion:hover, .username-suggestion.highlighted { background: #f2f1ff; color: #3730a3; }
   .username-suggestion img { width: 22px; height: 22px; border-radius: 50%; }
 
+  .repo-toolbar { background: #fff; border: 1px solid #e5e5ef; border-radius: 12px; padding: 0.9rem 1.1rem; box-shadow: 0 1px 4px rgba(20,20,50,0.04); }
+
+  .empty-state { text-align: center; padding: 3.5rem 2rem; border: 1.5px dashed #d9d9ee; border-radius: 16px; background: rgba(255,255,255,0.5); }
+  .empty-state-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%; background: #eef0ff; color: #6d28d9; display: flex; align-items: center; justify-content: center; }
+  .empty-state-icon svg { width: 26px; height: 26px; }
+  .empty-state-title { font-size: 15px; font-weight: 700; color: #1a1a1a; margin-bottom: 6px; }
+  .empty-state-desc { font-size: 13px; color: #9ca3af; max-width: 380px; margin: 0 auto; line-height: 1.6; }
+
   .profile-card { display: flex; gap: 22px; align-items: center; background: linear-gradient(135deg,#eef0ff,#faf9ff); border: 1px solid #e0e0f5; border-radius: 16px; padding: 1.5rem 1.75rem; margin-bottom: 1.5rem; }
   .profile-avatar { width: 84px; height: 84px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 4px 14px rgba(79,70,229,0.25); flex-shrink: 0; }
   .profile-info { flex: 1; min-width: 0; }
@@ -53,9 +63,37 @@
   .profile-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: #6b7280; margin-top: 10px; }
   .profile-meta a { color: #4f46e5; text-decoration: none; font-weight: 600; }
   .profile-meta a:hover { text-decoration: underline; }
-  header { padding: 2.25rem 2rem; margin: 0 -2rem 1.5rem; background: linear-gradient(135deg,#4f46e5,#7c3aed 60%,#a855f7); border-radius: 0 0 20px 20px; box-shadow: 0 8px 24px rgba(79,70,229,0.25); }
-  h1 { font-size: 26px; font-weight: 800; margin: 0 0 4px; color: #fff; letter-spacing: -0.02em; }
+  header {
+    position: relative; overflow: hidden;
+    padding: 2.5rem 2rem 4.5rem; margin: 0 -2rem 0;
+    background:
+      radial-gradient(circle at 18% -20%, rgba(255,255,255,0.28), transparent 45%),
+      radial-gradient(circle at 92% 0%, rgba(217,70,239,0.55), transparent 45%),
+      radial-gradient(circle at 60% 120%, rgba(56,189,248,0.35), transparent 50%),
+      linear-gradient(135deg,#4338ca,#6d28d9 55%,#a21caf 100%);
+    border-radius: 0 0 28px 28px;
+    box-shadow: 0 14px 34px rgba(67,56,202,0.28);
+  }
+  header::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.07) 1px, transparent 1px);
+    background-size: 30px 30px;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), transparent 85%);
+  }
+  header > * { position: relative; z-index: 1; }
+  h1 { font-size: 27px; font-weight: 800; margin: 0 0 4px; color: #fff; letter-spacing: -0.02em; }
   .subtitle { font-size: 13px; color: rgba(255,255,255,0.88); }
+
+  .hero-search { position: relative; z-index: 2; margin: -2.75rem 0 1.5rem; }
+  .hero-search .username-field { max-width: 420px; background: rgba(255,255,255,0.14); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); border: 1px solid rgba(255,255,255,0.35); border-radius: 14px; padding: 6px; box-shadow: 0 16px 34px rgba(30,20,80,0.22); }
+  .hero-search .username-field input { width: 100%; background: rgba(255,255,255,0.95); border: none; padding: 11px 14px 11px 40px; font-size: 14px; border-radius: 9px; }
+  .hero-search .username-field input:focus { box-shadow: 0 0 0 3px rgba(255,255,255,0.35); }
+  .username-icon { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #9ca3af; pointer-events: none; display: flex; }
+  .username-icon svg { width: 16px; height: 16px; }
+  .suggestions-heading { font-size: 10.5px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
+  .username-suggestion-icon { color: #a1a1cc; font-size: 14px; width: 22px; display: inline-flex; justify-content: center; }
   .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
   input, select { padding: 9px 12px; border: 1px solid #d0d0e0; border-radius: 8px; font-size: 14px; background: #fff; transition: all 0.15s ease; }
   input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
@@ -107,6 +145,17 @@
   .finding-card.sev-high { border-left-color: #dc2626; }
   .finding-card.sev-medium { border-left-color: #f59e0b; }
   .finding-card.sev-low { border-left-color: #22c55e; }
+
+  .label-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .label-chip { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid; }
+  .pr-avatar { width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  .generate-summary-btn { background: #eef0ff; color: #4338ca; font-size: 12.5px; padding: 6px 12px; }
+  .generate-summary-btn:hover { background: #e0e2fc; box-shadow: none; transform: none; }
+
+  .segmented { display: inline-flex; background: #eef0f7; border-radius: 10px; padding: 3px; gap: 2px; }
+  .segmented-option { padding: 7px 16px; font-size: 13px; font-weight: 600; color: #6b7280; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
+  .segmented-option:hover { color: #4f46e5; }
+  .segmented-option.active { background: #fff; color: #4f46e5; box-shadow: 0 1px 4px rgba(20,20,50,0.1); }
 
   .panel { display: none; animation: fadeIn 0.25s ease; }
   .panel.active { display: block; }
@@ -162,7 +211,7 @@
   <nav class="sidebar">
     <div class="sidebar-brand">
       <div class="sidebar-brand-mark">AI</div>
-      <div class="sidebar-brand-text">PR Summary</div>
+      <div class="sidebar-brand-text">PR Insights</div>
     </div>
     <div class="sidebar-nav">
       <div class="nav-item active" data-panel="overview">
@@ -173,13 +222,9 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 12 8 12 10 6 14 18 16 12 21 12"/></svg></span>
         <span class="nav-label">Monitor</span>
       </div>
-      <div class="nav-item" data-panel="prs">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="7" r="2"/><path d="M7 8v8"/><path d="M17 9a6.5 6.5 0 0 1-6.5 6.5"/></svg></span>
-        <span class="nav-label">Pull requests</span>
-      </div>
-      <div class="nav-item" data-panel="commits">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h6"/><path d="M15 12h6"/></svg></span>
-        <span class="nav-label">Commits</span>
+      <div class="nav-item" data-panel="activity">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="7" r="2"/><path d="M7 8v8"/><path d="M17 9a6.5 6.5 0 0 1-6.5 6.5"/><circle cx="17" cy="17" r="1.3" fill="currentColor" stroke="none"/></svg></span>
+        <span class="nav-label">Activity</span>
       </div>
       <div class="nav-item" data-panel="run">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
@@ -194,22 +239,34 @@
 
   <div class="main-content">
     <header>
-      <h1>AI PR Summary Dashboard</h1>
-      <div class="subtitle">Live activity, risk trends, and commit history from GitHub</div>
+      <h1>AI PR &amp; Security Insights</h1>
+      <div class="subtitle">AI-written PR summaries, vulnerability scans, and team activity analytics &mdash; all pulled live from your GitHub account</div>
     </header>
 
-    <div class="row">
+    <div class="hero-search">
       <div class="username-field">
-        <input id="username-input" type="text" value="" placeholder="GitHub username, then press Enter" autocomplete="off">
+        <span class="username-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+        <input id="username-input" type="text" value="" placeholder="Search a GitHub username, then press Enter" autocomplete="off">
         <div class="username-suggestions" id="username-suggestions"></div>
       </div>
-      <select id="repo-select" style="max-width:220px;"><option>(enter a username)</option></select>
-      <button id="refresh-btn">Refresh</button>
     </div>
 
     <div class="status" id="status"></div>
 
+    <div class="row repo-toolbar" id="repo-toolbar" style="display:none;">
+      <div class="field-group" id="repo-select-slot-top">
+        <span class="field-label">Repository</span>
+        <select id="repo-select" style="max-width:260px;"><option>(enter a username)</option></select>
+      </div>
+      <button id="refresh-btn">Refresh</button>
+    </div>
+
     <div class="panel active" id="panel-overview">
+  <div class="empty-state" id="overview-empty-state">
+    <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-6 8-6s8 2 8 6"/></svg></div>
+    <div class="empty-state-title">Find a GitHub profile to get started</div>
+    <div class="empty-state-desc">Search a username above to see their profile, aggregate stats, language mix, and repo activity &mdash; all in one view.</div>
+  </div>
   <div id="user-profile-card" style="display:none;"></div>
   <div class="metrics" id="user-metrics" style="display:none;"></div>
   <div class="chart-grid" id="user-chart-grid" style="display:none;">
@@ -221,18 +278,22 @@
     </div>
   </div>
   <div id="user-top-repos"></div>
+  <div id="user-involvement"></div>
 </div>
 
-<div class="panel" id="panel-prs">
+<div class="panel" id="panel-activity">
   <div class="metrics" id="metrics"></div>
   <div class="chart-wrap" style="margin-bottom:1.5rem;">
     <canvas id="riskChart" role="img" aria-label="Bar chart of pull request counts by risk level"></canvas>
   </div>
+  <div class="row activity-toggle">
+    <div class="segmented" id="activity-segmented">
+      <div class="segmented-option active" data-view="prs">Pull requests</div>
+      <div class="segmented-option" data-view="commits">Commits</div>
+    </div>
+  </div>
   <div id="list"></div>
-</div>
-
-<div class="panel" id="panel-commits">
-  <div id="commits"></div>
+  <div id="commits" style="display:none;"></div>
 </div>
 
 <div class="panel" id="panel-run">
@@ -261,6 +322,11 @@
     <div class="row">
       <label><input type="radio" name="vuln-source" id="vuln-source-repo" value="repo" checked><span>Scan selected repo</span></label>
       <label><input type="radio" name="vuln-source" id="vuln-source-upload" value="upload"><span>Upload folder from my computer</span></label>
+    </div>
+    <div class="row" id="vuln-repo-row">
+      <div class="field-group" id="repo-select-slot-vuln">
+        <span class="field-label">Repository</span>
+      </div>
     </div>
     <div class="row" id="vuln-upload-row" style="display:none;">
       <input type="file" id="vuln-folder-input" webkitdirectory directory multiple>
@@ -364,6 +430,15 @@ const repoSelect = document.getElementById('repo-select');
 const usernameSuggestions = document.getElementById('username-suggestions');
 let repoCache = [];
 
+const RECENT_USERS_KEY = 'aiprsummary_recent_usernames';
+function getRecentUsernames() {
+  try { return JSON.parse(localStorage.getItem(RECENT_USERS_KEY) || '[]'); } catch (e) { return []; }
+}
+function saveRecentUsername(name) {
+  const list = [name, ...getRecentUsernames().filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, 5);
+  localStorage.setItem(RECENT_USERS_KEY, JSON.stringify(list));
+}
+
 async function loadRepos() {
   const username = usernameInput.value.trim();
   if (!username) { statusEl.textContent = 'Enter a GitHub username'; return; }
@@ -376,9 +451,12 @@ async function loadRepos() {
       statusEl.textContent = repos.message || 'Could not load repos.';
       return;
     }
+    saveRecentUsername(username);
     repoCache = repos;
     repoSelect.innerHTML = '<option value="">-- Select a repo --</option>' + repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
     statusEl.textContent = repos.length + ' repos loaded.';
+    hasRepos = repos.length > 0;
+    updateRepoControlsForActiveTab();
     loadUserOverview(username);
     if (repos.length > 0) {
       repoSelect.value = repos[0].full_name;
@@ -389,20 +467,47 @@ async function loadRepos() {
     statusEl.textContent = 'Could not reach the local server. Is server.py running?';
   }
 }
-usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadRepos(); });
 repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); } });
 
 function closeSuggestions() {
   usernameSuggestions.classList.remove('open');
   usernameSuggestions.innerHTML = '';
+  suggestionIndex = -1;
+}
+
+function getSuggestionItems() {
+  return Array.from(usernameSuggestions.querySelectorAll('.username-suggestion'));
+}
+function highlightSuggestion(idx) {
+  const items = getSuggestionItems();
+  items.forEach(it => it.classList.remove('highlighted'));
+  if (idx >= 0 && idx < items.length) {
+    items[idx].classList.add('highlighted');
+    items[idx].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function renderRecentSuggestions() {
+  const recents = getRecentUsernames();
+  if (recents.length === 0) { closeSuggestions(); return; }
+  usernameSuggestions.innerHTML = '<div class="suggestions-heading">Recently viewed</div>' + recents.map(name =>
+    '<div class="username-suggestion" data-login="' + name + '"><span class="username-suggestion-icon">&#8635;</span><span>' + name + '</span></div>'
+  ).join('');
+  usernameSuggestions.classList.add('open');
+  suggestionIndex = -1;
 }
 
 let usernameSuggestTimer = null;
+let suggestionIndex = -1;
 usernameInput.addEventListener('input', () => {
   clearTimeout(usernameSuggestTimer);
   const q = usernameInput.value.trim();
-  if (q.length < 2) { closeSuggestions(); return; }
+  suggestionIndex = -1;
+  if (q.length < 2) { renderRecentSuggestions(); return; }
   usernameSuggestTimer = setTimeout(() => fetchUsernameSuggestions(q), 250);
+});
+usernameInput.addEventListener('focus', () => {
+  if (usernameInput.value.trim().length < 2) renderRecentSuggestions();
 });
 
 async function fetchUsernameSuggestions(q) {
@@ -416,6 +521,7 @@ async function fetchUsernameSuggestions(q) {
       '<div class="username-suggestion" data-login="' + u.login + '"><img src="' + u.avatar_url + '" alt=""><span>' + u.login + '</span></div>'
     ).join('');
     usernameSuggestions.classList.add('open');
+    suggestionIndex = -1;
   } catch (e) {
     closeSuggestions();
   }
@@ -432,7 +538,17 @@ usernameSuggestions.addEventListener('click', e => {
 document.addEventListener('click', e => {
   if (e.target !== usernameInput && !usernameSuggestions.contains(e.target)) closeSuggestions();
 });
-usernameInput.addEventListener('keydown', e => { if (e.key === 'Escape') closeSuggestions(); });
+
+usernameInput.addEventListener('keydown', e => {
+  const items = getSuggestionItems();
+  if (usernameSuggestions.classList.contains('open') && items.length > 0) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); suggestionIndex = Math.min(suggestionIndex + 1, items.length - 1); highlightSuggestion(suggestionIndex); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); suggestionIndex = Math.max(suggestionIndex - 1, 0); highlightSuggestion(suggestionIndex); return; }
+    if (e.key === 'Enter' && suggestionIndex >= 0) { e.preventDefault(); items[suggestionIndex].click(); return; }
+  }
+  if (e.key === 'Enter') loadRepos();
+  if (e.key === 'Escape') closeSuggestions();
+});
 
 const API_BASE = 'http://127.0.0.1:5000';
 function ghFetch(url) {
@@ -444,6 +560,95 @@ const metricsEl = document.getElementById('metrics');
 const listEl = document.getElementById('list');
 const commitsEl = document.getElementById('commits');
 let chartInstance = null;
+let riskCounts = { high: 0, medium: 0, low: 0 };
+
+function renderSummarySections(sections) {
+  const risk = (sections['Risk'] || '').match(/\w+/);
+  const riskLevel = risk ? risk[0].toLowerCase() : null;
+  let html = '';
+  if (sections['Suggested Title']) {
+    html += '<div class="section-label">Suggested title</div><div class="section-body">' + sections['Suggested Title'].replace(/[`*]/g, '') + '</div>';
+  }
+  if (sections['Summary']) {
+    html += '<div class="section-label">Summary</div><div class="section-body">' + mdToHtml(sections['Summary']) + '</div>';
+  }
+  if (sections['Impact']) {
+    html += '<div class="section-label">Impact</div><div class="section-body">' + mdToHtml(sections['Impact']) + '</div>';
+  }
+  if (sections['Risk']) {
+    html += '<div class="section-label">Risk</div><div class="section-body">' + badge(riskLevel || 'unknown', 'risk-' + (riskLevel || 'low')) + ' ' + sections['Risk'].replace(/^\w+\s*\|?\s*/, '') + '</div>';
+  }
+  if (sections['Flags']) {
+    html += '<div class="section-label">Flags</div><div class="section-body">' + mdToHtml(sections['Flags']) + '</div>';
+  }
+  if (sections['Suggested Tests']) {
+    html += '<div class="section-label">Suggested tests</div><div class="section-body">' + mdToHtml(sections['Suggested Tests']) + '</div>';
+  }
+  if (sections['Files']) {
+    html += '<div class="section-label">Files</div><div class="section-body">' + mdToHtml(sections['Files']) + '</div>';
+  }
+  return { html, riskLevel };
+}
+
+listEl.addEventListener('click', async e => {
+  const btn = e.target.closest('.generate-summary-btn');
+  if (!btn) return;
+  const num = btn.dataset.pr;
+  const repo = repoSelect.value;
+  const detailEl = document.getElementById('detail-' + num);
+  btn.disabled = true;
+  btn.textContent = 'Generating summary...';
+  try {
+    const diffRes = await fetch(API_BASE + '/api/current-diff?repo=' + encodeURIComponent(repo) +
+      '&base=' + encodeURIComponent('origin/' + btn.dataset.base) + '&compare=' + encodeURIComponent('origin/' + btn.dataset.head));
+    const diffData = await diffRes.json();
+    if (!diffData.diff) {
+      detailEl.innerHTML = '<div class="section-body" style="color:#999;">No diff found for this PR (its branch may no longer exist).</div>';
+      return;
+    }
+    const scanRes = await fetch(API_BASE + '/api/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diff: diffData.diff })
+    });
+    const scanData = await scanRes.json();
+    if (!scanRes.ok) {
+      detailEl.innerHTML = '<div class="section-body" style="color:#b91c1c;">' + (scanData.error || 'Could not generate summary.') + '</div>';
+      return;
+    }
+    const { html, riskLevel } = renderSummarySections(extractSections(scanData.markdown || ''));
+    if (riskLevel && riskCounts.hasOwnProperty(riskLevel)) {
+      riskCounts[riskLevel]++;
+      renderChart(riskCounts);
+    }
+    detailEl.innerHTML = (html || '<div class="section-body" style="color:#999;">Summary generated.</div>') +
+      '<div class="hint-text" style="margin-top:6px;">Generated locally just now &mdash; not posted as a PR comment.</div>';
+  } catch (e2) {
+    detailEl.innerHTML = '<div class="section-body" style="color:#b91c1c;">Could not reach the local server. Is server.py running?</div>';
+  }
+});
+
+document.querySelectorAll('#activity-segmented .segmented-option').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#activity-segmented .segmented-option').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    listEl.style.display = opt.dataset.view === 'prs' ? 'block' : 'none';
+    commitsEl.style.display = opt.dataset.view === 'commits' ? 'block' : 'none';
+  });
+});
+
+const repoToolbar = document.getElementById('repo-toolbar');
+let hasRepos = false;
+
+function updateRepoControlsForActiveTab() {
+  const activePanel = document.querySelector('.nav-item.active')?.dataset.panel;
+  if (!activePanel || activePanel === 'overview') {
+    repoToolbar.style.display = 'none';
+  } else if (activePanel === 'vuln') {
+    toggleVulnSource();
+  } else {
+    if (hasRepos) placeRepoSelect('repo-select-slot-top');
+    repoToolbar.style.display = hasRepos ? 'flex' : 'none';
+  }
+}
 
 document.querySelectorAll('.nav-item').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -451,6 +656,7 @@ document.querySelectorAll('.nav-item').forEach(tab => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+    updateRepoControlsForActiveTab();
   });
 });
 
@@ -483,6 +689,21 @@ function formatDate(iso) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
     ' at ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
+function timeAgo(iso) {
+  const seconds = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  const units = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60]];
+  for (const [name, secs] of units) {
+    const n = Math.floor(seconds / secs);
+    if (n >= 1) return n + ' ' + name + (n > 1 ? 's' : '') + ' ago';
+  }
+  return 'just now';
+}
+function labelChips(labels) {
+  if (!labels || labels.length === 0) return '';
+  return '<div class="label-chips">' + labels.map(l =>
+    '<span class="label-chip" style="background:#' + l.color + '22;color:#' + l.color + ';border-color:#' + l.color + '55;">' + l.name + '</span>'
+  ).join('') + '</div>';
+}
 function renderChart(counts) {
   const ctx = document.getElementById('riskChart');
   const data = [counts.low, counts.medium, counts.high];
@@ -510,24 +731,32 @@ let langChartInstance = null;
 let repoTimelineChartInstance = null;
 
 async function loadUserOverview(username) {
+  const emptyState = document.getElementById('overview-empty-state');
   const profileCard = document.getElementById('user-profile-card');
   const userMetrics = document.getElementById('user-metrics');
   const chartGrid = document.getElementById('user-chart-grid');
   const topReposEl = document.getElementById('user-top-repos');
+  const involvementEl = document.getElementById('user-involvement');
 
+  emptyState.style.display = 'none';
   profileCard.style.display = 'block';
   profileCard.innerHTML = '<div class="card">Loading profile for ' + username + '...</div>';
   userMetrics.style.display = 'none';
   chartGrid.style.display = 'none';
   topReposEl.innerHTML = '';
+  involvementEl.innerHTML = '';
 
   try {
-    const userRes = await fetch(API_BASE + '/api/github/user?username=' + encodeURIComponent(username));
+    const [userRes, activityRes] = await Promise.all([
+      fetch(API_BASE + '/api/github/user?username=' + encodeURIComponent(username)),
+      fetch(API_BASE + '/api/github/user-activity?username=' + encodeURIComponent(username)),
+    ]);
     const user = await userRes.json();
     if (!userRes.ok || user.message) {
       profileCard.innerHTML = '<div class="card">Could not load profile for "' + username + '".</div>';
       return;
     }
+    const activity = await activityRes.json().catch(() => ({ items: [] }));
 
     const repos = repoCache.filter(r => !r.fork);
     const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0);
@@ -614,6 +843,41 @@ async function loadUserOverview(username) {
         '<div class="meta-row">&#9733; ' + (r.stargazers_count || 0) + ' &middot; forks ' + (r.forks_count || 0) + ' &middot; updated ' + formatDate(r.updated_at) + '</div>' +
       '</div>'
     ).join('');
+
+    const ownedNames = new Set(repoCache.map(r => r.full_name));
+    const items = activity.items || [];
+    const byRepo = {};
+    items.forEach(it => {
+      if (!it.repo) return;
+      if (!byRepo[it.repo]) byRepo[it.repo] = [];
+      byRepo[it.repo].push(it);
+    });
+    const involvedRepos = Object.keys(byRepo).sort((a, b) => byRepo[b].length - byRepo[a].length);
+    const outsideCount = involvedRepos.filter(r => !ownedNames.has(r)).length;
+
+    if (involvedRepos.length === 0) {
+      involvementEl.innerHTML = '';
+    } else {
+      involvementEl.innerHTML =
+        '<div class="section-label">Involved in ' + involvedRepos.length + ' repositor' + (involvedRepos.length === 1 ? 'y' : 'ies') +
+        (outsideCount > 0 ? ' &middot; ' + outsideCount + ' outside their own repos' : '') + '</div>' +
+        involvedRepos.slice(0, 6).map(repoName => {
+          const prs = byRepo[repoName].slice(0, 3);
+          const isOwn = ownedNames.has(repoName);
+          return '<div class="card">' +
+            '<div class="top">' +
+              '<span style="font-size:14px;font-weight:700;">' + repoName + '</span>' +
+              (isOwn ? '<span class="badge state-merged">owner</span>' : '<span class="badge state-open">contributor</span>') +
+            '</div>' +
+            prs.map(pr =>
+              '<div class="meta-row" style="margin-top:6px;">' +
+                badge(pr.state, 'state-' + pr.state) +
+                ' <a href="' + pr.html_url + '" target="_blank" style="color:#374151;text-decoration:none;">' + pr.title + '</a>' +
+              '</div>'
+            ).join('') +
+          '</div>';
+        }).join('');
+    }
   } catch (e) {
     profileCard.innerHTML = '<div class="card">Could not reach the local server. Is server.py running?</div>';
   }
@@ -645,7 +909,7 @@ async function loadCommits(repo) {
         '<div style="flex:1;">' +
         '<a href="' + c.html_url + '" target="_blank" class="commit-msg">' + subject + '</a>' +
         (bodyText ? '<div class="commit-body">' + bodyText + '</div>' : '') +
-        '<div class="commit-meta">' + (authorLogin ? '@' + authorLogin : authorName) + ' &middot; ' + (date ? formatDate(date) : '') + ' &middot; <code style="font-size:11px;">' + sha.slice(0, 7) + '</code></div>' +
+        '<div class="commit-meta">' + (authorLogin ? '@' + authorLogin : authorName) + ' &middot; ' + (date ? formatDate(date) + ' (' + timeAgo(date) + ')' : '') + ' &middot; <code style="font-size:11px;">' + sha.slice(0, 7) + '</code></div>' +
         '<button class="commit-files-btn" data-sha="' + sha + '">Show files changed</button>' +
         '<div class="file-list" id="files-' + sha + '"></div>' +
         '</div></div>';
@@ -709,11 +973,15 @@ async function loadDashboard() {
       metricCard('Merged', merged) +
       metricCard('Closed', prs.length - open - merged);
 
-    const riskCounts = { high: 0, medium: 0, low: 0 };
+    riskCounts = { high: 0, medium: 0, low: 0 };
     renderChart(riskCounts);
 
     for (const pr of prs) {
       const state = pr.merged_at ? 'merged' : pr.state;
+      const endDate = pr.merged_at || pr.closed_at;
+      const lifetime = endDate
+        ? (state === 'merged' ? 'merged ' : 'closed ') + timeAgo(endDate)
+        : 'opened ' + timeAgo(pr.created_at);
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML =
@@ -721,48 +989,27 @@ async function loadDashboard() {
         '<a href="' + pr.html_url + '" target="_blank" class="title">#' + pr.number + ' ' + pr.title + '</a>' +
         badge(state, 'state-' + state) +
         '</div>' +
-        '<div class="meta-row">Opened by ' + pr.user.login + ' &middot; ' + formatDate(pr.created_at) + '</div>' +
+        labelChips(pr.labels) +
+        '<div class="meta-row"><img class="pr-avatar" src="' + pr.user.avatar_url + '" alt="">' + pr.user.login + ' &middot; ' + formatDate(pr.created_at) + ' &middot; ' + lifetime + '<span id="comments-' + pr.number + '"></span></div>' +
         '<div id="detail-' + pr.number + '">Loading AI summary...</div>';
       listEl.appendChild(card);
 
       ghFetch(API_BASE + '/api/github/comments?repo=' + encodeURIComponent(repo) + '&number=' + pr.number)
         .then(r => r.ok ? r.json() : [])
         .then(comments => {
+          const commentsEl2 = document.getElementById('comments-' + pr.number);
+          if (commentsEl2) commentsEl2.textContent = comments.length > 0 ? ' · ' + comments.length + ' comment' + (comments.length > 1 ? 's' : '') : '';
           const botComment = comments.find(c => c.body && c.body.includes('<!-- ai-pr-summary -->'));
           const detailEl = document.getElementById('detail-' + pr.number);
           if (!botComment) {
-            detailEl.innerHTML = '<div class="section-body" style="color:#999;">No AI summary comment yet</div>';
+            detailEl.innerHTML = '<div class="section-body" style="color:#999;">No AI summary comment yet.</div>' +
+              '<button class="generate-summary-btn" data-pr="' + pr.number + '" data-base="' + pr.base.ref + '" data-head="' + pr.head.ref + '" style="margin-top:6px;">Generate summary now</button>';
             return;
           }
-          const sections = extractSections(botComment.body);
-          const risk = (sections['Risk'] || '').match(/\w+/);
-          const riskLevel = risk ? risk[0].toLowerCase() : null;
+          const { html, riskLevel } = renderSummarySections(extractSections(botComment.body));
           if (riskLevel && riskCounts.hasOwnProperty(riskLevel)) {
             riskCounts[riskLevel]++;
             renderChart(riskCounts);
-          }
-
-          let html = '';
-          if (sections['Suggested Title']) {
-            html += '<div class="section-label">Suggested title</div><div class="section-body">' + sections['Suggested Title'].replace(/[`*]/g, '') + '</div>';
-          }
-          if (sections['Summary']) {
-            html += '<div class="section-label">Summary</div><div class="section-body">' + mdToHtml(sections['Summary']) + '</div>';
-          }
-          if (sections['Impact']) {
-            html += '<div class="section-label">Impact</div><div class="section-body">' + mdToHtml(sections['Impact']) + '</div>';
-          }
-          if (sections['Risk']) {
-            html += '<div class="section-label">Risk</div><div class="section-body">' + badge(riskLevel || 'unknown', 'risk-' + (riskLevel || 'low')) + ' ' + sections['Risk'].replace(/^\w+\s*\|?\s*/, '') + '</div>';
-          }
-          if (sections['Flags']) {
-            html += '<div class="section-label">Flags</div><div class="section-body">' + mdToHtml(sections['Flags']) + '</div>';
-          }
-          if (sections['Suggested Tests']) {
-            html += '<div class="section-label">Suggested tests</div><div class="section-body">' + mdToHtml(sections['Suggested Tests']) + '</div>';
-          }
-          if (sections['Files']) {
-            html += '<div class="section-label">Files</div><div class="section-body">' + mdToHtml(sections['Files']) + '</div>';
           }
           detailEl.innerHTML = html || '<div class="section-body" style="color:#999;">Summary posted</div>';
         })
@@ -989,8 +1236,19 @@ const vulnUploadRow = document.getElementById('vuln-upload-row');
 const vulnFolderInput = document.getElementById('vuln-folder-input');
 const vulnUploadCount = document.getElementById('vuln-upload-count');
 
+function placeRepoSelect(slotId) {
+  document.getElementById(slotId).appendChild(repoSelect);
+}
+
 function toggleVulnSource() {
-  vulnUploadRow.style.display = vulnSourceUpload.checked ? 'flex' : 'none';
+  const useUpload = vulnSourceUpload.checked;
+  const vulnRepoRow = document.getElementById('vuln-repo-row');
+  vulnUploadRow.style.display = useUpload ? 'flex' : 'none';
+  vulnRepoRow.style.display = (useUpload || !hasRepos) ? 'none' : 'flex';
+  if (document.getElementById('panel-vuln').classList.contains('active')) {
+    repoToolbar.style.display = 'none';
+    if (!useUpload && hasRepos) placeRepoSelect('repo-select-slot-vuln');
+  }
 }
 vulnSourceRepo.addEventListener('change', toggleVulnSource);
 vulnSourceUpload.addEventListener('change', toggleVulnSource);

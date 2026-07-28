@@ -73,6 +73,36 @@ def github_user():
     return jsonify(r.json()), r.status_code
 
 
+@app.route("/api/github/user-activity")
+def github_user_activity():
+    """Powers the Overview tab's 'Involved in' section: pull requests the
+    user has authored across ANY repo (not just ones they own), so
+    contributions to other people's/orgs' repos show up too."""
+    username = request.args.get("username", "")
+    if not username:
+        return jsonify({"error": "username required"}), 400
+    r = requests.get(
+        "https://api.github.com/search/issues",
+        params={"q": "author:" + username + " is:pr", "sort": "updated", "order": "desc", "per_page": 20},
+        headers=gh_headers(),
+    )
+    if not r.ok:
+        return jsonify({"items": []}), r.status_code
+    data = r.json()
+    items = []
+    for item in data.get("items", []):
+        repo_url = item.get("repository_url", "")
+        repo_full_name = "/".join(repo_url.split("/")[-2:]) if repo_url else ""
+        items.append({
+            "repo": repo_full_name,
+            "title": item.get("title"),
+            "html_url": item.get("html_url"),
+            "state": "merged" if item.get("pull_request", {}).get("merged_at") else item.get("state"),
+            "updated_at": item.get("updated_at"),
+        })
+    return jsonify({"items": items})
+
+
 @app.route("/api/github/search-users")
 def github_search_users():
     """Powers the username autocomplete dropdown: proxies GitHub's user
