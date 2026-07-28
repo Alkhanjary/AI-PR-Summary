@@ -214,7 +214,7 @@ def run_team_bugs_job(job_id, repo, use_ai):
                     break
 
             if author not in contributors:
-                contributors[author] = {"author": author, "total_bugs": 0, "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}, "worst": "low"}
+                contributors[author] = {"author": author, "total_bugs": 0, "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}, "worst": "low", "findings": []}
             c = contributors[author]
             c["total_bugs"] += 1
             sev = finding.get("severity", "low")
@@ -222,6 +222,15 @@ def run_team_bugs_job(job_id, repo, use_ai):
                 c["by_severity"][sev] += 1
             if severity_rank.get(sev, 0) > severity_rank.get(c["worst"], 0):
                 c["worst"] = sev
+            c["findings"].append({
+                "file": file_path,
+                "line": fline,
+                "severity": sev,
+                "description": finding.get("description", ""),
+                "evidence": finding.get("evidence", ""),
+                "impact": finding.get("impact", ""),
+                "improvement": finding.get("improvement", ""),
+            })
 
         job["status"] = "done"
         job["result"] = sorted(contributors.values(), key=lambda x: -x["total_bugs"])
