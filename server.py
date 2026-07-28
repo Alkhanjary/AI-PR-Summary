@@ -527,6 +527,7 @@ def ensure_scanner_available():
     return OTHER_SCANNER_PATH.exists()
 
 
+import socket
 import threading
 import time
 import uuid
@@ -534,9 +535,228 @@ import uuid
 VULN_JOBS = {}
 
 
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def port_is_open(host, port, timeout=1.0):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_any_port(host, candidate_ports, timeout_s, process):
+    """Polls a list of candidate ports until one accepts a connection or the
+    started process exits/times out. We can't know for certain which port an
+    arbitrary app will bind to (many frameworks ignore $PORT), so we poll a
+    short list of the most likely ones instead of guessing a single value."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if process.poll() is not None:
+            return None
+        for p in candidate_ports:
+            if port_is_open(host, p):
+                return p
+        time.sleep(1)
+    return None
+
+
+def _read_text(path):
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def detect_project(target_dir):
+    """Looks at marker files in target_dir to figure out what kind of app
+    this is and how to install its deps and start it, so 'scan the web app
+    in this folder' works without the user having to run it manually first.
+    Returns a dict describing the detected project, or None if nothing
+    runnable was recognized."""
+    target_dir = Path(target_dir)
+    has = lambda name: (target_dir / name).exists()
+    free_port = find_free_port()
+    use_shell = os.name == "nt"
+
+    if has("package.json"):
+        pkg = {}
+        try:
+            pkg = json.loads(_read_text(target_dir / "package.json") or "{}")
+        except json.JSONDecodeError:
+            pass
+        scripts = pkg.get("scripts", {}) if isinstance(pkg, dict) else {}
+        start_script = "dev" if "dev" in scripts else "start" if "start" in scripts else None
+        if has("yarn.lock"):
+            install, runner = ["yarn", "install"], ["yarn"]
+        elif has("pnpm-lock.yaml"):
+            install, runner = ["pnpm", "install"], ["pnpm"]
+        else:
+            install, runner = ["npm", "install"], ["npm", "run"]
+        if not start_script:
+            return None
+        start = runner + [start_script] if runner[-1] != start_script else runner
+        if runner[0] in ("npm",) and runner == ["npm", "run"]:
+            start = ["npm", "run", start_script]
+        elif runner[0] in ("yarn", "pnpm"):
+            start = runner + [start_script]
+        return {
+            "name": "Node.js",
+            "install": install,
+            "start": start,
+            "env": {"PORT": str(free_port)},
+            "candidate_ports": [free_port, 3000, 5173, 8080, 4200, 8000],
+            "use_shell": use_shell,
+        }
+
+    if has("manage.py"):
+        return {
+            "name": "Django",
+            "install": ["pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None,
+            "start": ["py", "manage.py", "runserver", f"127.0.0.1:{free_port}"],
+            "env": {},
+            "candidate_ports": [free_port],
+            "use_shell": use_shell,
+        }
+
+    if has("requirements.txt") or has("pyproject.toml"):
+        req_text = _read_text(target_dir / "requirements.txt").lower()
+        entry = next((c for c in ("app.py", "main.py", "server.py", "run.py", "wsgi.py") if has(c)), None)
+        install = ["pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None
+        if "uvicorn" in req_text or "fastapi" in req_text:
+            module = Path(entry).stem if entry else "main"
+            start = ["py", "-m", "uvicorn", f"{module}:app", "--port", str(free_port), "--host", "127.0.0.1"]
+        elif entry:
+            start = ["py", entry]
+        else:
+            return None
+        return {
+            "name": "Python (Flask/FastAPI/generic)",
+            "install": install,
+            "start": start,
+            "env": {"PORT": str(free_port), "FLASK_RUN_PORT": str(free_port)},
+            "candidate_ports": [free_port, 5000, 8000],
+            "use_shell": use_shell,
+        }
+
+    if has("Gemfile"):
+        is_rails = has("config") and (target_dir / "config" / "application.rb").exists()
+        start = ["bundle", "exec", "rails", "server", "-p", str(free_port)] if is_rails else \
+                ["bundle", "exec", "rackup", "-p", str(free_port)]
+        return {
+            "name": "Ruby" + (" on Rails" if is_rails else ""),
+            "install": ["bundle", "install"],
+            "start": start,
+            "env": {},
+            "candidate_ports": [free_port, 3000],
+            "use_shell": use_shell,
+        }
+
+    if has("composer.json") or has("index.php"):
+        return {
+            "name": "PHP",
+            "install": ["composer", "install"] if has("composer.json") else None,
+            "start": ["php", "-S", f"127.0.0.1:{free_port}"],
+            "env": {},
+            "candidate_ports": [free_port],
+            "use_shell": use_shell,
+        }
+
+    if has("go.mod"):
+        return {
+            "name": "Go",
+            "install": ["go", "mod", "download"],
+            "start": ["go", "run", "."],
+            "env": {"PORT": str(free_port)},
+            "candidate_ports": [free_port, 8080],
+            "use_shell": use_shell,
+        }
+
+    if has("index.html"):
+        return {
+            "name": "Static HTML",
+            "install": None,
+            "start": ["py", "-m", "http.server", str(free_port), "--directory", str(target_dir)],
+            "env": {},
+            "candidate_ports": [free_port],
+            "use_shell": use_shell,
+        }
+
+    return None
+
+
+def build_and_start_project(target_dir, job):
+    """Installs deps and starts the detected project in the background.
+    Returns (process, url) on success, or (None, None) if nothing could be
+    detected/started (details are appended to job['log'] either way)."""
+    detection = detect_project(target_dir)
+    if not detection:
+        job["log"].append("Could not detect a runnable web project in this folder "
+                           "(looked for package.json, manage.py, requirements.txt, Gemfile, "
+                           "composer.json, go.mod, index.html).")
+        return None, None
+
+    job["log"].append(f"Detected: {detection['name']}")
+    run_env = os.environ.copy()
+    run_env.update(detection.get("env", {}))
+    run_env["PYTHONIOENCODING"] = "utf-8"
+
+    if detection.get("install"):
+        job["log"].append("Installing dependencies: " + " ".join(detection["install"]))
+        try:
+            install_proc = subprocess.run(
+                detection["install"], cwd=target_dir, capture_output=True, text=True,
+                timeout=300, env=run_env, shell=detection["use_shell"], errors="replace",
+            )
+            if install_proc.returncode != 0:
+                job["log"].append("Dependency install failed:\n" + (install_proc.stderr or "")[-1500:])
+                return None, None
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            job["log"].append(f"Could not install dependencies: {e}")
+            return None, None
+
+    job["log"].append("Starting app: " + " ".join(detection["start"]))
+    try:
+        process = subprocess.Popen(
+            detection["start"], cwd=target_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, env=run_env, shell=detection["use_shell"], errors="replace",
+        )
+    except (FileNotFoundError, OSError) as e:
+        job["log"].append(f"Could not start the app: {e}")
+        return None, None
+
+    port = wait_for_any_port("127.0.0.1", detection["candidate_ports"], timeout_s=60, process=process)
+    if not port:
+        job["log"].append("Timed out waiting for the app to start listening (60s). Stopping it.")
+        process.terminate()
+        return None, None
+
+    url = f"http://127.0.0.1:{port}"
+    job["log"].append(f"App is up at {url}")
+    return process, url
+
+
+def stop_project(process, job):
+    if not process:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    except Exception:
+        pass
+    job["log"].append("Stopped the auto-started app.")
+
+
 def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None,
-                       url=None, net_target=None, net_ports=None):
+                       url=None, net_target=None, net_ports=None, auto_build=False):
     job = VULN_JOBS[job_id]
+    built_process = None
     try:
         import tempfile
         if files:
@@ -553,6 +773,11 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
         else:
             target_dir = get_repo_dir(repo)
             job["log"].append(f"Target ready: {target_dir}")
+
+        if "web" in scan_types and auto_build and not url:
+            built_process, built_url = build_and_start_project(target_dir, job)
+            if built_url:
+                url = built_url
 
         tmpdir = tempfile.mkdtemp()
         json_out = str(Path(tmpdir) / "report.json")
@@ -601,6 +826,8 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
     except Exception as e:
         job["status"] = "error"
         job["error"] = str(e)
+    finally:
+        stop_project(built_process, job)
 
 
 @app.route("/api/vuln-scan/start", methods=["POST"])
@@ -630,6 +857,7 @@ def vuln_scan_start():
             "url": (data.get("url") or "").strip() or None,
             "net_target": (data.get("net_target") or "").strip() or None,
             "net_ports": (data.get("net_ports") or "").strip() or None,
+            "auto_build": bool(data.get("auto_build", False)),
         },
         daemon=True,
     )
