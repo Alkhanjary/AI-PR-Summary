@@ -338,8 +338,22 @@
     <div class="panel-card-title">Scan options</div>
     <div class="row">
       <label><input type="checkbox" id="vuln-scan-code" checked><span>Code</span></label>
-      <label><input type="checkbox" id="vuln-scan-web"><span>Web (not yet implemented)</span></label>
-      <label><input type="checkbox" id="vuln-scan-network"><span>Network (not yet implemented)</span></label>
+      <label><input type="checkbox" id="vuln-scan-web"><span>Web</span></label>
+      <label><input type="checkbox" id="vuln-scan-network"><span>Network</span></label>
+    </div>
+    <div class="row" id="vuln-web-row" style="display:none;">
+      <div class="field-group">
+        <span class="field-label">Target URL</span>
+        <input type="text" id="vuln-web-url" placeholder="https://example.com or http://localhost:3000" style="min-width:280px;">
+        <span class="hint-text">Public site or a local app you're running (e.g. http://localhost:3000) &mdash; both work.</span>
+      </div>
+    </div>
+    <div class="row" id="vuln-network-row" style="display:none;">
+      <div class="field-group">
+        <span class="field-label">IP address or network to scan</span>
+        <input type="text" id="vuln-net-target" placeholder="e.g. 192.168.1.10 or 192.168.1.0/24" style="min-width:280px;">
+        <span class="hint-text">A single machine's IP, or a /24 subnet to scan a whole local network. Leave blank to auto-use the URL above instead. All common ports are scanned automatically.</span>
+      </div>
     </div>
     <div class="row">
       <label><input type="checkbox" id="vuln-ai" checked><span>AI verification (slower, more accurate)</span></label>
@@ -1281,24 +1295,40 @@ async function collectUploadedFiles() {
   return files;
 }
 
+document.getElementById('vuln-scan-web').addEventListener('change', function () {
+  document.getElementById('vuln-web-row').style.display = this.checked ? 'flex' : 'none';
+});
+document.getElementById('vuln-scan-network').addEventListener('change', function () {
+  document.getElementById('vuln-network-row').style.display = this.checked ? 'flex' : 'none';
+});
+
 runVulnBtn.addEventListener('click', async () => {
   const useUpload = vulnSourceUpload.checked;
   const repo = repoSelect.value;
-
-  if (!useUpload && !repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
-  if (useUpload && vulnFolderInput.files.length === 0) { vulnStatus.textContent = 'Choose a folder to upload first.'; return; }
 
   const scanTypes = [];
   if (document.getElementById('vuln-scan-code').checked) scanTypes.push('code');
   if (document.getElementById('vuln-scan-web').checked) scanTypes.push('web');
   if (document.getElementById('vuln-scan-network').checked) scanTypes.push('network');
 
+  if (scanTypes.length === 0) { vulnStatus.textContent = 'Pick at least one scan type.'; return; }
+  if (scanTypes.includes('code')) {
+    if (!useUpload && !repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
+    if (useUpload && vulnFolderInput.files.length === 0) { vulnStatus.textContent = 'Choose a folder to upload first.'; return; }
+  }
+  const webUrl = document.getElementById('vuln-web-url').value.trim();
+  const netTarget = document.getElementById('vuln-net-target').value.trim();
+  if (scanTypes.includes('web') && !webUrl) { vulnStatus.textContent = 'Enter a target URL for the web scan.'; return; }
+  if (scanTypes.includes('network') && !netTarget && !webUrl) { vulnStatus.textContent = 'Enter an IP/network (or a target URL above) for the network scan.'; return; }
+
   const body = {
-    repo: useUpload ? '' : repo,
+    repo: (useUpload || !scanTypes.includes('code')) ? '' : repo,
     ai: document.getElementById('vuln-ai').checked,
     scan_types: scanTypes,
     fail_on: 'high',
     include_test_files: document.getElementById('vuln-include-tests').checked,
+    url: webUrl,
+    net_target: netTarget,
   };
 
   if (useUpload) {

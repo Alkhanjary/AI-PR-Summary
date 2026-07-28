@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -533,7 +534,8 @@ import uuid
 VULN_JOBS = {}
 
 
-def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None):
+def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None,
+                       url=None, net_target=None, net_ports=None):
     job = VULN_JOBS[job_id]
     try:
         import tempfile
@@ -565,6 +567,12 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             cmd.append("--ai")
         if include_test_files:
             cmd.append("--include-test-files")
+        if url:
+            cmd += ["--url", url]
+        if net_target:
+            cmd += ["--net-target", net_target]
+        if net_ports:
+            cmd += ["--net-ports", net_ports]
 
         job["log"].append("Starting scan: " + " ".join(cmd))
 
@@ -618,6 +626,11 @@ def vuln_scan_start():
             data.get("include_test_files", False),
             files,
         ),
+        kwargs={
+            "url": (data.get("url") or "").strip() or None,
+            "net_target": (data.get("net_target") or "").strip() or None,
+            "net_ports": (data.get("net_ports") or "").strip() or None,
+        },
         daemon=True,
     )
     thread.start()
@@ -641,17 +654,125 @@ def vuln_scan_status(job_id):
 
 REPORT_MAX_CHARS = 60000
 
+SEVERITY_ORDER = ["critical", "high", "medium", "low"]
+SEVERITY_COLORS_HEX = {"critical": "4c0519", "high": "dc2626", "medium": "b45309", "low": "15803d"}
+
+
+def count_findings_by_severity(findings):
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for f in findings:
+        sev = (f.get("severity") or "").lower()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
+
+
+def build_findings_markdown(result):
+    """Deterministically builds the Findings Summary + Detailed Findings
+    sections directly from the scanner's JSON, so every single finding is
+    guaranteed to appear in the report - not left to the LLM to enumerate,
+    which risks silently dropping findings from a long list. Findings are
+    grouped by severity (critical first) with a clear subsection per
+    severity, so the document reads as an organized triage list rather
+    than a flat dump."""
+    findings = result.get("findings", [])
+    counts = count_findings_by_severity(findings)
+
+    category_counts = {}
+    for f in findings:
+        cat = f.get("category") or f.get("rule") or "uncategorized"
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+
+    lines = ["## Findings Summary", ""]
+    lines.append(f"- **Files scanned:** {result.get('files_scanned', 'n/a')}")
+    lines.append(f"- **Total findings:** {len(findings)}")
+    for sev in SEVERITY_ORDER:
+        lines.append(f"- **{sev.capitalize()}:** {counts[sev]}")
+    if category_counts:
+        lines.append("")
+        lines.append("**By category:**")
+        for cat, n in sorted(category_counts.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {cat}: {n}")
+
+    skipped = result.get("skipped_files") or []
+    ai_errors = result.get("ai_scan_errors") or []
+    if result.get("truncated") or skipped or ai_errors:
+        lines.append("")
+        lines.append("**Scan notes:**")
+        if result.get("truncated"):
+            lines.append("- Scan output was truncated; some files may not have been fully analyzed.")
+        if skipped:
+            lines.append(f"- {len(skipped)} file(s) were skipped during the scan (unsupported type, too large, or unreadable).")
+        if ai_errors:
+            lines.append(f"- AI verification failed for {len(ai_errors)} file(s); their findings are unverified.")
+    lines.append("")
+
+    def sort_key(f):
+        sev = (f.get("severity") or "low").lower()
+        return SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
+
+    grouped = {sev: [] for sev in SEVERITY_ORDER}
+    other = []
+    for f in findings:
+        sev = (f.get("severity") or "").lower()
+        (grouped[sev] if sev in grouped else other).append(f)
+
+    lines.append("## Detailed Findings")
+    lines.append("")
+
+    for sev in SEVERITY_ORDER + (["other"] if other else []):
+        group = other if sev == "other" else grouped[sev]
+        if not group:
+            continue
+        label = "Other" if sev == "other" else sev.capitalize()
+        lines.append(f"### {label} severity ({len(group)})")
+        lines.append("")
+        for f in group:
+            sev_tag = (f.get("severity") or "unknown").upper()
+            file_ = f.get("file", "unknown file")
+            line_no = f.get("line", "?")
+            category = f.get("category") or f.get("rule")
+            heading = f"#### [{sev_tag}] {file_}:{line_no}"
+            if category:
+                heading += f" &mdash; {category}"
+            lines.append(heading)
+            lines.append("")
+            lines.append(f"- **Location:** `{file_}`, line {line_no}")
+            if f.get("description"):
+                lines.append(f"- **Issue:** {f['description']}")
+            if f.get("evidence"):
+                lines.append(f"- **Evidence:** `{f['evidence']}`")
+            if f.get("impact"):
+                lines.append(f"- **Impact:** {f['impact']}")
+            if f.get("improvement"):
+                lines.append(f"- **Fix:** {f['improvement']}")
+            if f.get("ai_verdict"):
+                verdict_line = f"- **AI verdict:** {f['ai_verdict']}"
+                if f.get("ai_reason"):
+                    verdict_line += f" ({f['ai_reason']})"
+                lines.append(verdict_line)
+            if f.get("likely_test_fixture"):
+                lines.append("- _Likely a test fixture, not production code._")
+            lines.append("")
+
+    return "\n".join(lines)
+
 
 def parse_markdown_blocks(md_text):
-    """Small markdown parser tuned to the structure VULN_REPORT_SYSTEM_PROMPT
-    produces (## headings, "- " bullets, "1. " numbered lists, paragraphs).
-    Returns a list of (block_type, text) tuples for the docx/pdf builders."""
+    """Small markdown parser tuned to the structure this report's sections
+    produce (## / ### headings, "- " bullets, "1. " numbered lists,
+    paragraphs). Returns a list of (block_type, text) tuples for the
+    docx/pdf builders."""
     blocks = []
     for raw_line in md_text.splitlines():
         line = raw_line.rstrip()
         if not line.strip():
             continue
-        if line.startswith("## "):
+        if line.startswith("#### "):
+            blocks.append(("h4", line[5:].strip()))
+        elif line.startswith("### "):
+            blocks.append(("h3", line[4:].strip()))
+        elif line.startswith("## "):
             blocks.append(("h2", line[3:].strip()))
         elif line.startswith("# "):
             blocks.append(("h1", line[2:].strip()))
@@ -670,17 +791,39 @@ def strip_md_inline(text):
     return text
 
 
-def build_report_docx(md_text, title):
+FINDING_HEADING_RE = re.compile(r"^\[(CRITICAL|HIGH|MEDIUM|LOW|UNKNOWN)\]\s*(.*)$")
+
+
+def build_report_docx(md_text, title, subtitle=None):
     from docx import Document
+    from docx.shared import RGBColor
 
     doc = Document()
     doc.add_heading(title, level=0)
+    if subtitle:
+        sub = doc.add_paragraph(subtitle)
+        sub.runs[0].italic = True
+
     for kind, text in parse_markdown_blocks(md_text):
+        if kind == "h4":
+            m = FINDING_HEADING_RE.match(text)
+            p = doc.add_paragraph(style="Heading 4")
+            if m:
+                sev, rest = m.group(1), strip_md_inline(m.group(2))
+                hexcolor = SEVERITY_COLORS_HEX.get(sev.lower(), "374151")
+                run = p.add_run(sev + "  ")
+                run.font.color.rgb = RGBColor.from_string(hexcolor)
+                p.add_run(rest)
+            else:
+                p.add_run(strip_md_inline(text))
+            continue
         text = strip_md_inline(text)
         if kind == "h1":
             doc.add_heading(text, level=1)
         elif kind == "h2":
             doc.add_heading(text, level=2)
+        elif kind == "h3":
+            doc.add_heading(text, level=3)
         elif kind == "bullet":
             doc.add_paragraph(text, style="List Bullet")
         elif kind == "numbered":
@@ -692,19 +835,35 @@ def build_report_docx(md_text, title):
     return buf.getvalue()
 
 
-def build_report_pdf(md_text, title):
+def build_report_pdf(md_text, title, subtitle=None):
     from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib.pagesizes import letter
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=0.75 * inch, bottomMargin=0.75 * inch)
     styles = getSampleStyleSheet()
-    story = [Paragraph(xml_escape(title), styles["Title"]), Spacer(1, 12)]
+    heading3_finding_style = ParagraphStyle(
+        "Heading3Finding", parent=styles["Heading3"], spaceBefore=14, spaceAfter=4, fontSize=12,
+    )
+    story = [Paragraph(xml_escape(title), styles["Title"])]
+    if subtitle:
+        story.append(Paragraph(xml_escape(subtitle), styles["Italic"]))
+    story.append(Spacer(1, 12))
 
     for kind, text in parse_markdown_blocks(md_text):
+        if kind == "h4":
+            m = FINDING_HEADING_RE.match(text)
+            if m:
+                sev, rest = m.group(1), xml_escape(strip_md_inline(m.group(2)))
+                hexcolor = SEVERITY_COLORS_HEX.get(sev.lower(), "374151")
+                para_text = f'<font color="#{hexcolor}"><b>{xml_escape(sev)}</b></font>&nbsp;&nbsp;{rest}'
+            else:
+                para_text = xml_escape(strip_md_inline(text))
+            story.append(Paragraph(para_text, heading3_finding_style))
+            continue
         text = xml_escape(strip_md_inline(text))
         if kind == "h1":
             story.append(Spacer(1, 10))
@@ -712,6 +871,9 @@ def build_report_pdf(md_text, title):
         elif kind == "h2":
             story.append(Spacer(1, 8))
             story.append(Paragraph(text, styles["Heading2"]))
+        elif kind == "h3":
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(text, styles["Heading3"]))
         elif kind in ("bullet", "numbered"):
             story.append(Paragraph("• " + text, styles["Normal"]))
         else:
@@ -722,28 +884,50 @@ def build_report_pdf(md_text, title):
     return buf.getvalue()
 
 
-def build_report_html(md_text, title):
+def build_report_html(md_text, title, subtitle=None):
     import html as html_lib
     import markdown as md_lib
 
+    def colorize_heading(m):
+        sev = m.group(1)
+        hexcolor = SEVERITY_COLORS_HEX.get(sev.lower(), "374151")
+        return (
+            f'#### <span style="background:#{hexcolor}22;color:#{hexcolor};'
+            f'padding:2px 10px;border-radius:999px;font-size:0.68em;'
+            f'font-weight:700;letter-spacing:0.03em;">{sev}</span>'
+        )
+
+    md_text = re.sub(r"^#### \[(CRITICAL|HIGH|MEDIUM|LOW|UNKNOWN)\]", colorize_heading, md_text, flags=re.MULTILINE)
     body = md_lib.markdown(md_text, extensions=["extra"])
     safe_title = html_lib.escape(title)
+    # subtitle is built server-side with a literal `&middot;` entity, not
+    # user input, so it's passed through as-is rather than re-escaped
+    # (escaping would turn it into the literal text "&middot;").
+    safe_subtitle = subtitle or ""
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         f"<title>{safe_title}</title><style>"
         "body{font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:860px;"
-        "margin:2rem auto;padding:0 1.5rem;color:#1f2937;line-height:1.55;}"
-        "h1,h2{color:#111827;}"
-        "h2{border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-top:2rem;}"
+        "margin:2rem auto;padding:0 1.5rem;color:#1f2937;line-height:1.6;}"
+        "h1{margin-bottom:2px;}"
+        ".report-subtitle{color:#9ca3af;font-size:13px;margin-bottom:1.5rem;}"
+        "h2{color:#111827;border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-top:2.2rem;}"
+        "h3{margin-top:1.8rem;color:#374151;}"
+        "h4{display:flex;align-items:center;gap:10px;margin-top:1.4rem;font-size:15px;}"
         "code{background:#f3f4f6;padding:1px 4px;border-radius:4px;}"
-        f"</style></head><body><h1>{safe_title}</h1>{body}</body></html>"
+        "ul{padding-left:1.3rem;}"
+        f"</style></head><body><h1>{safe_title}</h1>"
+        f"<div class=\"report-subtitle\">{safe_subtitle}</div>{body}</body></html>"
     )
 
 
 @app.route("/api/vuln-scan/report", methods=["POST"])
 def vuln_scan_report():
-    """Generates a detailed, AI-written report from a completed vuln scan's
-    findings and returns it as a downloadable file in the requested format."""
+    """Generates a detailed vulnerability report from a completed scan: an
+    AI-written narrative (executive summary, risk overview, remediation
+    plan) followed by a deterministically-built, complete list of every
+    finding - so nothing gets summarized away. Returned as a downloadable
+    file in the requested format."""
     data = request.get_json(force=True)
     job_id = data.get("job_id", "")
     fmt = (data.get("format") or "markdown").lower()
@@ -752,7 +936,8 @@ def vuln_scan_report():
     if not job or job.get("status") != "done" or not job.get("result"):
         return jsonify({"error": "No completed scan found for that job_id."}), 400
 
-    findings = job["result"].get("findings", [])
+    result = job["result"]
+    findings = result.get("findings", [])
     if not findings:
         return jsonify({"error": "No findings to report on."}), 400
 
@@ -760,26 +945,40 @@ def vuln_scan_report():
     if not client:
         return jsonify({"error": "LLM_API_KEY is not configured on the server."}), 500
 
-    findings_json = json.dumps(findings, indent=2)[:REPORT_MAX_CHARS]
+    counts = count_findings_by_severity(findings)
+    summary_payload = {
+        "files_scanned": result.get("files_scanned"),
+        "exit_code": result.get("exit_code"),
+        "counts": counts,
+        "findings": findings,
+    }
+    findings_json = json.dumps(summary_payload, indent=2)[:REPORT_MAX_CHARS]
     try:
-        report_md = call_llm(client, model, findings_json, system_prompt=VULN_REPORT_SYSTEM_PROMPT)
+        narrative_md = call_llm(client, model, findings_json, system_prompt=VULN_REPORT_SYSTEM_PROMPT)
     except Exception as e:
         return jsonify({"error": f"Report generation failed: {e}"}), 500
 
+    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result)
+
     title = "Vulnerability Assessment Report"
+    subtitle = (
+        f"{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
+        f"&middot; generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+    subtitle_plain = subtitle.replace("&middot;", "-")
 
     if fmt == "markdown":
         return Response(report_md, mimetype="text/markdown",
                          headers={"Content-Disposition": "attachment; filename=vuln-report.md"})
     if fmt == "html":
-        return Response(build_report_html(report_md, title), mimetype="text/html",
+        return Response(build_report_html(report_md, title, subtitle), mimetype="text/html",
                          headers={"Content-Disposition": "attachment; filename=vuln-report.html"})
     if fmt == "docx":
-        return Response(build_report_docx(report_md, title),
+        return Response(build_report_docx(report_md, title, subtitle_plain),
                          mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                          headers={"Content-Disposition": "attachment; filename=vuln-report.docx"})
     if fmt == "pdf":
-        return Response(build_report_pdf(report_md, title), mimetype="application/pdf",
+        return Response(build_report_pdf(report_md, title, subtitle_plain), mimetype="application/pdf",
                          headers={"Content-Disposition": "attachment; filename=vuln-report.pdf"})
 
     return jsonify({"error": f"Unknown format: {fmt}"}), 400
