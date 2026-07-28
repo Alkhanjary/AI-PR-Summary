@@ -817,15 +817,40 @@ function renderLinesOverTimeChart(contributors, timeline) {
 
 function computeRowData(contributors, bugsByAuthor) {
   return contributors.map(c => {
-    const bugInfo = bugsByAuthor[c.login] || { total_bugs: 0, worst: 'low' };
+    const bugInfo = bugsByAuthor[c.login] || { total_bugs: 0, worst: 'low', findings: [] };
     const churn = c.additions > 0 ? Math.round((c.deletions / c.additions) * 100) : 0;
     return {
       login: c.login, avatar_url: c.avatar_url, commits: c.commits, additions: c.additions, deletions: c.deletions,
       avg_lines_per_commit: c.avg_lines_per_commit, test_coverage_pct: c.test_coverage_pct || 0,
       active_days_count: c.active_days_count || 0, churn_pct: churn, total_bugs: bugInfo.total_bugs, worst: bugInfo.worst,
       quality_score: c.commits > 0 ? (c.commits / (1 + bugInfo.total_bugs)) : 0,
+      findings: bugInfo.findings || [],
     };
   });
+}
+
+function severityBadgeSmall(level) {
+  const lvl = (level || 'low').toLowerCase();
+  const cls = lvl === 'critical' || lvl === 'high' ? 'risk-high' : lvl === 'medium' ? 'risk-medium' : 'risk-low';
+  return '<span class="badge ' + cls + '">' + lvl + '</span>';
+}
+
+function renderFindingsDetail(row) {
+  if (row.findings.length === 0) {
+    return '<div style="padding:12px;color:#9ca3af;font-size:13px;">No bugs found for this contributor.</div>';
+  }
+  return row.findings.map(f =>
+    '<div style="padding:10px 12px;border-top:1px solid #f0f0f5;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+    '<span style="font-family:monospace;font-size:12px;font-weight:700;">' + f.file + ':' + f.line + '</span>' +
+    severityBadgeSmall(f.severity) +
+    '</div>' +
+    '<div style="font-size:13px;color:#374151;margin-top:4px;">' + f.description + '</div>' +
+    (f.evidence ? '<div style="font-family:monospace;font-size:11px;color:#6b7280;margin-top:4px;">' + f.evidence + '</div>' : '') +
+    (f.impact ? '<div style="font-size:12px;color:#6b7280;margin-top:4px;"><b>Impact:</b> ' + f.impact + '</div>' : '') +
+    (f.improvement ? '<div style="font-size:12px;color:#6b7280;"><b>Fix:</b> ' + f.improvement + '</div>' : '') +
+    '</div>'
+  ).join('');
 }
 
 function renderMonitorTable() {
@@ -844,10 +869,10 @@ function renderMonitorTable() {
   const head = cols.map(col =>
     '<th data-key="' + col.key + '" style="padding:10px;text-align:right;cursor:pointer;user-select:none;">' + col.label + (monitorSortKey === col.key ? (monitorSortDir === -1 ? ' \u25bc' : ' \u25b2') : '') + '</th>'
   ).join('');
-  const rows = sorted.map(c => '<tr>' +
+  const rows = sorted.map((c, idx) => '<tr data-idx="' + idx + '" style="cursor:pointer;" title="Click to see this person\'s findings">' +
     '<td style="padding:10px;display:flex;align-items:center;gap:8px;">' +
     (c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:28px;height:28px;border-radius:50%;">' : '') +
-    '<b>' + c.login + '</b></td>' +
+    '<b>' + c.login + '</b> <span style="font-size:11px;color:#9ca3af;">&#9660;</span></td>' +
     '<td style="padding:10px;text-align:right;">' + c.commits + '</td>' +
     '<td style="padding:10px;text-align:right;"><span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></td>' +
     '<td style="padding:10px;text-align:right;">' + c.churn_pct + '%</td>' +
@@ -856,18 +881,24 @@ function renderMonitorTable() {
     '<td style="padding:10px;text-align:right;">' + c.active_days_count + '</td>' +
     '<td style="padding:10px;text-align:right;">' + c.total_bugs + '</td>' +
     '<td style="padding:10px;text-align:center;">' + riskBadgeFor(c.worst) + '</td>' +
-    '</tr>'
+    '</tr>' +
+    '<tr class="detail-row" data-detail-idx="' + idx + '" style="display:none;"><td colspan="9" style="padding:0;background:#f9f9fc;">' + renderFindingsDetail(c) + '</td></tr>'
   ).join('');
   monitorTableWrap.innerHTML =
     '<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);">' +
     '<thead><tr style="background:#f4f5fb;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
-
   monitorTableWrap.querySelectorAll('th[data-key]').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.key;
       if (monitorSortKey === key) monitorSortDir *= -1;
       else { monitorSortKey = key; monitorSortDir = -1; }
       renderMonitorTable();
+    });
+  });
+  monitorTableWrap.querySelectorAll('tr[data-idx]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const detail = monitorTableWrap.querySelector('tr[data-detail-idx="' + tr.dataset.idx + '"]');
+      if (detail) detail.style.display = detail.style.display === 'none' ? 'table-row' : 'none';
     });
   });
 }
