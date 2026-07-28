@@ -1,11 +1,13 @@
+import io
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import requests
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,6 +18,7 @@ from summarize_pr import (
     format_security_report,
     call_llm,
     SYSTEM_PROMPT,
+    VULN_REPORT_SYSTEM_PROMPT,
     MAX_CHARS,
 )
 from openai import OpenAI
@@ -53,6 +56,43 @@ def github_repos():
         headers=gh_headers(),
     )
     return jsonify(r.json()), r.status_code
+
+
+@app.route("/api/github/user")
+def github_user():
+    """Powers the Overview tab's user profile card (name, bio, follower
+    counts, account age, etc.) - separate from /api/github/repos, which
+    only returns the repo list used to compute aggregate stats."""
+    username = request.args.get("username", "")
+    if not username:
+        return jsonify({"error": "username required"}), 400
+    r = requests.get(
+        "https://api.github.com/users/" + username,
+        headers=gh_headers(),
+    )
+    return jsonify(r.json()), r.status_code
+
+
+@app.route("/api/github/search-users")
+def github_search_users():
+    """Powers the username autocomplete dropdown: proxies GitHub's user
+    search so the frontend doesn't need its own token/CORS handling."""
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"items": []})
+    r = requests.get(
+        "https://api.github.com/search/users",
+        params={"q": q, "per_page": 6},
+        headers=gh_headers(),
+    )
+    if not r.ok:
+        return jsonify({"items": []}), r.status_code
+    data = r.json()
+    items = [
+        {"login": item["login"], "avatar_url": item.get("avatar_url", "")}
+        for item in data.get("items", [])
+    ]
+    return jsonify({"items": items})
 
 
 CACHE_DIR = Path(__file__).resolve().parent / ".repo-cache"
@@ -567,6 +607,152 @@ def vuln_scan_status(job_id):
         "error": job["error"],
         "elapsed": round(time.time() - job["started"], 1),
     })
+
+
+REPORT_MAX_CHARS = 60000
+
+
+def parse_markdown_blocks(md_text):
+    """Small markdown parser tuned to the structure VULN_REPORT_SYSTEM_PROMPT
+    produces (## headings, "- " bullets, "1. " numbered lists, paragraphs).
+    Returns a list of (block_type, text) tuples for the docx/pdf builders."""
+    blocks = []
+    for raw_line in md_text.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        if line.startswith("## "):
+            blocks.append(("h2", line[3:].strip()))
+        elif line.startswith("# "):
+            blocks.append(("h1", line[2:].strip()))
+        elif line.lstrip().startswith("- "):
+            blocks.append(("bullet", line.lstrip()[2:].strip()))
+        elif re.match(r"^\d+\.\s", line.lstrip()):
+            blocks.append(("numbered", re.sub(r"^\d+\.\s", "", line.lstrip())))
+        else:
+            blocks.append(("p", line.strip()))
+    return blocks
+
+
+def strip_md_inline(text):
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"`(.+?)`", r"\1", text)
+    return text
+
+
+def build_report_docx(md_text, title):
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading(title, level=0)
+    for kind, text in parse_markdown_blocks(md_text):
+        text = strip_md_inline(text)
+        if kind == "h1":
+            doc.add_heading(text, level=1)
+        elif kind == "h2":
+            doc.add_heading(text, level=2)
+        elif kind == "bullet":
+            doc.add_paragraph(text, style="List Bullet")
+        elif kind == "numbered":
+            doc.add_paragraph(text, style="List Number")
+        else:
+            doc.add_paragraph(text)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def build_report_pdf(md_text, title):
+    from xml.sax.saxutils import escape as xml_escape
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=0.75 * inch, bottomMargin=0.75 * inch)
+    styles = getSampleStyleSheet()
+    story = [Paragraph(xml_escape(title), styles["Title"]), Spacer(1, 12)]
+
+    for kind, text in parse_markdown_blocks(md_text):
+        text = xml_escape(strip_md_inline(text))
+        if kind == "h1":
+            story.append(Spacer(1, 10))
+            story.append(Paragraph(text, styles["Heading1"]))
+        elif kind == "h2":
+            story.append(Spacer(1, 8))
+            story.append(Paragraph(text, styles["Heading2"]))
+        elif kind in ("bullet", "numbered"):
+            story.append(Paragraph("• " + text, styles["Normal"]))
+        else:
+            story.append(Paragraph(text, styles["Normal"]))
+        story.append(Spacer(1, 4))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def build_report_html(md_text, title):
+    import html as html_lib
+    import markdown as md_lib
+
+    body = md_lib.markdown(md_text, extensions=["extra"])
+    safe_title = html_lib.escape(title)
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{safe_title}</title><style>"
+        "body{font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:860px;"
+        "margin:2rem auto;padding:0 1.5rem;color:#1f2937;line-height:1.55;}"
+        "h1,h2{color:#111827;}"
+        "h2{border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-top:2rem;}"
+        "code{background:#f3f4f6;padding:1px 4px;border-radius:4px;}"
+        f"</style></head><body><h1>{safe_title}</h1>{body}</body></html>"
+    )
+
+
+@app.route("/api/vuln-scan/report", methods=["POST"])
+def vuln_scan_report():
+    """Generates a detailed, AI-written report from a completed vuln scan's
+    findings and returns it as a downloadable file in the requested format."""
+    data = request.get_json(force=True)
+    job_id = data.get("job_id", "")
+    fmt = (data.get("format") or "markdown").lower()
+
+    job = VULN_JOBS.get(job_id)
+    if not job or job.get("status") != "done" or not job.get("result"):
+        return jsonify({"error": "No completed scan found for that job_id."}), 400
+
+    findings = job["result"].get("findings", [])
+    if not findings:
+        return jsonify({"error": "No findings to report on."}), 400
+
+    client, model = get_client()
+    if not client:
+        return jsonify({"error": "LLM_API_KEY is not configured on the server."}), 500
+
+    findings_json = json.dumps(findings, indent=2)[:REPORT_MAX_CHARS]
+    try:
+        report_md = call_llm(client, model, findings_json, system_prompt=VULN_REPORT_SYSTEM_PROMPT)
+    except Exception as e:
+        return jsonify({"error": f"Report generation failed: {e}"}), 500
+
+    title = "Vulnerability Assessment Report"
+
+    if fmt == "markdown":
+        return Response(report_md, mimetype="text/markdown",
+                         headers={"Content-Disposition": "attachment; filename=vuln-report.md"})
+    if fmt == "html":
+        return Response(build_report_html(report_md, title), mimetype="text/html",
+                         headers={"Content-Disposition": "attachment; filename=vuln-report.html"})
+    if fmt == "docx":
+        return Response(build_report_docx(report_md, title),
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         headers={"Content-Disposition": "attachment; filename=vuln-report.docx"})
+    if fmt == "pdf":
+        return Response(build_report_pdf(report_md, title), mimetype="application/pdf",
+                         headers={"Content-Disposition": "attachment; filename=vuln-report.pdf"})
+
+    return jsonify({"error": f"Unknown format: {fmt}"}), 400
 
 
 if __name__ == "__main__":

@@ -7,24 +7,107 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; }
-  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1300px; margin: 0 auto; padding: 0 2rem 4rem; color: #1a1a1a; background: #f4f5fb; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a1a1a;
+    background:
+      radial-gradient(circle at 12% 0%, rgba(124,58,237,0.07), transparent 42%),
+      radial-gradient(circle at 88% 12%, rgba(79,70,229,0.06), transparent 38%),
+      radial-gradient(circle at 50% 100%, rgba(168,85,247,0.05), transparent 45%),
+      #f4f5fb;
+    background-attachment: fixed;
+  }
+
+  .app-shell { display: flex; align-items: stretch; min-height: 100vh; }
+  .sidebar { width: 72px; flex-shrink: 0; background: linear-gradient(180deg,#1e1b4b,#312e81); display: flex; flex-direction: column; padding: 1.4rem 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease; z-index: 30; }
+  .sidebar:hover, .sidebar:focus-within { width: 226px; overflow: visible; }
+  .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 22px 1.5rem; white-space: nowrap; }
+  .sidebar-brand-mark { width: 34px; height: 34px; border-radius: 9px; background: #fff; color: #4f46e5; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex-shrink: 0; }
+  .sidebar-brand-text { color: #fff; font-weight: 700; font-size: 14px; opacity: 0; transition: opacity 0.15s ease; }
+  .sidebar:hover .sidebar-brand-text { opacity: 1; }
+  .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 14px; padding: 12px 22px; color: rgba(255,255,255,0.62); cursor: pointer; white-space: nowrap; position: relative; font-size: 14px; font-weight: 600; transition: background 0.15s ease, color 0.15s ease; }
+  .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .nav-item.active { color: #fff; background: rgba(255,255,255,0.12); }
+  .nav-item.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; background: #a855f7; border-radius: 0 4px 4px 0; }
+  .nav-icon { width: 20px; height: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .nav-icon svg { width: 20px; height: 20px; }
+  .nav-label { opacity: 0; transform: translateX(-6px); transition: opacity 0.15s ease, transform 0.15s ease; }
+  .sidebar:hover .nav-label { opacity: 1; transform: translateX(0); }
+
+  .main-content { flex: 1; min-width: 0; max-width: 1300px; padding: 0 2rem 4rem; }
+
+  .username-field { position: relative; }
+  .username-suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 240px; background: #fff; border: 1px solid #e5e5f0; border-radius: 10px; box-shadow: 0 10px 24px rgba(20,20,50,0.12); z-index: 40; overflow: hidden; }
+  .username-suggestions.open { display: block; }
+  .username-suggestion { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; color: #374151; }
+  .username-suggestion:hover, .username-suggestion.highlighted { background: #f2f1ff; color: #3730a3; }
+  .username-suggestion img { width: 22px; height: 22px; border-radius: 50%; }
+
+  .profile-card { display: flex; gap: 22px; align-items: center; background: linear-gradient(135deg,#eef0ff,#faf9ff); border: 1px solid #e0e0f5; border-radius: 16px; padding: 1.5rem 1.75rem; margin-bottom: 1.5rem; }
+  .profile-avatar { width: 84px; height: 84px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 4px 14px rgba(79,70,229,0.25); flex-shrink: 0; }
+  .profile-info { flex: 1; min-width: 0; }
+  .profile-name { font-size: 19px; font-weight: 800; color: #1a1a1a; }
+  .profile-login { font-size: 14px; font-weight: 500; color: #9ca3af; margin-left: 4px; }
+  .profile-bio { font-size: 13.5px; color: #4b5563; margin-top: 4px; }
+  .profile-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: #6b7280; margin-top: 10px; }
+  .profile-meta a { color: #4f46e5; text-decoration: none; font-weight: 600; }
+  .profile-meta a:hover { text-decoration: underline; }
   header { padding: 2.25rem 2rem; margin: 0 -2rem 1.5rem; background: linear-gradient(135deg,#4f46e5,#7c3aed 60%,#a855f7); border-radius: 0 0 20px 20px; box-shadow: 0 8px 24px rgba(79,70,229,0.25); }
   h1 { font-size: 26px; font-weight: 800; margin: 0 0 4px; color: #fff; letter-spacing: -0.02em; }
   .subtitle { font-size: 13px; color: rgba(255,255,255,0.88); }
   .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
   input, select { padding: 9px 12px; border: 1px solid #d0d0e0; border-radius: 8px; font-size: 14px; background: #fff; transition: all 0.15s ease; }
   input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
+  select { cursor: pointer; font-weight: 500; }
   button { padding: 9px 16px; border: none; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.15s ease; }
   button:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(79,70,229,0.3); }
   button:active { transform: translateY(0); }
+  button:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; transform: none; box-shadow: none; }
   #load-repos-btn, #load-branches-btn { background: #0891b2; }
   #load-repos-btn:hover, #load-branches-btn:hover { background: #0e7490; box-shadow: 0 4px 10px rgba(8,145,178,0.3); }
   .status { font-size: 13px; color: #888; margin-bottom: 1rem; }
 
-  .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e5e5f0; margin-bottom: 1.5rem; overflow-x: auto; }
-  .tab { padding: 10px 18px; font-size: 14px; font-weight: 600; color: #9ca3af; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; white-space: nowrap; transition: color 0.15s ease, border-color 0.15s ease; }
-  .tab:hover { color: #6366f1; }
-  .tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+  /* Pill-style checkbox/radio labels used throughout the tool panels */
+  .row label:has(> input[type="checkbox"]), .row label:has(> input[type="radio"]) {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 8px 14px;
+    border: 1px solid #e2e2f0; border-radius: 999px; background: #fff; cursor: pointer;
+    color: #4b5563; transition: all 0.15s ease; user-select: none;
+  }
+  .row label:has(> input[type="checkbox"]):hover, .row label:has(> input[type="radio"]):hover {
+    border-color: #c7c7f5; background: #f8f7ff;
+  }
+  .row label:has(> input:checked) { background: #eef0ff; border-color: #4f46e5; color: #3730a3; font-weight: 600; }
+  .row label:has(> input:disabled) { opacity: 0.55; cursor: not-allowed; }
+  .row label > input[type="checkbox"], .row label > input[type="radio"] { accent-color: #4f46e5; margin: 0; }
+
+  .field-group { display: flex; flex-direction: column; gap: 4px; }
+  .field-label { font-size: 11px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.04em; }
+  .hint-text { font-size: 12px; color: #9ca3af; }
+
+  .panel-card { background: #fff; border: 1px solid #e5e5ef; border-radius: 14px; padding: 1.25rem 1.4rem; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(20,20,50,0.04); }
+  .panel-card .row:first-child { margin-top: 0; }
+  .panel-card .row:last-child { margin-bottom: 0; }
+  .panel-card-title { font-size: 15px; font-weight: 700; color: #1a1a1a; margin-bottom: 2px; }
+  .panel-card-desc { font-size: 12.5px; color: #9ca3af; margin-bottom: 4px; }
+  .report-card { background: linear-gradient(135deg,#f8f6ff,#fdfcff); border: 1px solid #ddd6fe; }
+
+  .risk-critical { background: #4c0519; color: #fff; }
+  .metric.sev-critical { border-top: 3px solid #4c0519; }
+  .metric.sev-high { border-top: 3px solid #dc2626; }
+  .metric.sev-medium { border-top: 3px solid #f59e0b; }
+  .metric.sev-low { border-top: 3px solid #22c55e; }
+  .metric.sev-critical .metric-value { color: #4c0519; }
+  .metric.sev-high .metric-value { color: #dc2626; }
+  .metric.sev-medium .metric-value { color: #b45309; }
+  .metric.sev-low .metric-value { color: #15803d; }
+
+  .finding-card { border-left: 4px solid #e5e5e5; }
+  .finding-card.sev-critical { border-left-color: #4c0519; }
+  .finding-card.sev-high { border-left-color: #dc2626; }
+  .finding-card.sev-medium { border-left-color: #f59e0b; }
+  .finding-card.sev-low { border-left-color: #22c55e; }
+
   .panel { display: none; animation: fadeIn 0.25s ease; }
   .panel.active { display: block; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -75,37 +158,76 @@
 </head>
 <body>
 
-<header>
-  <h1>AI PR Summary Dashboard</h1>
-  <div class="subtitle">Live activity, risk trends, and commit history from GitHub</div>
-</header>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-mark">AI</div>
+      <div class="sidebar-brand-text">PR Summary</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" data-panel="overview">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+        <span class="nav-label">Overview</span>
+      </div>
+      <div class="nav-item" data-panel="monitor">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 12 8 12 10 6 14 18 16 12 21 12"/></svg></span>
+        <span class="nav-label">Monitor</span>
+      </div>
+      <div class="nav-item" data-panel="prs">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="7" r="2"/><path d="M7 8v8"/><path d="M17 9a6.5 6.5 0 0 1-6.5 6.5"/></svg></span>
+        <span class="nav-label">Pull requests</span>
+      </div>
+      <div class="nav-item" data-panel="commits">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h6"/><path d="M15 12h6"/></svg></span>
+        <span class="nav-label">Commits</span>
+      </div>
+      <div class="nav-item" data-panel="run">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
+        <span class="nav-label">Run scan</span>
+      </div>
+      <div class="nav-item" data-panel="vuln">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg></span>
+        <span class="nav-label">Vuln Scan</span>
+      </div>
+    </div>
+  </nav>
 
-<div class="row">
-  <input id="username-input" type="text" value="" placeholder="GitHub username">
-  <button id="load-repos-btn">Load repos</button>
-  <select id="repo-select" style="max-width:220px;"><option>(click Load repos)</option></select>
-  <button id="refresh-btn">Refresh</button>
-</div>
+  <div class="main-content">
+    <header>
+      <h1>AI PR Summary Dashboard</h1>
+      <div class="subtitle">Live activity, risk trends, and commit history from GitHub</div>
+    </header>
 
-<div class="status" id="status"></div>
+    <div class="row">
+      <div class="username-field">
+        <input id="username-input" type="text" value="" placeholder="GitHub username, then press Enter" autocomplete="off">
+        <div class="username-suggestions" id="username-suggestions"></div>
+      </div>
+      <select id="repo-select" style="max-width:220px;"><option>(enter a username)</option></select>
+      <button id="refresh-btn">Refresh</button>
+    </div>
 
-<div class="tabs">
-  <div class="tab active" data-panel="overview">Overview</div>
-  <div class="tab" data-panel="monitor">Monitor</div>
-  <div class="tab" data-panel="prs">Pull requests</div>
-  <div class="tab" data-panel="commits">Commits</div>
-  <div class="tab" data-panel="run">Run scan</div>
-  <div class="tab" data-panel="vuln">Vuln Scan</div>
-</div>
+    <div class="status" id="status"></div>
 
-<div class="panel active" id="panel-overview">
-  <div class="metrics" id="metrics"></div>
-  <div class="chart-wrap">
-    <canvas id="riskChart" role="img" aria-label="Bar chart of pull request counts by risk level"></canvas>
+    <div class="panel active" id="panel-overview">
+  <div id="user-profile-card" style="display:none;"></div>
+  <div class="metrics" id="user-metrics" style="display:none;"></div>
+  <div class="chart-grid" id="user-chart-grid" style="display:none;">
+    <div class="chart-wrap">
+      <canvas id="userLanguageChart" role="img" aria-label="Doughnut chart of primary language across repos"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="userRepoTimelineChart" role="img" aria-label="Bar chart of repos created per year"></canvas>
+    </div>
   </div>
+  <div id="user-top-repos"></div>
 </div>
 
 <div class="panel" id="panel-prs">
+  <div class="metrics" id="metrics"></div>
+  <div class="chart-wrap" style="margin-bottom:1.5rem;">
+    <canvas id="riskChart" role="img" aria-label="Bar chart of pull request counts by risk level"></canvas>
+  </div>
   <div id="list"></div>
 </div>
 
@@ -114,50 +236,76 @@
 </div>
 
 <div class="panel" id="panel-run">
-  <div class="row" style="align-items:center;">
-    <span style="font-size:13px;color:#666;">Pull request:</span>
-    <select id="pr-select" style="max-width:320px;"><option>Loading...</option></select>
-  </div>
-  <textarea id="diff-input" placeholder="Paste a diff here, or click 'Load my current uncommitted diff' above" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
-  <div class="row">
-    <button id="run-scan-btn">Run scan (AI summary + security)</button>
+  <div class="panel-card">
+    <div class="panel-card-title">Generate PR summary</div>
+    <div class="panel-card-desc">Pick an open pull request below (or paste a diff) to have the AI write a summary, impact, risk, and a security review for it &mdash; the same write-up the GitHub Action posts automatically as a PR comment.</div>
+    <div class="row">
+      <div class="field-group">
+        <span class="field-label">Pull request</span>
+        <select id="pr-select" style="max-width:320px;"><option>Loading...</option></select>
+      </div>
+    </div>
+    <textarea id="diff-input" placeholder="A diff loads here automatically when you pick a pull request above, or paste your own diff (e.g. from `git diff`) to summarize instead" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
+    <div class="row">
+      <button id="run-scan-btn">Generate summary & security review</button>
+    </div>
   </div>
   <div class="status" id="run-status"></div>
   <div class="card" id="run-result" style="display:none;"></div>
 </div>
 
 <div class="panel" id="panel-vuln">
-  <div class="row" style="align-items:center;">
-    <label style="font-size:13px;"><input type="radio" name="vuln-source" id="vuln-source-repo" value="repo" checked> Scan selected repo</label>
-    <label style="font-size:13px;"><input type="radio" name="vuln-source" id="vuln-source-upload" value="upload"> Upload folder from my computer</label>
+  <div class="panel-card">
+    <div class="panel-card-title">Source</div>
+    <div class="panel-card-desc">Pick what the scanner should look at.</div>
+    <div class="row">
+      <label><input type="radio" name="vuln-source" id="vuln-source-repo" value="repo" checked><span>Scan selected repo</span></label>
+      <label><input type="radio" name="vuln-source" id="vuln-source-upload" value="upload"><span>Upload folder from my computer</span></label>
+    </div>
+    <div class="row" id="vuln-upload-row" style="display:none;">
+      <input type="file" id="vuln-folder-input" webkitdirectory directory multiple>
+      <span id="vuln-upload-count" class="hint-text"></span>
+    </div>
   </div>
-  <div class="row" id="vuln-upload-row" style="display:none;">
-    <input type="file" id="vuln-folder-input" webkitdirectory directory multiple>
-    <span id="vuln-upload-count" style="font-size:12px;color:#9ca3af;"></span>
+
+  <div class="panel-card">
+    <div class="panel-card-title">Scan options</div>
+    <div class="row">
+      <label><input type="checkbox" id="vuln-scan-code" checked><span>Code</span></label>
+      <label><input type="checkbox" id="vuln-scan-web"><span>Web (not yet implemented)</span></label>
+      <label><input type="checkbox" id="vuln-scan-network"><span>Network (not yet implemented)</span></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="vuln-ai" checked><span>AI verification (slower, more accurate)</span></label>
+      <label><input type="checkbox" id="vuln-include-tests"><span>Include test files in gate</span></label>
+    </div>
+    <div class="row">
+      <button id="run-vuln-btn">Run vulnerability scan</button>
+    </div>
   </div>
-  <div class="row" style="align-items:center;flex-wrap:wrap;">
-    <span style="font-size:13px;color:#666;">Scan:</span>
-    <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-code" checked> code</label>
-    <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-web"> web (not yet implemented)</label>
-    <label style="font-size:13px;"><input type="checkbox" id="vuln-scan-network"> network (not yet implemented)</label>
-  </div>
-  <div class="row" style="align-items:center;flex-wrap:wrap;">
-    <span style="font-size:13px;color:#666;">Fail on:</span>
-    <select id="vuln-fail-on" style="max-width:140px;">
-      <option value="critical">critical</option>
-      <option value="high" selected>high</option>
-      <option value="medium">medium</option>
-      <option value="low">low</option>
-      <option value="none">none</option>
-    </select>
-    <label style="font-size:13px;"><input type="checkbox" id="vuln-ai" checked> AI verification (slower, more accurate)</label>
-    <label style="font-size:13px;"><input type="checkbox" id="vuln-include-tests"> include test files in gate</label>
-  </div>
-  <div class="row">
-    <button id="run-vuln-btn">Run vulnerability scan</button>
-  </div>
+
   <div class="status" id="vuln-status"></div>
-  <div id="vuln-summary" style="display:flex;gap:8px;margin-bottom:1rem;"></div>
+  <div id="vuln-summary" class="metrics" style="display:none;"></div>
+
+  <div class="panel-card report-card" id="vuln-report-row" style="display:none;">
+    <div class="panel-card-title">AI-generated report</div>
+    <div class="panel-card-desc">Turn these findings into a detailed write-up you can share.</div>
+    <div class="row">
+      <label><input type="checkbox" id="vuln-report-toggle"><span>Generate detailed AI report</span></label>
+      <div class="field-group">
+        <span class="field-label">Format</span>
+        <select id="vuln-report-format" style="max-width:160px;">
+          <option value="pdf">PDF</option>
+          <option value="docx">Word (.docx)</option>
+          <option value="markdown">Markdown</option>
+          <option value="html">HTML</option>
+        </select>
+      </div>
+      <button id="vuln-report-btn">Generate & download</button>
+      <span id="vuln-report-status" class="hint-text"></span>
+    </div>
+  </div>
+
   <div id="vuln-results"></div>
 </div>
 
@@ -207,14 +355,19 @@
   <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
 </div>
 
+  </div>
+</div>
+
 <script>
 const usernameInput = document.getElementById('username-input');
-const loadReposBtn = document.getElementById('load-repos-btn');
 const repoSelect = document.getElementById('repo-select');
+const usernameSuggestions = document.getElementById('username-suggestions');
+let repoCache = [];
 
 async function loadRepos() {
   const username = usernameInput.value.trim();
   if (!username) { statusEl.textContent = 'Enter a GitHub username'; return; }
+  closeSuggestions();
   statusEl.textContent = 'Loading repos for ' + username + '...';
   try {
     const res = await fetch(API_BASE + '/api/github/repos?username=' + encodeURIComponent(username));
@@ -223,23 +376,64 @@ async function loadRepos() {
       statusEl.textContent = repos.message || 'Could not load repos.';
       return;
     }
+    repoCache = repos;
     repoSelect.innerHTML = '<option value="">-- Select a repo --</option>' + repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
     statusEl.textContent = repos.length + ' repos loaded.';
+    loadUserOverview(username);
+    if (repos.length > 0) {
+      repoSelect.value = repos[0].full_name;
+      loadDashboard();
+      loadPRsForScan();
+    }
   } catch (e) {
     statusEl.textContent = 'Could not reach the local server. Is server.py running?';
   }
 }
-loadReposBtn.addEventListener('click', loadRepos);
-usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadReposAndRefresh(); });
+usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadRepos(); });
 repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); } });
 
-async function loadReposAndRefresh() {
-  await loadRepos();
-  if (repoSelect.options.length > 0 && repoSelect.value) {
-    loadDashboard();
-    loadPRsForScan();
+function closeSuggestions() {
+  usernameSuggestions.classList.remove('open');
+  usernameSuggestions.innerHTML = '';
+}
+
+let usernameSuggestTimer = null;
+usernameInput.addEventListener('input', () => {
+  clearTimeout(usernameSuggestTimer);
+  const q = usernameInput.value.trim();
+  if (q.length < 2) { closeSuggestions(); return; }
+  usernameSuggestTimer = setTimeout(() => fetchUsernameSuggestions(q), 250);
+});
+
+async function fetchUsernameSuggestions(q) {
+  try {
+    const res = await fetch(API_BASE + '/api/github/search-users?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    const items = data.items || [];
+    if (usernameInput.value.trim() !== q) return;
+    if (items.length === 0) { closeSuggestions(); return; }
+    usernameSuggestions.innerHTML = items.map(u =>
+      '<div class="username-suggestion" data-login="' + u.login + '"><img src="' + u.avatar_url + '" alt=""><span>' + u.login + '</span></div>'
+    ).join('');
+    usernameSuggestions.classList.add('open');
+  } catch (e) {
+    closeSuggestions();
   }
 }
+
+usernameSuggestions.addEventListener('click', e => {
+  const item = e.target.closest('.username-suggestion');
+  if (!item) return;
+  usernameInput.value = item.dataset.login;
+  closeSuggestions();
+  loadRepos();
+});
+
+document.addEventListener('click', e => {
+  if (e.target !== usernameInput && !usernameSuggestions.contains(e.target)) closeSuggestions();
+});
+usernameInput.addEventListener('keydown', e => { if (e.key === 'Escape') closeSuggestions(); });
+
 const API_BASE = 'http://127.0.0.1:5000';
 function ghFetch(url) {
   return fetch(url);
@@ -251,9 +445,9 @@ const listEl = document.getElementById('list');
 const commitsEl = document.getElementById('commits');
 let chartInstance = null;
 
-document.querySelectorAll('.tab').forEach(tab => {
+document.querySelectorAll('.nav-item').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
@@ -310,6 +504,119 @@ function renderChart(counts) {
       scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
     }
   });
+}
+
+let langChartInstance = null;
+let repoTimelineChartInstance = null;
+
+async function loadUserOverview(username) {
+  const profileCard = document.getElementById('user-profile-card');
+  const userMetrics = document.getElementById('user-metrics');
+  const chartGrid = document.getElementById('user-chart-grid');
+  const topReposEl = document.getElementById('user-top-repos');
+
+  profileCard.style.display = 'block';
+  profileCard.innerHTML = '<div class="card">Loading profile for ' + username + '...</div>';
+  userMetrics.style.display = 'none';
+  chartGrid.style.display = 'none';
+  topReposEl.innerHTML = '';
+
+  try {
+    const userRes = await fetch(API_BASE + '/api/github/user?username=' + encodeURIComponent(username));
+    const user = await userRes.json();
+    if (!userRes.ok || user.message) {
+      profileCard.innerHTML = '<div class="card">Could not load profile for "' + username + '".</div>';
+      return;
+    }
+
+    const repos = repoCache.filter(r => !r.fork);
+    const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0);
+    const totalForks = repos.reduce((s, r) => s + (r.forks_count || 0), 0);
+    const totalIssues = repos.reduce((s, r) => s + (r.open_issues_count || 0), 0);
+
+    profileCard.innerHTML =
+      '<div class="profile-card">' +
+        '<img class="profile-avatar" src="' + user.avatar_url + '" alt="">' +
+        '<div class="profile-info">' +
+          '<div class="profile-name">' + (user.name || user.login) + '<span class="profile-login">@' + user.login + '</span></div>' +
+          (user.bio ? '<div class="profile-bio">' + user.bio + '</div>' : '') +
+          '<div class="profile-meta">' +
+            (user.company ? '<span>' + user.company + '</span>' : '') +
+            (user.location ? '<span>' + user.location + '</span>' : '') +
+            '<span>Joined ' + new Date(user.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) + '</span>' +
+            '<a href="' + user.html_url + '" target="_blank">View on GitHub &rarr;</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    userMetrics.style.display = 'grid';
+    userMetrics.innerHTML =
+      metricCard('Public repos', user.public_repos) +
+      metricCard('Followers', user.followers) +
+      metricCard('Following', user.following) +
+      metricCard('Total stars', totalStars) +
+      metricCard('Total forks', totalForks) +
+      metricCard('Open issues', totalIssues);
+
+    const langCounts = {};
+    repos.forEach(r => { if (r.language) langCounts[r.language] = (langCounts[r.language] || 0) + 1; });
+    const langEntries = Object.entries(langCounts).sort((a, b) => b[1] - a[1]);
+    const topLangs = langEntries.slice(0, 6);
+    const otherCount = langEntries.slice(6).reduce((s, [, n]) => s + n, 0);
+    if (otherCount > 0) topLangs.push(['Other', otherCount]);
+
+    const yearCounts = {};
+    repos.forEach(r => { const y = new Date(r.created_at).getFullYear(); yearCounts[y] = (yearCounts[y] || 0) + 1; });
+    const years = Object.keys(yearCounts).sort();
+
+    if (topLangs.length > 0 || years.length > 0) {
+      chartGrid.style.display = 'grid';
+
+      const langColors = ['#4f46e5', '#7c3aed', '#a855f7', '#0891b2', '#f59e0b', '#22c55e', '#64748b'];
+      if (langChartInstance) langChartInstance.destroy();
+      langChartInstance = new Chart(document.getElementById('userLanguageChart'), {
+        type: 'doughnut',
+        data: {
+          labels: topLangs.map(([l]) => l),
+          datasets: [{ data: topLangs.map(([, n]) => n), backgroundColor: langColors, borderWidth: 2, borderColor: '#fff' }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+            title: { display: true, text: 'Languages used', font: { size: 12 } }
+          }
+        }
+      });
+
+      if (repoTimelineChartInstance) repoTimelineChartInstance.destroy();
+      repoTimelineChartInstance = new Chart(document.getElementById('userRepoTimelineChart'), {
+        type: 'bar',
+        data: { labels: years, datasets: [{ data: years.map(y => yearCounts[y]), backgroundColor: '#7c3aed', borderRadius: 4, maxBarThickness: 36 }] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false }, title: { display: true, text: 'Repos created per year', font: { size: 12 } } },
+          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+        }
+      });
+    }
+
+    const topRepos = [...repos].sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0)).slice(0, 5);
+    topReposEl.innerHTML = topRepos.length === 0 ? '' : '<div class="section-label">Top repositories</div>' + topRepos.map(r =>
+      '<div class="card">' +
+        '<div class="top">' +
+          '<a href="' + r.html_url + '" target="_blank" class="title">' + r.name + '</a>' +
+          (r.language ? '<span class="badge state-merged">' + r.language + '</span>' : '') +
+        '</div>' +
+        (r.description ? '<div class="section-body">' + r.description + '</div>' : '') +
+        '<div class="meta-row">&#9733; ' + (r.stargazers_count || 0) + ' &middot; forks ' + (r.forks_count || 0) + ' &middot; updated ' + formatDate(r.updated_at) + '</div>' +
+      '</div>'
+    ).join('');
+  } catch (e) {
+    profileCard.innerHTML = '<div class="card">Could not reach the local server. Is server.py running?</div>';
+  }
 }
 
 async function loadCommits(repo) {
@@ -618,11 +925,62 @@ const runVulnBtn = document.getElementById('run-vuln-btn');
 const vulnStatus = document.getElementById('vuln-status');
 const vulnSummary = document.getElementById('vuln-summary');
 const vulnResults = document.getElementById('vuln-results');
+const vulnReportRow = document.getElementById('vuln-report-row');
+const vulnReportToggle = document.getElementById('vuln-report-toggle');
+const vulnReportFormat = document.getElementById('vuln-report-format');
+const vulnReportBtn = document.getElementById('vuln-report-btn');
+const vulnReportStatus = document.getElementById('vuln-report-status');
+let lastVulnJobId = null;
 
+function updateVulnReportControls() {
+  const on = vulnReportToggle.checked;
+  vulnReportFormat.disabled = !on;
+  vulnReportBtn.disabled = !on;
+}
+vulnReportToggle.addEventListener('change', updateVulnReportControls);
+updateVulnReportControls();
+
+vulnReportBtn.addEventListener('click', async () => {
+  if (!lastVulnJobId) { vulnReportStatus.textContent = 'Run a scan first.'; return; }
+  const format = vulnReportFormat.value;
+  vulnReportStatus.textContent = 'Generating report with AI... this can take a moment.';
+  vulnReportBtn.disabled = true;
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: lastVulnJobId, format })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      vulnReportStatus.textContent = errData.error || 'Could not generate report.';
+      return;
+    }
+    const blob = await res.blob();
+    const ext = { pdf: 'pdf', docx: 'docx', markdown: 'md', html: 'html' }[format] || 'txt';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'vuln-report.' + ext;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    vulnReportStatus.textContent = 'Report downloaded.';
+  } catch (e) {
+    vulnReportStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  } finally {
+    vulnReportBtn.disabled = !vulnReportToggle.checked;
+  }
+});
+
+function vulnSeverityClass(level) {
+  const lvl = (level || '').toLowerCase();
+  return lvl === 'critical' ? 'critical' : lvl === 'high' ? 'high' : lvl === 'medium' ? 'medium' : 'low';
+}
 function vulnSeverityBadge(level) {
   const lvl = (level || '').toLowerCase();
-  const cls = lvl === 'critical' || lvl === 'high' ? 'risk-high' : lvl === 'medium' ? 'risk-medium' : 'risk-low';
-  return '<span class="badge ' + cls + '">' + lvl + '</span>';
+  return '<span class="badge risk-' + vulnSeverityClass(level) + '">' + lvl + '</span>';
 }
 
 const vulnSourceRepo = document.getElementById('vuln-source-repo');
@@ -681,7 +1039,7 @@ runVulnBtn.addEventListener('click', async () => {
     repo: useUpload ? '' : repo,
     ai: document.getElementById('vuln-ai').checked,
     scan_types: scanTypes,
-    fail_on: document.getElementById('vuln-fail-on').value,
+    fail_on: 'high',
     include_test_files: document.getElementById('vuln-include-tests').checked,
   };
 
@@ -691,7 +1049,11 @@ runVulnBtn.addEventListener('click', async () => {
   }
 
   vulnSummary.innerHTML = '';
+  vulnSummary.style.display = 'none';
   vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
+  vulnReportRow.style.display = 'none';
+  lastVulnJobId = null;
+  vulnReportStatus.textContent = '';
 
   try {
     const startRes = await fetch(API_BASE + '/api/vuln-scan/start', {
@@ -731,9 +1093,13 @@ runVulnBtn.addEventListener('click', async () => {
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
     findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
 
+    lastVulnJobId = jobId;
+    vulnReportRow.style.display = findings.length ? 'block' : 'none';
+
     vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings. Exit code: ' + report.exit_code;
+    vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
-      '<div class="metric" style="flex:1;"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
+      '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
     ).join('');
 
     if (findings.length === 0) {
@@ -741,10 +1107,10 @@ runVulnBtn.addEventListener('click', async () => {
     } else {
       const order = { critical: 0, high: 1, medium: 2, low: 3 };
       const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
-      vulnResults.innerHTML = sorted.map(f => {
+      vulnResults.innerHTML = '<div class="section-label">Findings</div>' + sorted.map(f => {
         const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
         const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
-        return '<div class="card">' +
+        return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
           '<div class="top">' +
           '<span style="font-size:14px;font-weight:700;">' + f.file + ':' + f.line + fixtureTag + '</span>' +
           vulnSeverityBadge(f.severity) +
