@@ -5,67 +5,72 @@
 <title>AI PR Summary Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 0 1.5rem 3rem; color: #1a1a1a; background: #f4f5fb; }
-  header { padding: 2rem 1.5rem; margin: 0 -1.5rem 1.5rem; background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; border-radius: 0 0 16px 16px; }
-  h1 { font-size: 24px; font-weight: 700; margin: 0 0 4px; }
-  .subtitle { font-size: 13px; color: rgba(255,255,255,0.85); }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1300px; margin: 0 auto; padding: 0 2rem 4rem; color: #1a1a1a; background: #f4f5fb; }
+  header { padding: 2.25rem 2rem; margin: 0 -2rem 1.5rem; background: linear-gradient(135deg,#4f46e5,#7c3aed 60%,#a855f7); border-radius: 0 0 20px 20px; box-shadow: 0 8px 24px rgba(79,70,229,0.25); }
+  h1 { font-size: 26px; font-weight: 800; margin: 0 0 4px; color: #fff; letter-spacing: -0.02em; }
+  .subtitle { font-size: 13px; color: rgba(255,255,255,0.88); }
   .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
-  input, select { padding: 9px 12px; border: 1px solid #d0d0e0; border-radius: 8px; font-size: 14px; background: #fff; }
+  input, select { padding: 9px 12px; border: 1px solid #d0d0e0; border-radius: 8px; font-size: 14px; background: #fff; transition: all 0.15s ease; }
   input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
-  button { padding: 9px 16px; border: none; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; }
-  button:hover { background: #4338ca; }
+  button { padding: 9px 16px; border: none; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.15s ease; }
+  button:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(79,70,229,0.3); }
+  button:active { transform: translateY(0); }
   #load-repos-btn, #load-branches-btn { background: #0891b2; }
-  #load-repos-btn:hover, #load-branches-btn:hover { background: #0e7490; }
-  .status { font-size: 13px; color: #6b7280; margin-bottom: 1rem; }
+  #load-repos-btn:hover, #load-branches-btn:hover { background: #0e7490; box-shadow: 0 4px 10px rgba(8,145,178,0.3); }
+  .status { font-size: 13px; color: #888; margin-bottom: 1rem; }
 
-  .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e5e5f0; margin-bottom: 1.5rem; }
-  .tab { padding: 10px 18px; font-size: 14px; font-weight: 600; color: #9ca3af; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e5e5f0; margin-bottom: 1.5rem; overflow-x: auto; }
+  .tab { padding: 10px 18px; font-size: 14px; font-weight: 600; color: #9ca3af; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; white-space: nowrap; transition: color 0.15s ease, border-color 0.15s ease; }
+  .tab:hover { color: #6366f1; }
   .tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
-  .panel { display: none; }
+  .panel { display: none; animation: fadeIn 0.25s ease; }
   .panel.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
-  .metric { border-radius: 12px; padding: 1.1rem; color: #fff; }
-  .metric:nth-child(1) { background: linear-gradient(135deg, #4f46e5, #6366f1); }
-  .metric:nth-child(2) { background: linear-gradient(135deg, #059669, #10b981); }
-  .metric:nth-child(3) { background: linear-gradient(135deg, #7c3aed, #a855f7); }
-  .metric:nth-child(4) { background: linear-gradient(135deg, #dc2626, #ef4444); }
-  .metric-label { font-size: 12px; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.04em; }
-  .metric-value { font-size: 30px; font-weight: 700; margin-top: 6px; }
-  .chart-wrap { position: relative; width: 100%; height: 200px; background: #fff; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 1.5rem; }
+  .metric { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 1.15rem; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .metric:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
+  .metric-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric-value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; }
+  .chart-wrap { position: relative; width: 100%; height: 240px; background: #fff; border: 1px solid #e5e5e5; border-radius: 14px; padding: 1.1rem; margin-bottom: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); transition: box-shadow 0.2s ease; }
+  .chart-wrap:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
 
-  .card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-left: 4px solid #4f46e5; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .card:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  .card a.title { font-size: 15px; font-weight: 700; color: #1a1a1a; text-decoration: none; }
+  .card a.title { font-size: 15px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
   .card a.title:hover { color: #4f46e5; }
   .badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
-  .state-open { background: #d1fae5; color: #047857; }
-  .state-closed { background: #fee2e2; color: #b91c1c; }
-  .state-merged { background: #ede9fe; color: #6d28d9; }
-  .risk-high { background: #fee2e2; color: #b91c1c; }
-  .risk-medium { background: #fef3c7; color: #b45309; }
-  .risk-low { background: #d1fae5; color: #047857; }
+  .state-open { background: #e6f4ea; color: #1e7e34; }
+  .state-closed { background: #fde8e8; color: #a12525; }
+  .state-merged { background: #eee5fb; color: #6a3fc7; }
+  .risk-high { background: #fde8e8; color: #a12525; }
+  .risk-medium { background: #fdf3d8; color: #966917; }
+  .risk-low { background: #e6f4ea; color: #1e7e34; }
 
-  .section-label { font-size: 12px; font-weight: 700; color: #4f46e5; text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
-  .section-body { font-size: 13px; color: #374151; line-height: 1.6; }
+  .section-label { font-size: 12px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
+  .section-body { font-size: 13px; color: #333; line-height: 1.6; }
   .section-body ul { margin: 4px 0; padding-left: 18px; }
-  .meta-row { font-size: 12px; color: #9ca3af; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+  .meta-row { font-size: 12px; color: #999; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
 
-  .commit-card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-left: 4px solid #0891b2; }
+  .commit-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: box-shadow 0.15s ease; }
+  .commit-card:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
   .commit-head { display: flex; gap: 10px; align-items: flex-start; }
-  .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; border: 2px solid #e5e5f0; }
-  .commit-msg { font-size: 14px; font-weight: 700; color: #1a1a1a; text-decoration: none; }
-  .commit-msg:hover { color: #0891b2; }
-  .commit-body { font-size: 13px; color: #6b7280; white-space: pre-wrap; margin-top: 4px; }
-  .commit-meta { font-size: 12px; color: #9ca3af; margin-top: 6px; }
-  .commit-files-btn { font-size: 12px; color: #0891b2; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 700; }
-  .commit-files-btn:hover { text-decoration: underline; background: none; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
+  .commit-msg { font-size: 14px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
+  .commit-msg:hover { color: #4f46e5; }
+  .commit-body { font-size: 13px; color: #555; white-space: pre-wrap; margin-top: 4px; }
+  .commit-meta { font-size: 12px; color: #999; margin-top: 6px; }
+  .commit-files-btn { font-size: 12px; color: #4f46e5; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 500; }
+  .commit-files-btn:hover { text-decoration: underline; background: none; box-shadow: none; transform: none; }
   .file-list { margin-top: 6px; }
-  .file-row { font-size: 12px; color: #374151; padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid #f0f0f5; padding-top: 5px; }
-  .file-add { color: #059669; font-weight: 700; }
-  .file-del { color: #dc2626; font-weight: 700; }
-  .file-status { font-size: 10px; text-transform: uppercase; color: #9ca3af; margin-right: 6px; }
+  .file-row { font-size: 12px; color: #444; padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid #f0f0f0; padding-top: 5px; }
+  .file-add { color: #1e7e34; font-weight: 600; }
+  .file-del { color: #a12525; font-weight: 600; }
+  .file-status { font-size: 10px; text-transform: uppercase; color: #999; margin-right: 6px; }
 </style>
 </head>
 <body>
@@ -178,17 +183,19 @@
     <div id="monitor-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
   </div>
 
-  <div class="chart-wrap" id="monitor-chart-wrap" style="display:none;">
-    <canvas id="monitorChart" role="img" aria-label="Bar chart of commits per contributor"></canvas>
-  </div>
-  <div class="chart-wrap" id="monitor-severity-chart-wrap" style="display:none;">
-    <canvas id="monitorSeverityChart" role="img" aria-label="Stacked bar chart of bugs by severity per contributor"></canvas>
-  </div>
-  <div class="chart-wrap" id="monitor-timeline-chart-wrap" style="display:none;">
-    <canvas id="monitorTimelineChart" role="img" aria-label="Line chart of commits over time per contributor"></canvas>
-  </div>
-  <div class="chart-wrap" id="monitor-scatter-chart-wrap" style="display:none;">
-    <canvas id="monitorScatterChart" role="img" aria-label="Scatter chart comparing lines changed to bugs found per contributor"></canvas>
+  <div class="chart-grid">
+    <div class="chart-wrap" id="monitor-chart-wrap" style="display:none;">
+      <canvas id="monitorChart" role="img" aria-label="Bar chart of commits per contributor"></canvas>
+    </div>
+    <div class="chart-wrap" id="monitor-severity-chart-wrap" style="display:none;">
+      <canvas id="monitorSeverityChart" role="img" aria-label="Stacked bar chart of bugs by severity per contributor"></canvas>
+    </div>
+    <div class="chart-wrap" id="monitor-timeline-chart-wrap" style="display:none;">
+      <canvas id="monitorTimelineChart" role="img" aria-label="Line chart of commits over time per contributor"></canvas>
+    </div>
+    <div class="chart-wrap" id="monitor-scatter-chart-wrap" style="display:none;">
+      <canvas id="monitorScatterChart" role="img" aria-label="Scatter chart comparing lines changed to bugs found per contributor"></canvas>
+    </div>
   </div>
 
   <div id="monitor-summary-card" class="card" style="display:none;font-size:14px;line-height:1.6;color:#374151;"></div>
@@ -216,7 +223,7 @@ async function loadRepos() {
       statusEl.textContent = repos.message || 'Could not load repos.';
       return;
     }
-    repoSelect.innerHTML = repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
+    repoSelect.innerHTML = '<option value="">-- Select a repo --</option>' + repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
     statusEl.textContent = repos.length + ' repos loaded.';
   } catch (e) {
     statusEl.textContent = 'Could not reach the local server. Is server.py running?';
@@ -224,7 +231,7 @@ async function loadRepos() {
 }
 loadReposBtn.addEventListener('click', loadRepos);
 usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadReposAndRefresh(); });
-repoSelect.addEventListener('change', () => { loadDashboard(); loadPRsForScan(); });
+repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); } });
 
 async function loadReposAndRefresh() {
   await loadRepos();
