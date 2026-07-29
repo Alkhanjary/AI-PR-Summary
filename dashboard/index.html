@@ -500,21 +500,6 @@
       <span class="hint-text">"Exit code" above (and CI pass/fail) is based only on findings in real app code by default &mdash; issues found in test files don't count against it, since a hardcoded fake password in a test fixture usually isn't a real risk. Check this to make test-file findings count toward that gate too.</span>
     </div>
     <div class="row">
-      <div class="field-group">
-        <span class="field-label">Webhook URL (optional)</span>
-        <input type="text" id="vuln-webhook-url" placeholder="https://hooks.slack.com/services/... (optional)" style="min-width:280px;">
-      </div>
-      <div class="field-group">
-        <span class="field-label">Notify at/above</span>
-        <select id="vuln-webhook-severity" style="max-width:130px;">
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high" selected>High</option>
-          <option value="critical">Critical</option>
-        </select>
-      </div>
-    </div>
-    <div class="row">
       <button id="run-vuln-btn">Run vulnerability scan</button>
     </div>
   </div>
@@ -1708,7 +1693,9 @@ document.getElementById('vuln-web-autobuild').addEventListener('change', functio
   if (this.checked) document.getElementById('vuln-web-url').value = '';
 });
 
+let vulnScanInFlight = false;
 runVulnBtn.addEventListener('click', async () => {
+  if (vulnScanInFlight) return;
   const useUpload = vulnSourceUpload.checked;
   const repo = repoSelect.value;
 
@@ -1739,8 +1726,6 @@ runVulnBtn.addEventListener('click', async () => {
     url: webUrl,
     net_target: netTarget,
     auto_build: autoBuild,
-    webhook_url: document.getElementById('vuln-webhook-url').value.trim(),
-    webhook_severity: document.getElementById('vuln-webhook-severity').value,
   };
 
   if (useUpload) {
@@ -1748,6 +1733,8 @@ runVulnBtn.addEventListener('click', async () => {
     body.files = await collectUploadedFiles();
   }
 
+  vulnScanInFlight = true;
+  runVulnBtn.disabled = true;
   vulnSummary.innerHTML = '';
   vulnSummary.style.display = 'none';
   vulnSeverityFilterEl.style.display = 'none';
@@ -1812,6 +1799,9 @@ runVulnBtn.addEventListener('click', async () => {
     renderVulnFindingsList();
   } catch (e) {
     vulnStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  } finally {
+    vulnScanInFlight = false;
+    runVulnBtn.disabled = false;
   }
 });
 

@@ -824,38 +824,8 @@ def stop_project(process, job):
     job["log"].append("Stopped the auto-started app.")
 
 
-def notify_webhook(webhook_url, repo, report, threshold, job):
-    """POSTs a summary to a Slack-compatible incoming webhook (or any URL
-    that accepts a JSON body with a "text" field) when a scan finds
-    anything at or above the configured severity threshold. Best-effort:
-    failures are logged but never fail the scan itself."""
-    order = ["low", "medium", "high", "critical"]
-    findings = report.get("findings", [])
-    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-    for f in findings:
-        sev = (f.get("severity") or "").lower()
-        if sev in counts:
-            counts[sev] += 1
-    if threshold not in order:
-        threshold = "high"
-    worst_idx = max((order.index(sev) for sev, n in counts.items() if n > 0), default=-1)
-    if worst_idx < order.index(threshold):
-        job["log"].append(f"Webhook skipped: no findings at or above '{threshold}'.")
-        return
-    text = (
-        f"Vuln scan for *{repo or 'uploaded folder'}*: {len(findings)} finding(s) - "
-        f"{counts['critical']} critical, {counts['high']} high, {counts['medium']} medium, {counts['low']} low."
-    )
-    try:
-        requests.post(webhook_url, json={"text": text, "repo": repo, "counts": counts, "total": len(findings)}, timeout=10)
-        job["log"].append("Webhook notified.")
-    except requests.RequestException as e:
-        job["log"].append(f"Webhook notification failed: {e}")
-
-
 def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None,
-                       url=None, net_target=None, net_ports=None, auto_build=False,
-                       webhook_url=None, webhook_severity="high"):
+                       url=None, net_target=None, net_ports=None, auto_build=False):
     job = VULN_JOBS[job_id]
     built_process = None
     try:
@@ -921,8 +891,6 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
                 report = json.load(f)
             job["status"] = "done"
             job["result"] = report
-            if webhook_url:
-                notify_webhook(webhook_url, repo, report, webhook_severity, job)
         except (FileNotFoundError, json.JSONDecodeError):
             job["status"] = "error"
             job["error"] = "Scanner did not produce a valid report."
@@ -964,8 +932,6 @@ def vuln_scan_start():
             "net_target": (data.get("net_target") or "").strip() or None,
             "net_ports": (data.get("net_ports") or "").strip() or None,
             "auto_build": bool(data.get("auto_build", False)),
-            "webhook_url": (data.get("webhook_url") or "").strip() or None,
-            "webhook_severity": data.get("webhook_severity", "high"),
         },
         daemon=True,
     )
