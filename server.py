@@ -1175,6 +1175,21 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
                     job["log"].append(f"AI scan pass added {len(ai_findings)} additional finding(s) total.")
                     report["findings"] = (report.get("findings") or []) + ai_findings
 
+                    # The regex scanner already set exit_code from its own findings;
+                    # make sure AI-only findings can also trigger the gate instead of
+                    # silently passing just because the regex pass alone found nothing.
+                    severity_rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+                    if fail_on != "none" and not report.get("exit_code"):
+                        threshold_rank = severity_rank.get(fail_on, 2)
+                        gate_triggered = any(
+                            severity_rank.get((f.get("severity") or "").lower(), -1) >= threshold_rank
+                            and (include_test_files or not f.get("likely_test_fixture"))
+                            for f in ai_findings
+                        )
+                        if gate_triggered:
+                            report["exit_code"] = 2
+                            job["log"].append(f"AI-found finding(s) alone triggered the gate (threshold: {fail_on}).")
+
             job["status"] = "done"
             job["result"] = report
         except (FileNotFoundError, json.JSONDecodeError):
