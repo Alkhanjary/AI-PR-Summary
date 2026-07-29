@@ -486,6 +486,7 @@
 
   <div class="status" id="vuln-status"></div>
   <div id="vuln-summary" class="metrics" style="display:none;"></div>
+  <div class="row" id="vuln-severity-filter" style="display:none;"></div>
 
   <div class="panel-card report-card" id="vuln-report-row" style="display:none;">
     <div class="panel-card-title">AI-generated report</div>
@@ -1346,7 +1347,62 @@ const vulnReportToggle = document.getElementById('vuln-report-toggle');
 const vulnReportFormat = document.getElementById('vuln-report-format');
 const vulnReportBtn = document.getElementById('vuln-report-btn');
 const vulnReportStatus = document.getElementById('vuln-report-status');
+const vulnSeverityFilterEl = document.getElementById('vuln-severity-filter');
 let lastVulnJobId = null;
+let lastVulnFindings = [];
+let currentVulnFilter = 'all';
+
+function renderVulnFilterPills(counts) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (total === 0) { vulnSeverityFilterEl.style.display = 'none'; vulnSeverityFilterEl.innerHTML = ''; return; }
+  const options = [['all', 'All', total]].concat(
+    SEVERITY_LEVELS.filter(lvl => counts[lvl] > 0).map(lvl => [lvl, lvl[0].toUpperCase() + lvl.slice(1), counts[lvl]])
+  );
+  vulnSeverityFilterEl.style.display = 'flex';
+  vulnSeverityFilterEl.innerHTML = '<div class="segmented" id="vuln-severity-segmented">' +
+    options.map(([key, label, n]) =>
+      '<div class="segmented-option' + (key === currentVulnFilter ? ' active' : '') + '" data-severity="' + key + '">' + label + ' (' + n + ')</div>'
+    ).join('') + '</div>';
+  vulnSeverityFilterEl.querySelectorAll('.segmented-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      currentVulnFilter = opt.dataset.severity;
+      vulnSeverityFilterEl.querySelectorAll('.segmented-option').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      renderVulnFindingsList();
+    });
+  });
+}
+
+function renderVulnFindingsList() {
+  const findings = currentVulnFilter === 'all'
+    ? lastVulnFindings
+    : lastVulnFindings.filter(f => (f.severity || '').toLowerCase() === currentVulnFilter);
+
+  if (lastVulnFindings.length === 0) {
+    vulnResults.innerHTML = '<div class="card">No findings.</div>';
+    return;
+  }
+  if (findings.length === 0) {
+    vulnResults.innerHTML = '<div class="card">No ' + currentVulnFilter + ' severity findings.</div>';
+    return;
+  }
+  const order = { critical: 0, high: 1, medium: 2, low: 3 };
+  const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
+  vulnResults.innerHTML = '<div class="section-label">Findings</div>' + sorted.map(f => {
+    const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
+    const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
+    return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
+      '<div class="top">' +
+      '<span style="font-size:14px;font-weight:700;">' + f.file + ':' + f.line + fixtureTag + '</span>' +
+      vulnSeverityBadge(f.severity) +
+      '</div>' +
+      '<div class="section-body" style="margin-top:6px;">' + f.description + verdictNote + '</div>' +
+      '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + f.evidence + '</div>' +
+      '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + f.impact + '</div>' +
+      '<div class="section-body"><b>Fix:</b> ' + f.improvement + '</div>' +
+      '</div>';
+  }).join('');
+}
 
 function updateVulnReportControls() {
   const on = vulnReportToggle.checked;
@@ -1390,6 +1446,7 @@ vulnReportBtn.addEventListener('click', async () => {
   }
 });
 
+const SEVERITY_LEVELS = ['critical', 'high', 'medium', 'low'];
 function vulnSeverityClass(level) {
   const lvl = (level || '').toLowerCase();
   return lvl === 'critical' ? 'critical' : lvl === 'high' ? 'high' : lvl === 'medium' ? 'medium' : 'low';
@@ -1503,6 +1560,10 @@ runVulnBtn.addEventListener('click', async () => {
 
   vulnSummary.innerHTML = '';
   vulnSummary.style.display = 'none';
+  vulnSeverityFilterEl.style.display = 'none';
+  vulnSeverityFilterEl.innerHTML = '';
+  lastVulnFindings = [];
+  currentVulnFilter = 'all';
   vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
   vulnReportRow.style.display = 'none';
   lastVulnJobId = null;
@@ -1555,26 +1616,10 @@ runVulnBtn.addEventListener('click', async () => {
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
     ).join('');
 
-    if (findings.length === 0) {
-      vulnResults.innerHTML = '<div class="card">No findings.</div>';
-    } else {
-      const order = { critical: 0, high: 1, medium: 2, low: 3 };
-      const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
-      vulnResults.innerHTML = '<div class="section-label">Findings</div>' + sorted.map(f => {
-        const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
-        const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
-        return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
-          '<div class="top">' +
-          '<span style="font-size:14px;font-weight:700;">' + f.file + ':' + f.line + fixtureTag + '</span>' +
-          vulnSeverityBadge(f.severity) +
-          '</div>' +
-          '<div class="section-body" style="margin-top:6px;">' + f.description + verdictNote + '</div>' +
-          '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + f.evidence + '</div>' +
-          '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + f.impact + '</div>' +
-          '<div class="section-body"><b>Fix:</b> ' + f.improvement + '</div>' +
-          '</div>';
-      }).join('');
-    }
+    lastVulnFindings = findings;
+    currentVulnFilter = 'all';
+    renderVulnFilterPills(counts);
+    renderVulnFindingsList();
   } catch (e) {
     vulnStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
