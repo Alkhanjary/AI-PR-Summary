@@ -3,25 +3,128 @@
 <head>
 <meta charset="UTF-8">
 <title>AI PR &amp; Security Insights Dashboard</title>
+<script>
+  (function () {
+    var saved = localStorage.getItem('theme');
+    if (saved === 'dark' || saved === 'light') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+  })();
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f4f5fb;
+    --bg-dot: rgba(79,70,229,0.09);
+    --surface: #ffffff;
+    --surface-alt: #f8f7ff;
+    --border: #e5e5e5;
+    --border-soft: #e5e5ef;
+    --text-primary: #1a1a1a;
+    --text-secondary: #4b5563;
+    --text-tertiary: #333333;
+    --text-muted: #9ca3af;
+    --text-faint: #888888;
+    --input-bg: #ffffff;
+    --input-border: #d0d0e0;
+    --code-bg: #f3f4f6;
+    --shadow-soft: rgba(20,20,50,0.04);
+    --shadow-card: rgba(0,0,0,0.07);
+    --divider: #f0f0f0;
+    --segmented-bg: #eef0f7;
+    --accent-text: #3730a3;
+    --sidebar-gradient: linear-gradient(180deg,#1e1b4b,#312e81);
+    --header-gradient:
+      radial-gradient(circle at 18% -20%, rgba(255,255,255,0.28), transparent 45%),
+      radial-gradient(circle at 92% 0%, rgba(217,70,239,0.55), transparent 45%),
+      radial-gradient(circle at 60% 120%, rgba(56,189,248,0.35), transparent 50%),
+      linear-gradient(135deg,#4338ca,#6d28d9 55%,#a21caf 100%);
+    --header-shadow: rgba(67,56,202,0.28);
+    --hero-gradient: linear-gradient(135deg,#4f46e5,#7c3aed);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1117;
+    --bg-dot: rgba(129,140,248,0.10);
+    --surface: #1a1c26;
+    --surface-alt: #21232f;
+    --border: #2c2f3d;
+    --border-soft: #2c2f3d;
+    --text-primary: #f1f2f6;
+    --text-secondary: #c3c6d4;
+    --text-tertiary: #d2d4e0;
+    --text-muted: #8b8fa3;
+    --text-faint: #8b8fa3;
+    --input-bg: #21232f;
+    --input-border: #383b4d;
+    --code-bg: #262835;
+    --shadow-soft: rgba(0,0,0,0.25);
+    --shadow-card: rgba(0,0,0,0.4);
+    --divider: #2c2f3d;
+    --segmented-bg: #21232f;
+    --accent-text: #b4b0f8;
+    --sidebar-gradient: linear-gradient(180deg,#0a0a14,#161329);
+    --header-gradient:
+      radial-gradient(circle at 18% -20%, rgba(255,255,255,0.10), transparent 45%),
+      radial-gradient(circle at 92% 0%, rgba(190,60,220,0.28), transparent 45%),
+      radial-gradient(circle at 60% 120%, rgba(56,120,189,0.20), transparent 50%),
+      linear-gradient(135deg,#221c4a,#3b1e63 55%,#551a52 100%);
+    --header-shadow: rgba(0,0,0,0.45);
+    --hero-gradient: linear-gradient(135deg,#2e2a6b,#4c2f82);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1117;
+      --bg-dot: rgba(129,140,248,0.10);
+      --surface: #1a1c26;
+      --surface-alt: #21232f;
+      --border: #2c2f3d;
+      --border-soft: #2c2f3d;
+      --text-primary: #f1f2f6;
+      --text-secondary: #c3c6d4;
+      --text-tertiary: #d2d4e0;
+      --text-muted: #8b8fa3;
+      --text-faint: #8b8fa3;
+      --input-bg: #21232f;
+      --input-border: #383b4d;
+      --code-bg: #262835;
+      --shadow-soft: rgba(0,0,0,0.25);
+      --shadow-card: rgba(0,0,0,0.4);
+      --divider: #2c2f3d;
+      --segmented-bg: #21232f;
+      --accent-text: #b4b0f8;
+      --sidebar-gradient: linear-gradient(180deg,#0a0a14,#161329);
+      --header-gradient:
+        radial-gradient(circle at 18% -20%, rgba(255,255,255,0.10), transparent 45%),
+        radial-gradient(circle at 92% 0%, rgba(190,60,220,0.28), transparent 45%),
+        radial-gradient(circle at 60% 120%, rgba(56,120,189,0.20), transparent 50%),
+        linear-gradient(135deg,#221c4a,#3b1e63 55%,#551a52 100%);
+      --header-shadow: rgba(0,0,0,0.45);
+      --hero-gradient: linear-gradient(135deg,#2e2a6b,#4c2f82);
+      color-scheme: dark;
+    }
+  }
+
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a1a1a;
-    background-color: #f4f5fb;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--text-primary);
+    background-color: var(--bg);
     background-image:
       radial-gradient(circle at 12% 0%, rgba(124,58,237,0.08), transparent 42%),
       radial-gradient(circle at 88% 8%, rgba(79,70,229,0.07), transparent 38%),
       radial-gradient(circle at 50% 100%, rgba(168,85,247,0.05), transparent 45%),
-      radial-gradient(rgba(79,70,229,0.09) 1px, transparent 1.4px);
+      radial-gradient(var(--bg-dot) 1px, transparent 1.4px);
     background-size: auto, auto, auto, 26px 26px;
     background-attachment: fixed;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   .app-shell { display: flex; align-items: stretch; min-height: 100vh; }
-  .sidebar { width: 72px; flex-shrink: 0; background: linear-gradient(180deg,#1e1b4b,#312e81); display: flex; flex-direction: column; padding: 1.4rem 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease; z-index: 30; }
+  .sidebar { width: 72px; flex-shrink: 0; background: var(--sidebar-gradient); display: flex; flex-direction: column; padding: 1.4rem 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease, background 0.2s ease; z-index: 30; }
   .sidebar:hover, .sidebar:focus-within { width: 226px; overflow: visible; }
   .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 22px 1.5rem; white-space: nowrap; }
   .sidebar-brand-mark { width: 34px; height: 34px; border-radius: 9px; background: #fff; color: #4f46e5; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex-shrink: 0; }
@@ -40,39 +143,43 @@
   .main-content { flex: 1; min-width: 0; max-width: 1300px; padding: 0 2rem 4rem; }
 
   .username-field { position: relative; }
-  .username-suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 240px; background: #fff; border: 1px solid #e5e5f0; border-radius: 10px; box-shadow: 0 10px 24px rgba(20,20,50,0.12); z-index: 40; overflow: hidden; }
+  .username-suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 240px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 10px; box-shadow: 0 10px 24px rgba(20,20,50,0.12); z-index: 40; overflow: hidden; }
   .username-suggestions.open { display: block; }
-  .username-suggestion { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; color: #374151; }
-  .username-suggestion:hover, .username-suggestion.highlighted { background: #f2f1ff; color: #3730a3; }
+  .username-suggestion { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  .username-suggestion:hover, .username-suggestion.highlighted { background: var(--surface-alt); color: #3730a3; }
   .username-suggestion img { width: 22px; height: 22px; border-radius: 50%; }
 
-  .repo-toolbar { background: #fff; border: 1px solid #e5e5ef; border-radius: 12px; padding: 0.9rem 1.1rem; box-shadow: 0 1px 4px rgba(20,20,50,0.04); }
+  .repo-toolbar { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 12px; padding: 0.9rem 1.1rem; box-shadow: 0 1px 4px var(--shadow-soft); }
 
-  .empty-state { text-align: center; padding: 3.5rem 2rem; border: 1.5px dashed #d9d9ee; border-radius: 16px; background: rgba(255,255,255,0.5); }
-  .empty-state-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%; background: #eef0ff; color: #6d28d9; display: flex; align-items: center; justify-content: center; }
+  .hero-block { background: var(--hero-gradient); border-radius: 14px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; color: #fff; transition: background 0.2s ease; }
+  .hero-block-title { font-size: 16px; font-weight: 700; }
+  .hero-block-desc { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d1d5db; border-top-color: #4f46e5; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 7px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty-state { text-align: center; padding: 3.5rem 2rem; border: 1.5px dashed var(--border-soft); border-radius: 16px; background: var(--surface-alt); }
+  .empty-state-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%; background: var(--surface-alt); color: #a78bfa; display: flex; align-items: center; justify-content: center; }
   .empty-state-icon svg { width: 26px; height: 26px; }
-  .empty-state-title { font-size: 15px; font-weight: 700; color: #1a1a1a; margin-bottom: 6px; }
-  .empty-state-desc { font-size: 13px; color: #9ca3af; max-width: 380px; margin: 0 auto; line-height: 1.6; }
+  .empty-state-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+  .empty-state-desc { font-size: 13px; color: var(--text-muted); max-width: 380px; margin: 0 auto; line-height: 1.6; }
 
-  .profile-card { display: flex; gap: 22px; align-items: center; background: linear-gradient(135deg,#eef0ff,#faf9ff); border: 1px solid #e0e0f5; border-radius: 16px; padding: 1.5rem 1.75rem; margin-bottom: 1.5rem; }
-  .profile-avatar { width: 84px; height: 84px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 4px 14px rgba(79,70,229,0.25); flex-shrink: 0; }
+  .profile-card { display: flex; gap: 22px; align-items: center; background: var(--surface-alt); border: 1px solid var(--border-soft); border-radius: 16px; padding: 1.5rem 1.75rem; margin-bottom: 1.5rem; }
+  .profile-avatar { width: 84px; height: 84px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 4px 14px rgba(79,70,229,0.25); flex-shrink: 0; }
   .profile-info { flex: 1; min-width: 0; }
-  .profile-name { font-size: 19px; font-weight: 800; color: #1a1a1a; }
-  .profile-login { font-size: 14px; font-weight: 500; color: #9ca3af; margin-left: 4px; }
-  .profile-bio { font-size: 13.5px; color: #4b5563; margin-top: 4px; }
-  .profile-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: #6b7280; margin-top: 10px; }
+  .profile-name { font-size: 19px; font-weight: 800; color: var(--text-primary); }
+  .profile-login { font-size: 14px; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
+  .profile-bio { font-size: 13.5px; color: var(--text-secondary); margin-top: 4px; }
+  .profile-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin-top: 10px; }
   .profile-meta a { color: #4f46e5; text-decoration: none; font-weight: 600; }
   .profile-meta a:hover { text-decoration: underline; }
   header {
     position: relative; overflow: hidden;
     padding: 2.5rem 2rem 4.5rem; margin: 0 -2rem 0;
-    background:
-      radial-gradient(circle at 18% -20%, rgba(255,255,255,0.28), transparent 45%),
-      radial-gradient(circle at 92% 0%, rgba(217,70,239,0.55), transparent 45%),
-      radial-gradient(circle at 60% 120%, rgba(56,189,248,0.35), transparent 50%),
-      linear-gradient(135deg,#4338ca,#6d28d9 55%,#a21caf 100%);
+    background: var(--header-gradient);
     border-radius: 0 0 28px 28px;
-    box-shadow: 0 14px 34px rgba(67,56,202,0.28);
+    box-shadow: 0 14px 34px var(--header-shadow);
+    transition: background 0.2s ease, box-shadow 0.2s ease;
   }
   header::before {
     content: ''; position: absolute; inset: 0; pointer-events: none;
@@ -95,7 +202,7 @@
   .suggestions-heading { font-size: 10.5px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
   .username-suggestion-icon { color: #a1a1cc; font-size: 14px; width: 22px; display: inline-flex; justify-content: center; }
   .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
-  input, select { padding: 9px 12px; border: 1px solid #d0d0e0; border-radius: 8px; font-size: 14px; background: #fff; transition: all 0.15s ease; }
+  input, select { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 8px; font-size: 14px; background: var(--input-bg); color: var(--text-primary); transition: all 0.15s ease; }
   input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
   select { cursor: pointer; font-weight: 500; }
   button { padding: 9px 16px; border: none; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.15s ease; }
@@ -104,31 +211,31 @@
   button:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; transform: none; box-shadow: none; }
   #load-repos-btn, #load-branches-btn { background: #0891b2; }
   #load-repos-btn:hover, #load-branches-btn:hover { background: #0e7490; box-shadow: 0 4px 10px rgba(8,145,178,0.3); }
-  .status { font-size: 13px; color: #888; margin-bottom: 1rem; }
+  .status { font-size: 13px; color: var(--text-faint); margin-bottom: 1rem; }
 
   /* Pill-style checkbox/radio labels used throughout the tool panels */
   .row label:has(> input[type="checkbox"]), .row label:has(> input[type="radio"]) {
     display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 8px 14px;
-    border: 1px solid #e2e2f0; border-radius: 999px; background: #fff; cursor: pointer;
-    color: #4b5563; transition: all 0.15s ease; user-select: none;
+    border: 1px solid var(--border-soft); border-radius: 999px; background: var(--surface); cursor: pointer;
+    color: var(--text-secondary); transition: all 0.15s ease; user-select: none;
   }
   .row label:has(> input[type="checkbox"]):hover, .row label:has(> input[type="radio"]):hover {
-    border-color: #c7c7f5; background: #f8f7ff;
+    border-color: #c7c7f5; background: var(--surface-alt);
   }
-  .row label:has(> input:checked) { background: #eef0ff; border-color: #4f46e5; color: #3730a3; font-weight: 600; }
+  .row label:has(> input:checked) { background: var(--surface-alt); border-color: #4f46e5; color: var(--accent-text); font-weight: 600; }
   .row label:has(> input:disabled) { opacity: 0.55; cursor: not-allowed; }
   .row label > input[type="checkbox"], .row label > input[type="radio"] { accent-color: #4f46e5; margin: 0; }
 
   .field-group { display: flex; flex-direction: column; gap: 4px; }
-  .field-label { font-size: 11px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.04em; }
-  .hint-text { font-size: 12px; color: #9ca3af; }
+  .field-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .hint-text { font-size: 12px; color: var(--text-muted); }
 
-  .panel-card { background: #fff; border: 1px solid #e5e5ef; border-radius: 14px; padding: 1.25rem 1.4rem; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(20,20,50,0.04); }
+  .panel-card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 14px; padding: 1.25rem 1.4rem; margin-bottom: 1rem; box-shadow: 0 1px 4px var(--shadow-soft); }
   .panel-card .row:first-child { margin-top: 0; }
   .panel-card .row:last-child { margin-bottom: 0; }
-  .panel-card-title { font-size: 15px; font-weight: 700; color: #1a1a1a; margin-bottom: 2px; }
-  .panel-card-desc { font-size: 12.5px; color: #9ca3af; margin-bottom: 4px; }
-  .report-card { background: linear-gradient(135deg,#f8f6ff,#fdfcff); border: 1px solid #ddd6fe; }
+  .panel-card-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+  .panel-card-desc { font-size: 12.5px; color: var(--text-muted); margin-bottom: 4px; }
+  .report-card { background: var(--surface-alt); border: 1px solid #7c5ce633; }
 
   .risk-critical { background: #4c0519; color: #fff; }
   .metric.sev-critical { border-top: 3px solid #4c0519; }
@@ -140,7 +247,7 @@
   .metric.sev-medium .metric-value { color: #b45309; }
   .metric.sev-low .metric-value { color: #15803d; }
 
-  .finding-card { border-left: 4px solid #e5e5e5; }
+  .finding-card { border-left: 4px solid var(--border); }
   .finding-card.sev-critical { border-left-color: #4c0519; }
   .finding-card.sev-high { border-left-color: #dc2626; }
   .finding-card.sev-medium { border-left-color: #f59e0b; }
@@ -149,31 +256,31 @@
   .label-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   .label-chip { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid; }
   .pr-avatar { width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
-  .generate-summary-btn { background: #eef0ff; color: #4338ca; font-size: 12.5px; padding: 6px 12px; }
-  .generate-summary-btn:hover { background: #e0e2fc; box-shadow: none; transform: none; }
+  .generate-summary-btn { background: var(--surface-alt); color: var(--accent-text); font-size: 12.5px; padding: 6px 12px; }
+  .generate-summary-btn:hover { background: var(--border-soft); box-shadow: none; transform: none; }
 
-  .segmented { display: inline-flex; background: #eef0f7; border-radius: 10px; padding: 3px; gap: 2px; }
-  .segmented-option { padding: 7px 16px; font-size: 13px; font-weight: 600; color: #6b7280; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
+  .segmented { display: inline-flex; background: var(--segmented-bg); border-radius: 10px; padding: 3px; gap: 2px; }
+  .segmented-option { padding: 7px 16px; font-size: 13px; font-weight: 600; color: var(--text-secondary); border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
   .segmented-option:hover { color: #4f46e5; }
-  .segmented-option.active { background: #fff; color: #4f46e5; box-shadow: 0 1px 4px rgba(20,20,50,0.1); }
+  .segmented-option.active { background: var(--surface); color: #4f46e5; box-shadow: 0 1px 4px var(--shadow-soft); }
 
   .panel { display: none; animation: fadeIn 0.25s ease; }
   .panel.active { display: block; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
   .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 1.5rem; }
-  .metric { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 1.15rem; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .metric:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
-  .metric-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.03em; }
-  .metric-value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.15rem; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .metric:hover { transform: translateY(-2px); box-shadow: 0 6px 16px var(--shadow-card); }
+  .metric-label { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric-value { font-size: 28px; font-weight: 700; margin-top: 6px; color: var(--text-primary); }
   .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; }
-  .chart-wrap { position: relative; width: 100%; height: 240px; background: #fff; border: 1px solid #e5e5e5; border-radius: 14px; padding: 1.1rem; margin-bottom: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); transition: box-shadow 0.2s ease; }
-  .chart-wrap:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+  .chart-wrap { position: relative; width: 100%; height: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem; margin-bottom: 0; box-shadow: 0 1px 4px var(--shadow-soft); transition: box-shadow 0.2s ease; }
+  .chart-wrap:hover { box-shadow: 0 6px 20px var(--shadow-card); }
 
-  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .card:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .card:hover { box-shadow: 0 6px 16px var(--shadow-card); }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  .card a.title { font-size: 15px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
+  .card a.title { font-size: 15px; font-weight: 600; color: var(--text-primary); text-decoration: none; }
   .card a.title:hover { color: #4f46e5; }
   .badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
   .state-open { background: #e6f4ea; color: #1e7e34; }
@@ -183,26 +290,30 @@
   .risk-medium { background: #fdf3d8; color: #966917; }
   .risk-low { background: #e6f4ea; color: #1e7e34; }
 
-  .section-label { font-size: 12px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
-  .section-body { font-size: 13px; color: #333; line-height: 1.6; }
+  .section-label { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
+  .section-body { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
   .section-body ul { margin: 4px 0; padding-left: 18px; }
-  .meta-row { font-size: 12px; color: #999; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+  .meta-row { font-size: 12px; color: var(--text-muted); margin-top: 8px; display: flex; gap: 12px; align-items: center; }
 
-  .commit-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: box-shadow 0.15s ease; }
-  .commit-card:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
+  .commit-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: box-shadow 0.15s ease; }
+  .commit-card:hover { box-shadow: 0 6px 16px var(--shadow-card); }
   .commit-head { display: flex; gap: 10px; align-items: flex-start; }
   .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
-  .commit-msg { font-size: 14px; font-weight: 600; color: #1a1a1a; text-decoration: none; }
+  .commit-msg { font-size: 14px; font-weight: 600; color: var(--text-primary); text-decoration: none; }
   .commit-msg:hover { color: #4f46e5; }
-  .commit-body { font-size: 13px; color: #555; white-space: pre-wrap; margin-top: 4px; }
-  .commit-meta { font-size: 12px; color: #999; margin-top: 6px; }
+  .commit-body { font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 4px; }
+  .commit-meta { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
   .commit-files-btn { font-size: 12px; color: #4f46e5; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 500; }
   .commit-files-btn:hover { text-decoration: underline; background: none; box-shadow: none; transform: none; }
   .file-list { margin-top: 6px; }
-  .file-row { font-size: 12px; color: #444; padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid #f0f0f0; padding-top: 5px; }
-  .file-add { color: #1e7e34; font-weight: 600; }
-  .file-del { color: #a12525; font-weight: 600; }
-  .file-status { font-size: 10px; text-transform: uppercase; color: #999; margin-right: 6px; }
+  .file-row { font-size: 12px; color: var(--text-secondary); padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid var(--divider); padding-top: 5px; }
+  .file-add { color: #22c55e; font-weight: 600; }
+  .file-del { color: #ef4444; font-weight: 600; }
+  .file-status { font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-right: 6px; }
+
+  .theme-toggle { display: flex; align-items: center; gap: 14px; padding: 12px 22px; color: rgba(255,255,255,0.62); cursor: pointer; white-space: nowrap; background: none; border: none; font-family: inherit; font-size: 14px; font-weight: 600; width: 100%; text-align: left; margin-top: auto; }
+  .theme-toggle:hover { background: rgba(255,255,255,0.08); color: #fff; box-shadow: none; transform: none; }
+  .theme-toggle .nav-icon svg { width: 20px; height: 20px; }
 </style>
 </head>
 <body>
@@ -235,6 +346,11 @@
         <span class="nav-label">Vuln Scan</span>
       </div>
     </div>
+    <button class="theme-toggle" id="theme-toggle" type="button">
+      <span class="nav-icon" id="theme-toggle-icon-dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A9 9 0 1 1 11.5 3a7 7 0 0 0 9.5 9.5z"/></svg></span>
+      <span class="nav-icon" id="theme-toggle-icon-light" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
+      <span class="nav-label" id="theme-toggle-label">Dark mode</span>
+    </button>
   </nav>
 
   <div class="main-content">
@@ -394,20 +510,26 @@
 </div>
 
 <div class="panel" id="panel-monitor">
-  <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:12px;padding:1.25rem 1.5rem;margin-bottom:1.25rem;color:#fff;">
-    <div style="font-size:16px;font-weight:700;">Team Performance</div>
-    <div style="font-size:13px;opacity:0.85;">Commit activity, code quality, and bug attribution per contributor</div>
+  <div class="hero-block">
+    <div class="hero-block-title">Team Performance</div>
+    <div class="hero-block-desc">Commit activity, code quality, and bug attribution per contributor</div>
   </div>
-  <div class="row" style="align-items:center;flex-wrap:wrap;">
-    <span style="font-size:13px;color:#666;">Range:</span>
-    <select id="monitor-range" style="max-width:140px;">
-      <option value="day">Today</option>
-      <option value="week" selected>This week</option>
-      <option value="month">This month</option>
-      <option value="all">All time</option>
-    </select>
-    <label style="font-size:13px;"><input type="checkbox" id="monitor-ai"> AI-verified bugs (slower, more accurate)</label>
-    <button id="run-monitor-btn">Load team activity</button>
+  <div class="panel-card">
+    <div class="row">
+      <div class="field-group">
+        <span class="field-label">Range</span>
+        <select id="monitor-range" style="max-width:160px;">
+          <option value="day">Today</option>
+          <option value="week" selected>This week</option>
+          <option value="month">This month</option>
+          <option value="all">All time</option>
+        </select>
+      </div>
+      <label><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
+    </div>
+    <div class="row">
+      <button id="run-monitor-btn">Load team activity</button>
+    </div>
   </div>
   <div class="status" id="monitor-status"></div>
   <div id="monitor-progress-wrap" style="display:none;" class="card">
@@ -443,6 +565,35 @@
 </div>
 
 <script>
+function currentTheme() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark' || saved === 'light') return saved;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyThemeUI(theme) {
+  document.getElementById('theme-toggle-icon-dark').style.display = theme === 'dark' ? 'none' : 'flex';
+  document.getElementById('theme-toggle-icon-light').style.display = theme === 'dark' ? 'flex' : 'none';
+  document.getElementById('theme-toggle-label').textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+}
+applyThemeUI(currentTheme());
+if (window.Chart) {
+  Chart.defaults.color = currentTheme() === 'dark' ? '#c3c6d4' : '#374151';
+  Chart.defaults.borderColor = currentTheme() === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+}
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  applyThemeUI(next);
+  if (window.Chart) {
+    Chart.defaults.color = next === 'dark' ? '#c3c6d4' : '#374151';
+    Chart.defaults.borderColor = next === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+    [chartInstance, langChartInstance, repoTimelineChartInstance, monitorChartInstance,
+     monitorSeverityChartInstance, monitorTimelineChartInstance, monitorLinesChartInstance]
+      .forEach(inst => { if (inst) inst.update(); });
+  }
+});
+
 const usernameInput = document.getElementById('username-input');
 const repoSelect = document.getElementById('repo-select');
 const usernameSuggestions = document.getElementById('username-suggestions');
@@ -461,7 +612,7 @@ async function loadRepos() {
   const username = usernameInput.value.trim();
   if (!username) { statusEl.textContent = 'Enter a GitHub username'; return; }
   closeSuggestions();
-  statusEl.textContent = 'Loading repos for ' + username + '...';
+  statusEl.innerHTML = '<span class="spinner"></span>Loading repos for ' + username + '...';
   try {
     const res = await fetch(API_BASE + '/api/github/repos?username=' + encodeURIComponent(username));
     const repos = await res.json();
@@ -758,7 +909,7 @@ async function loadUserOverview(username) {
 
   emptyState.style.display = 'none';
   profileCard.style.display = 'block';
-  profileCard.innerHTML = '<div class="card">Loading profile for ' + username + '...</div>';
+  profileCard.innerHTML = '<div class="card"><span class="spinner"></span>Loading profile for ' + username + '...</div>';
   userMetrics.style.display = 'none';
   chartGrid.style.display = 'none';
   topReposEl.innerHTML = '';
@@ -1122,7 +1273,7 @@ async function runEndpoint(path) {
     runStatus.textContent = 'Paste a diff or load your current changes first.';
     return;
   }
-  runStatus.textContent = 'Running...';
+  runStatus.innerHTML = '<span class="spinner"></span>Running...';
   runResult.style.display = 'none';
   try {
     const res = await fetch(API_BASE + path, {
@@ -1149,7 +1300,7 @@ async function runBothScans() {
     runStatus.textContent = 'Paste a diff or load a PR first.';
     return;
   }
-  runStatus.textContent = 'Running AI summary and security scan...';
+  runStatus.innerHTML = '<span class="spinner"></span>Running AI summary and security scan...';
   runResult.style.display = 'none';
   try {
     const [summaryRes, securityRes] = await Promise.all([
@@ -1208,7 +1359,7 @@ updateVulnReportControls();
 vulnReportBtn.addEventListener('click', async () => {
   if (!lastVulnJobId) { vulnReportStatus.textContent = 'Run a scan first.'; return; }
   const format = vulnReportFormat.value;
-  vulnReportStatus.textContent = 'Generating report with AI... this can take a moment.';
+  vulnReportStatus.innerHTML = '<span class="spinner"></span>Generating report with AI... this can take a moment.';
   vulnReportBtn.disabled = true;
   try {
     const res = await fetch(API_BASE + '/api/vuln-scan/report', {
@@ -1375,7 +1526,7 @@ runVulnBtn.addEventListener('click', async () => {
       await new Promise(r => setTimeout(r, 1000));
       const pollRes = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
       const pollData = await pollRes.json();
-      vulnStatus.textContent = 'Running... (' + pollData.elapsed + 's elapsed)';
+      vulnStatus.innerHTML = '<span class="spinner"></span>Running... (' + pollData.elapsed + 's elapsed)';
       if (progressLog) progressLog.textContent = pollData.log.join('\n');
       if (progressLog) progressLog.scrollTop = progressLog.scrollHeight;
 
@@ -1672,7 +1823,7 @@ runMonitorBtn.addEventListener('click', async () => {
   [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap].forEach(w => w.style.display = 'none');
   monitorProgressWrap.style.display = 'block';
   monitorProgressLog.textContent = '';
-  monitorStatus.textContent = 'Loading commit activity...';
+  monitorStatus.innerHTML = '<span class="spinner"></span>Loading commit activity...';
 
   try {
     const { since, prevSince, prevUntil } = rangeToDates(monitorRange.value);
