@@ -395,6 +395,15 @@
   </div>
   <div id="user-top-repos"></div>
   <div id="user-involvement"></div>
+
+  <div class="row">
+    <button id="overview-compare-toggle">Compare with another user</button>
+  </div>
+  <div class="row" id="overview-compare-row" style="display:none;">
+    <input type="text" id="overview-compare-input" placeholder="Another GitHub username">
+    <button id="overview-compare-btn">Compare</button>
+  </div>
+  <div id="overview-compare-result"></div>
 </div>
 
 <div class="panel" id="panel-activity">
@@ -407,6 +416,10 @@
       <div class="segmented-option active" data-view="prs">Pull requests</div>
       <div class="segmented-option" data-view="commits">Commits</div>
     </div>
+  </div>
+  <div class="row" id="pr-filter-row">
+    <input type="text" id="pr-search-input" placeholder="Search PRs by title, author, or #number" style="min-width:280px;">
+    <span class="hint-text" id="pr-label-filter-hint" style="display:none;"></span>
   </div>
   <div id="list"></div>
   <div id="commits" style="display:none;"></div>
@@ -422,7 +435,11 @@
         <select id="pr-select" style="max-width:320px;"><option>Loading...</option></select>
       </div>
     </div>
+    <div class="row" style="margin-bottom:6px;">
+      <label><input type="checkbox" id="diff-preview-toggle"><span>Colorized preview instead of raw text</span></label>
+    </div>
     <textarea id="diff-input" placeholder="A diff loads here automatically when you pick a pull request above, or paste your own diff (e.g. from `git diff`) to summarize instead" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
+    <div id="diff-preview" style="display:none;width:100%;height:180px;overflow:auto;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--input-border);border-radius:6px;background:var(--code-bg);"></div>
     <div class="row">
       <button id="run-scan-btn">Generate summary & security review</button>
     </div>
@@ -483,8 +500,28 @@
       <span class="hint-text">"Exit code" above (and CI pass/fail) is based only on findings in real app code by default &mdash; issues found in test files don't count against it, since a hardcoded fake password in a test fixture usually isn't a real risk. Check this to make test-file findings count toward that gate too.</span>
     </div>
     <div class="row">
+      <div class="field-group">
+        <span class="field-label">Webhook URL (optional)</span>
+        <input type="text" id="vuln-webhook-url" placeholder="https://hooks.slack.com/services/... (optional)" style="min-width:280px;">
+      </div>
+      <div class="field-group">
+        <span class="field-label">Notify at/above</span>
+        <select id="vuln-webhook-severity" style="max-width:130px;">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high" selected>High</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
       <button id="run-vuln-btn">Run vulnerability scan</button>
     </div>
+  </div>
+
+  <div class="panel-card" id="vuln-history-card" style="display:none;">
+    <div class="panel-card-title">Recent scans</div>
+    <div id="vuln-history-list"></div>
   </div>
 
   <div class="status" id="vuln-status"></div>
@@ -587,6 +624,20 @@
 
   <div id="monitor-mvp-card" style="display:none;background:linear-gradient(135deg,#059669,#10b981);border-radius:12px;padding:1rem 1.25rem;margin-bottom:1rem;color:#fff;"></div>
 
+  <div class="row" id="monitor-export-row" style="display:none;">
+    <button id="monitor-export-csv-btn">Export CSV</button>
+    <div class="field-group">
+      <span class="field-label">Report format</span>
+      <select id="monitor-report-format" style="max-width:150px;">
+        <option value="pdf">PDF</option>
+        <option value="docx">Word (.docx)</option>
+        <option value="markdown">Markdown</option>
+        <option value="html">HTML</option>
+      </select>
+    </div>
+    <button id="monitor-export-report-btn">Export team report</button>
+    <span id="monitor-export-status" class="hint-text"></span>
+  </div>
   <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
 </div>
 
@@ -637,7 +688,15 @@ function saveRecentUsername(name) {
   localStorage.setItem(RECENT_USERS_KEY, JSON.stringify(list));
 }
 
-async function loadRepos() {
+const LAST_STATE_KEY = 'aiprsummary_last_state';
+function saveLastState() {
+  localStorage.setItem(LAST_STATE_KEY, JSON.stringify({ username: usernameInput.value.trim(), repo: repoSelect.value }));
+}
+function loadLastState() {
+  try { return JSON.parse(localStorage.getItem(LAST_STATE_KEY) || '{}'); } catch (e) { return {}; }
+}
+
+async function loadRepos(preferredRepo) {
   const username = usernameInput.value.trim();
   if (!username) { statusEl.textContent = 'Enter a GitHub username'; return; }
   closeSuggestions();
@@ -656,17 +715,19 @@ async function loadRepos() {
     hasRepos = repos.length > 0;
     updateRepoControlsForActiveTab();
     loadUserOverview(username);
-    if (repos.length > 0) {
-      repoSelect.value = repos[0].full_name;
+    const pick = (preferredRepo && repos.some(r => r.full_name === preferredRepo)) ? preferredRepo : (repos[0] && repos[0].full_name);
+    if (pick) {
+      repoSelect.value = pick;
       loadDashboard();
       loadPRsForScan();
       loadMonitorBranches();
     }
+    saveLastState();
   } catch (e) {
     statusEl.textContent = 'Could not reach the local server. Is server.py running?';
   }
 }
-repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); loadMonitorBranches(); } });
+repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); loadMonitorBranches(); saveLastState(); } });
 
 async function loadMonitorBranches() {
   const branchSelect = document.getElementById('monitor-branch');
@@ -804,7 +865,33 @@ function renderSummarySections(sections) {
   return { html, riskLevel };
 }
 
+let activityLabelFilter = null;
+function applyActivityFilter() {
+  const q = document.getElementById('pr-search-input').value.trim().toLowerCase();
+  const hint = document.getElementById('pr-label-filter-hint');
+  if (activityLabelFilter) {
+    hint.style.display = 'inline';
+    hint.innerHTML = 'Filtering by label: <b>' + activityLabelFilter + '</b> &middot; <a href="#" id="pr-label-filter-clear" style="color:#4f46e5;">clear</a>';
+    const clearLink = document.getElementById('pr-label-filter-clear');
+    if (clearLink) clearLink.addEventListener('click', e2 => { e2.preventDefault(); activityLabelFilter = null; applyActivityFilter(); });
+  } else {
+    hint.style.display = 'none';
+  }
+  listEl.querySelectorAll(':scope > .card').forEach(card => {
+    const matchesSearch = !q || (card.dataset.search || '').includes(q);
+    const matchesLabel = !activityLabelFilter || (card.dataset.labels || '').split(',').includes(activityLabelFilter);
+    card.style.display = (matchesSearch && matchesLabel) ? '' : 'none';
+  });
+}
+document.getElementById('pr-search-input').addEventListener('input', applyActivityFilter);
+
 listEl.addEventListener('click', async e => {
+  const labelChip = e.target.closest('.label-chip');
+  if (labelChip) {
+    activityLabelFilter = labelChip.dataset.label;
+    applyActivityFilter();
+    return;
+  }
   const btn = e.target.closest('.generate-summary-btn');
   if (!btn) return;
   const num = btn.dataset.pr;
@@ -858,6 +945,7 @@ function updateRepoControlsForActiveTab() {
     repoToolbar.style.display = 'none';
   } else if (activePanel === 'vuln') {
     toggleVulnSource();
+    loadVulnScanHistory();
   } else {
     if (hasRepos) placeRepoSelect('repo-select-slot-top');
     repoToolbar.style.display = hasRepos ? 'flex' : 'none';
@@ -915,7 +1003,7 @@ function timeAgo(iso) {
 function labelChips(labels) {
   if (!labels || labels.length === 0) return '';
   return '<div class="label-chips">' + labels.map(l =>
-    '<span class="label-chip" style="background:#' + l.color + '22;color:#' + l.color + ';border-color:#' + l.color + '55;">' + l.name + '</span>'
+    '<span class="label-chip" data-label="' + l.name.toLowerCase() + '" style="cursor:pointer;background:#' + l.color + '22;color:#' + l.color + ';border-color:#' + l.color + '55;">' + l.name + '</span>'
   ).join('') + '</div>';
 }
 function renderChart(counts) {
@@ -1169,6 +1257,9 @@ async function loadDashboard() {
     return;
   }
   listEl.innerHTML = '';
+  document.getElementById('pr-search-input').value = '';
+  activityLabelFilter = null;
+  document.getElementById('pr-label-filter-hint').style.display = 'none';
   metricsEl.innerHTML = '';
   statusEl.textContent = 'Loading recent pull requests...';
 
@@ -1198,6 +1289,9 @@ async function loadDashboard() {
         : 'opened ' + timeAgo(pr.created_at);
       const card = document.createElement('div');
       card.className = 'card';
+      card.dataset.search = (pr.title + ' ' + pr.user.login + ' #' + pr.number).toLowerCase();
+      card.dataset.labels = (pr.labels || []).map(l => l.name.toLowerCase()).join(',');
+      card.dataset.state = state;
       card.innerHTML =
         '<div class="top">' +
         '<a href="' + pr.html_url + '" target="_blank" class="title">#' + pr.number + ' ' + pr.title + '</a>' +
@@ -1395,6 +1489,56 @@ const vulnSeverityFilterEl = document.getElementById('vuln-severity-filter');
 let lastVulnJobId = null;
 let lastVulnFindings = [];
 let currentVulnFilter = 'all';
+
+async function loadVulnScanHistory() {
+  const card = document.getElementById('vuln-history-card');
+  const list = document.getElementById('vuln-history-list');
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/history');
+    const data = await res.json();
+    const items = (data.items || []).filter(i => i.status === 'done');
+    if (items.length === 0) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    list.innerHTML = items.map(i => {
+      const when = new Date(i.started * 1000).toLocaleString();
+      const counts = i.counts || {};
+      return '<div class="card" data-job="' + i.job_id + '" style="cursor:pointer;">' +
+        '<div class="top"><span style="font-weight:600;">' + (i.repo || 'scan') + '</span>' +
+        '<span class="hint-text">' + when + '</span></div>' +
+        '<div class="section-body">' + (i.total_findings || 0) + ' finding(s) &mdash; ' +
+        (counts.critical || 0) + ' critical, ' + (counts.high || 0) + ' high, ' + (counts.medium || 0) + ' medium, ' + (counts.low || 0) + ' low</div>' +
+        '</div>';
+    }).join('');
+    list.querySelectorAll('[data-job]').forEach(el => {
+      el.addEventListener('click', () => loadVulnScanFromHistory(el.dataset.job));
+    });
+  } catch (e) {
+    card.style.display = 'none';
+  }
+}
+
+async function loadVulnScanFromHistory(jobId) {
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
+    const pollData = await res.json();
+    if (pollData.status !== 'done' || !pollData.result) return;
+    const report = pollData.result;
+    const findings = report.findings || [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+    lastVulnJobId = jobId;
+    vulnReportRow.style.display = findings.length ? 'block' : 'none';
+    vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings (from history). Exit code: ' + report.exit_code;
+    vulnSummary.style.display = 'grid';
+    vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
+      '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
+    ).join('');
+    lastVulnFindings = findings;
+    currentVulnFilter = 'all';
+    renderVulnFilterPills(counts);
+    renderVulnFindingsList();
+  } catch (e) {}
+}
 
 function renderVulnFilterPills(counts) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -1595,6 +1739,8 @@ runVulnBtn.addEventListener('click', async () => {
     url: webUrl,
     net_target: netTarget,
     auto_build: autoBuild,
+    webhook_url: document.getElementById('vuln-webhook-url').value.trim(),
+    webhook_severity: document.getElementById('vuln-webhook-severity').value,
   };
 
   if (useUpload) {
@@ -1730,8 +1876,10 @@ function renderMonitorFromState() {
     monitorTableWrap.innerHTML = '<div class="card">No contributors selected.</div>';
     monitorHealthMetrics.style.display = 'none';
     monitorMvpCard.style.display = 'none';
+    document.getElementById('monitor-export-row').style.display = 'none';
     return;
   }
+  document.getElementById('monitor-export-row').style.display = 'flex';
 
   renderMonitorCommitsChart(contributors);
   renderTimelineChart(contributors, timeline);
@@ -2126,6 +2274,124 @@ runMonitorBtn.addEventListener('click', async () => {
     monitorStatus.textContent = 'Could not reach the local server. Is server.py running?';
   }
 });
+
+document.getElementById('monitor-export-csv-btn').addEventListener('click', () => {
+  const cols = ['login', 'commits', 'additions', 'deletions', 'churn_pct', 'avg_lines_per_commit', 'test_coverage_pct', 'active_days_count', 'total_bugs', 'worst'];
+  const csvLines = [cols.join(',')].concat(
+    monitorTableData.map(r => cols.map(c => ('' + (r[c] ?? '')).replace(/,/g, ';')).join(','))
+  );
+  const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'team-activity.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('monitor-export-report-btn').addEventListener('click', async () => {
+  const statusEl2 = document.getElementById('monitor-export-status');
+  const format = document.getElementById('monitor-report-format').value;
+  statusEl2.innerHTML = '<span class="spinner"></span>Generating report...';
+  try {
+    const res = await fetch(API_BASE + '/api/team-report', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        format, contributors: monitorTableData,
+        summary: monitorSummaryCard.textContent, range: monitorRange.options[monitorRange.selectedIndex].text,
+      })
+    });
+    if (!res.ok) { statusEl2.textContent = 'Could not generate report.'; return; }
+    const blob = await res.blob();
+    const ext = { pdf: 'pdf', docx: 'docx', markdown: 'md', html: 'html' }[format] || 'txt';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'team-report.' + ext;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    statusEl2.textContent = 'Downloaded.';
+  } catch (e) {
+    statusEl2.textContent = 'Could not reach the local server.';
+  }
+});
+
+// Simple colorized diff preview for the Run Scan tab (+/- lines colored),
+// toggled alongside the plain editable textarea.
+const diffPreviewToggle = document.getElementById('diff-preview-toggle');
+if (diffPreviewToggle) {
+  const diffPreview = document.getElementById('diff-preview');
+  function renderDiffPreview() {
+    const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = diffInput.value.split('\n').map(line => {
+      let color = 'inherit';
+      if (line.startsWith('+') && !line.startsWith('+++')) color = '#22c55e';
+      else if (line.startsWith('-') && !line.startsWith('---')) color = '#ef4444';
+      else if (line.startsWith('@@')) color = '#0891b2';
+      return '<div style="color:' + color + ';">' + (escapeHtml(line) || '&nbsp;') + '</div>';
+    }).join('');
+    diffPreview.innerHTML = html || '<span class="hint-text">Nothing to preview yet.</span>';
+  }
+  diffPreviewToggle.addEventListener('change', function () {
+    diffPreview.style.display = this.checked ? 'block' : 'none';
+    diffInput.style.display = this.checked ? 'none' : 'block';
+    if (this.checked) renderDiffPreview();
+  });
+  diffInput.addEventListener('input', () => { if (diffPreviewToggle.checked) renderDiffPreview(); });
+}
+
+// Compare mode: a second username field in Overview for side-by-side stats.
+const compareToggleBtn = document.getElementById('overview-compare-toggle');
+if (compareToggleBtn) {
+  compareToggleBtn.addEventListener('click', () => {
+    const row = document.getElementById('overview-compare-row');
+    row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  });
+  document.getElementById('overview-compare-btn').addEventListener('click', async () => {
+    const otherUsername = document.getElementById('overview-compare-input').value.trim();
+    const wrap = document.getElementById('overview-compare-result');
+    if (!otherUsername) return;
+    wrap.innerHTML = '<div class="card"><span class="spinner"></span>Loading ' + otherUsername + '...</div>';
+    try {
+      const [userRes, reposRes] = await Promise.all([
+        fetch(API_BASE + '/api/github/user?username=' + encodeURIComponent(otherUsername)),
+        fetch(API_BASE + '/api/github/repos?username=' + encodeURIComponent(otherUsername)),
+      ]);
+      const user = await userRes.json();
+      const repos = await reposRes.json();
+      if (!userRes.ok || user.message) { wrap.innerHTML = '<div class="card">Could not load "' + otherUsername + '".</div>'; return; }
+      const repoArr = Array.isArray(repos) ? repos.filter(r => !r.fork) : [];
+      const stars = repoArr.reduce((s, r) => s + (r.stargazers_count || 0), 0);
+      wrap.innerHTML =
+        '<div class="chart-grid" style="grid-template-columns:1fr 1fr;">' +
+        '<div class="panel-card"><div class="panel-card-title">' + (usernameInput.value.trim() || 'You') + '</div>' +
+        '<div class="metrics"><div class="metric"><div class="metric-label">Repos</div><div class="metric-value">' + (repoCache.filter(r => !r.fork).length) + '</div></div>' +
+        '<div class="metric"><div class="metric-label">Stars</div><div class="metric-value">' + (repoCache.filter(r => !r.fork).reduce((s, r) => s + (r.stargazers_count || 0), 0)) + '</div></div></div></div>' +
+        '<div class="panel-card"><div class="panel-card-title">' + user.login + '</div>' +
+        '<div class="metrics"><div class="metric"><div class="metric-label">Repos</div><div class="metric-value">' + repoArr.length + '</div></div>' +
+        '<div class="metric"><div class="metric-label">Stars</div><div class="metric-value">' + stars + '</div></div></div></div>' +
+        '</div>';
+    } catch (e) {
+      wrap.innerHTML = '<div class="card">Could not reach the local server.</div>';
+    }
+  });
+}
+
+// Keyboard shortcuts: "/" focuses the username search unless already typing
+// in a text field; Escape closes the suggestions dropdown (handled elsewhere).
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+    e.preventDefault();
+    usernameInput.focus();
+  }
+});
+
+// Restore the last-used username/repo on page load, if any.
+(function restoreLastState() {
+  const last = loadLastState();
+  if (last.username) {
+    usernameInput.value = last.username;
+    loadRepos(last.repo);
+  }
+})();
 </script>
 
 </body>

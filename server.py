@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -189,6 +190,18 @@ def team_stats():
         return jsonify(r.json()), r.status_code
     commits = r.json()
 
+    def fetch_detail(sha):
+        try:
+            d = requests.get("https://api.github.com/repos/" + repo + "/commits/" + sha, headers=gh_headers())
+            return sha, (d.json() if d.status_code == 200 else None)
+        except requests.RequestException:
+            return sha, None
+
+    details_by_sha = {}
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for sha, detail in ex.map(fetch_detail, [c["sha"] for c in commits]):
+            details_by_sha[sha] = detail
+
     stats = {}
     timeline = []
     for c in commits:
@@ -202,13 +215,9 @@ def team_stats():
         if date:
             stats[login]["active_days"].add(date[:10])
 
-        detail = requests.get(
-            "https://api.github.com/repos/" + repo + "/commits/" + c["sha"],
-            headers=gh_headers(),
-        )
+        d = details_by_sha.get(c["sha"])
         commit_additions = commit_deletions = 0
-        if detail.status_code == 200:
-            d = detail.json()
+        if d:
             s = d.get("stats", {})
             commit_additions = s.get("additions", 0)
             commit_deletions = s.get("deletions", 0)
@@ -349,6 +358,53 @@ def team_summary():
         return jsonify({"summary": response.choices[0].message.content})
     except Exception as e:
         return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/team-report", methods=["POST"])
+def team_report():
+    """Builds a downloadable Team Performance report (PDF/Word/Markdown/
+    HTML) from the Monitor tab's already-computed contributor data and
+    executive summary - reuses the same builders as the vuln scan report."""
+    data = request.get_json(force=True)
+    fmt = (data.get("format") or "markdown").lower()
+    contributors = data.get("contributors", [])
+    summary = data.get("summary", "")
+    range_label = data.get("range", "")
+
+    lines = []
+    if summary:
+        lines += ["## Executive Summary", "", summary, ""]
+    lines += ["## Contributor Breakdown", ""]
+    for c in contributors:
+        lines.append(f"### {c.get('login', 'unknown')}")
+        lines.append("")
+        lines.append(f"- **Commits:** {c.get('commits', 0)}")
+        lines.append(f"- **Lines:** +{c.get('additions', 0)} / -{c.get('deletions', 0)}")
+        lines.append(f"- **Test coverage:** {c.get('test_coverage_pct', 0)}%")
+        lines.append(f"- **Active days:** {c.get('active_days_count', 0)}")
+        lines.append(f"- **Bugs found:** {c.get('total_bugs', 0)} (worst severity: {c.get('worst', 'low')})")
+        lines.append("")
+    report_md = "\n".join(lines)
+
+    title = "Team Performance Report"
+    subtitle = (range_label + " &middot; " if range_label else "") + \
+        "generated " + datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    subtitle_plain = subtitle.replace("&middot;", "-")
+
+    if fmt == "markdown":
+        return Response(report_md, mimetype="text/markdown",
+                         headers={"Content-Disposition": "attachment; filename=team-report.md"})
+    if fmt == "html":
+        return Response(build_report_html(report_md, title, subtitle), mimetype="text/html",
+                         headers={"Content-Disposition": "attachment; filename=team-report.html"})
+    if fmt == "docx":
+        return Response(build_report_docx(report_md, title, subtitle_plain),
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         headers={"Content-Disposition": "attachment; filename=team-report.docx"})
+    if fmt == "pdf":
+        return Response(build_report_pdf(report_md, title, subtitle_plain), mimetype="application/pdf",
+                         headers={"Content-Disposition": "attachment; filename=team-report.pdf"})
+    return jsonify({"error": f"Unknown format: {fmt}"}), 400
 
 
 @app.route("/api/team-bugs/start", methods=["POST"])
@@ -768,8 +824,38 @@ def stop_project(process, job):
     job["log"].append("Stopped the auto-started app.")
 
 
+def notify_webhook(webhook_url, repo, report, threshold, job):
+    """POSTs a summary to a Slack-compatible incoming webhook (or any URL
+    that accepts a JSON body with a "text" field) when a scan finds
+    anything at or above the configured severity threshold. Best-effort:
+    failures are logged but never fail the scan itself."""
+    order = ["low", "medium", "high", "critical"]
+    findings = report.get("findings", [])
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for f in findings:
+        sev = (f.get("severity") or "").lower()
+        if sev in counts:
+            counts[sev] += 1
+    if threshold not in order:
+        threshold = "high"
+    worst_idx = max((order.index(sev) for sev, n in counts.items() if n > 0), default=-1)
+    if worst_idx < order.index(threshold):
+        job["log"].append(f"Webhook skipped: no findings at or above '{threshold}'.")
+        return
+    text = (
+        f"Vuln scan for *{repo or 'uploaded folder'}*: {len(findings)} finding(s) - "
+        f"{counts['critical']} critical, {counts['high']} high, {counts['medium']} medium, {counts['low']} low."
+    )
+    try:
+        requests.post(webhook_url, json={"text": text, "repo": repo, "counts": counts, "total": len(findings)}, timeout=10)
+        job["log"].append("Webhook notified.")
+    except requests.RequestException as e:
+        job["log"].append(f"Webhook notification failed: {e}")
+
+
 def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None,
-                       url=None, net_target=None, net_ports=None, auto_build=False):
+                       url=None, net_target=None, net_ports=None, auto_build=False,
+                       webhook_url=None, webhook_severity="high"):
     job = VULN_JOBS[job_id]
     built_process = None
     try:
@@ -835,6 +921,8 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
                 report = json.load(f)
             job["status"] = "done"
             job["result"] = report
+            if webhook_url:
+                notify_webhook(webhook_url, repo, report, webhook_severity, job)
         except (FileNotFoundError, json.JSONDecodeError):
             job["status"] = "error"
             job["error"] = "Scanner did not produce a valid report."
@@ -857,7 +945,10 @@ def vuln_scan_start():
     if not ensure_scanner_available():
         return jsonify({"error": f"Could not find or clone the scanner tool (expected at {OTHER_SCANNER_PATH})"}), 500
     job_id = str(uuid.uuid4())
-    VULN_JOBS[job_id] = {"status": "running", "log": [], "result": None, "error": None, "started": time.time()}
+    VULN_JOBS[job_id] = {
+        "status": "running", "log": [], "result": None, "error": None, "started": time.time(),
+        "repo": repo or "(uploaded folder)",
+    }
     thread = threading.Thread(
         target=run_vuln_scan_job,
         args=(
@@ -873,6 +964,8 @@ def vuln_scan_start():
             "net_target": (data.get("net_target") or "").strip() or None,
             "net_ports": (data.get("net_ports") or "").strip() or None,
             "auto_build": bool(data.get("auto_build", False)),
+            "webhook_url": (data.get("webhook_url") or "").strip() or None,
+            "webhook_severity": data.get("webhook_severity", "high"),
         },
         daemon=True,
     )
@@ -893,6 +986,32 @@ def vuln_scan_status(job_id):
         "error": job["error"],
         "elapsed": round(time.time() - job["started"], 1),
     })
+
+
+@app.route("/api/vuln-scan/history")
+def vuln_scan_history():
+    """Lists the most recent scans run this server session (in-memory
+    only - resets on restart), so a finished scan's results can be
+    revisited without re-running it."""
+    items = []
+    for job_id, job in VULN_JOBS.items():
+        entry = {
+            "job_id": job_id, "repo": job.get("repo", ""), "status": job["status"],
+            "started": job["started"],
+        }
+        if job.get("result"):
+            findings = job["result"].get("findings", [])
+            counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            for f in findings:
+                sev = (f.get("severity") or "").lower()
+                if sev in counts:
+                    counts[sev] += 1
+            entry["files_scanned"] = job["result"].get("files_scanned")
+            entry["total_findings"] = len(findings)
+            entry["counts"] = counts
+        items.append(entry)
+    items.sort(key=lambda e: -e["started"])
+    return jsonify({"items": items[:10]})
 
 
 REPORT_MAX_CHARS = 60000
