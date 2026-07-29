@@ -345,6 +345,42 @@ The real logic lives in this repo's reusable-pr-summary.yml. Every repo pointing
 
 ---
 
+## 5. Dashboard (local web UI)
+
+A browser dashboard (`dashboard/index.html` + `server.py`) that wraps this
+tool with GitHub-connected views: PR/commit activity, a team-performance
+Monitor tab, a Vuln Scan tab (code/web/network scanning, optionally AI-driven
+end to end), and one-click AI report exports.
+
+### Run it
+
+py -m pip install -r requirements.txt
+cp .env.example .env
+# edit .env with your real LLM_API_KEY (and optionally GITHUB_TOKEN)
+
+Then either double-click `start-dashboard.bat`, or run manually:
+
+py server.py
+# then open dashboard/index.html in your browser
+
+The server listens on `http://127.0.0.1:5000`; the dashboard is a static
+HTML file that talks to it, so `dashboard/index.html` can be opened directly
+(file://) or served however you like, as long as the server is running.
+
+### First-time notes
+
+- **GITHUB_TOKEN is optional but recommended.** Without it you're limited to
+  GitHub's low unauthenticated rate limit and public repos only.
+- **The Vuln Scan tab depends on a sibling tool**, `security-scan`, which the
+  server clones automatically on first use into `../security-scan` (next to
+  this repo, not inside it) — this needs `git` on your PATH and normal
+  internet/GitHub access. If that clone ever fails, delete the partial
+  `../security-scan` folder and retry.
+- **Auto-build-and-scan** (the "no live URL? build & run it" option) will
+  shell out to whatever install/start tooling the detected project actually
+  needs (`npm`, `pip`, `docker`, etc.) - only use it against projects/URLs
+  you trust, since it executes real build/run commands from that folder.
+
 ## Notes
 
 - Diffs over ~8,000 characters are truncated automatically.

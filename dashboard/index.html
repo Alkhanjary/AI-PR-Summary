@@ -520,6 +520,7 @@
   </div>
   <div id="vuln-summary" class="metrics" style="display:none;"></div>
   <div class="row" id="vuln-severity-filter" style="display:none;"></div>
+  <div class="row" id="vuln-type-filter" style="display:none;"></div>
 
   <div class="panel-card report-card" id="vuln-report-row" style="display:none;">
     <div class="panel-card-title">AI-generated report</div>
@@ -1479,9 +1480,35 @@ const vulnReportFormat = document.getElementById('vuln-report-format');
 const vulnReportBtn = document.getElementById('vuln-report-btn');
 const vulnReportStatus = document.getElementById('vuln-report-status');
 const vulnSeverityFilterEl = document.getElementById('vuln-severity-filter');
+const vulnTypeFilterEl = document.getElementById('vuln-type-filter');
 let lastVulnJobId = null;
 let lastVulnFindings = [];
 let currentVulnFilter = 'all';
+let currentVulnTypeFilter = 'all';
+
+function renderVulnTypeFilterPills(findings) {
+  const typeCounts = { code: 0, web: 0, network: 0 };
+  findings.forEach(f => { if (typeCounts.hasOwnProperty(f.scan_type)) typeCounts[f.scan_type]++; });
+  const total = typeCounts.code + typeCounts.web + typeCounts.network;
+  if (total === 0) { vulnTypeFilterEl.style.display = 'none'; vulnTypeFilterEl.innerHTML = ''; return; }
+  const labels = { code: 'Code', web: 'Web', network: 'Network' };
+  const options = [['all', 'All', total]].concat(
+    Object.keys(typeCounts).filter(t => typeCounts[t] > 0).map(t => [t, labels[t], typeCounts[t]])
+  );
+  vulnTypeFilterEl.style.display = 'flex';
+  vulnTypeFilterEl.innerHTML = '<div class="segmented" id="vuln-type-segmented">' +
+    options.map(([key, label, n]) =>
+      '<div class="segmented-option' + (key === currentVulnTypeFilter ? ' active' : '') + '" data-type="' + key + '">' + label + ' (' + n + ')</div>'
+    ).join('') + '</div>';
+  vulnTypeFilterEl.querySelectorAll('.segmented-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      currentVulnTypeFilter = opt.dataset.type;
+      vulnTypeFilterEl.querySelectorAll('.segmented-option').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      renderVulnFindingsList();
+    });
+  });
+}
 
 async function loadVulnScanHistory() {
   const card = document.getElementById('vuln-history-card');
@@ -1535,7 +1562,9 @@ async function loadVulnScanFromHistory(jobId) {
     ).join('');
     lastVulnFindings = findings;
     currentVulnFilter = 'all';
+    currentVulnTypeFilter = 'all';
     renderVulnFilterPills(counts);
+    renderVulnTypeFilterPills(findings);
     renderVulnFindingsList();
   } catch (e) {}
 }
@@ -1562,16 +1591,17 @@ function renderVulnFilterPills(counts) {
 }
 
 function renderVulnFindingsList() {
-  const findings = currentVulnFilter === 'all'
-    ? lastVulnFindings
-    : lastVulnFindings.filter(f => (f.severity || '').toLowerCase() === currentVulnFilter);
+  const findings = lastVulnFindings.filter(f =>
+    (currentVulnFilter === 'all' || (f.severity || '').toLowerCase() === currentVulnFilter) &&
+    (currentVulnTypeFilter === 'all' || f.scan_type === currentVulnTypeFilter)
+  );
 
   if (lastVulnFindings.length === 0) {
     vulnResults.innerHTML = '<div class="card">No findings.</div>';
     return;
   }
   if (findings.length === 0) {
-    vulnResults.innerHTML = '<div class="card">No ' + currentVulnFilter + ' severity findings.</div>';
+    vulnResults.innerHTML = '<div class="card">No findings match the current filters.</div>';
     return;
   }
   const order = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -1761,8 +1791,11 @@ runVulnBtn.addEventListener('click', async () => {
   vulnSummary.style.display = 'none';
   vulnSeverityFilterEl.style.display = 'none';
   vulnSeverityFilterEl.innerHTML = '';
+  vulnTypeFilterEl.style.display = 'none';
+  vulnTypeFilterEl.innerHTML = '';
   lastVulnFindings = [];
   currentVulnFilter = 'all';
+  currentVulnTypeFilter = 'all';
   vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
   document.getElementById('vuln-log-card').style.display = 'none';
   document.getElementById('vuln-ai-note').style.display = 'none';
@@ -1836,7 +1869,9 @@ runVulnBtn.addEventListener('click', async () => {
 
     lastVulnFindings = findings;
     currentVulnFilter = 'all';
+    currentVulnTypeFilter = 'all';
     renderVulnFilterPills(counts);
+    renderVulnTypeFilterPills(findings);
     renderVulnFindingsList();
   } catch (e) {
     vulnStatus.textContent = 'Could not reach the local server. Is server.py running?';

@@ -3,6 +3,7 @@ python-dotenv==1.2.2
 pytest==9.1.1
 flask
 flask-cors
+requests
 python-docx
 reportlab
 markdown

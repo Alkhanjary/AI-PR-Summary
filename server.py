@@ -39,6 +39,12 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = Flask(__name__)
 CORS(app)
 
+# The exact interpreter running this server - used instead of a hardcoded
+# "py" (Windows-launcher-only, not guaranteed even there) or "python3"
+# (missing on some Windows setups) so scanner/detected-project subprocesses
+# always resolve to a real, working Python on any platform.
+PYTHON_CMD = sys.executable
+
 
 def get_client():
     api_key = os.environ.get("LLM_API_KEY")
@@ -257,7 +263,7 @@ def run_team_bugs_job(job_id, repo, use_ai, branch=None):
         import tempfile
         tmpdir = tempfile.mkdtemp()
         json_out = str(Path(tmpdir) / "report.json")
-        cmd = ["py", str(OTHER_SCANNER_PATH), str(target_dir), "--json", json_out, "--scan", "code", "--fail-on", "none"]
+        cmd = [PYTHON_CMD, str(OTHER_SCANNER_PATH), str(target_dir), "--json", json_out, "--scan", "code", "--fail-on", "none"]
         if use_ai:
             cmd.append("--ai")
 
@@ -687,8 +693,8 @@ def detect_project(target_dir):
     if has("manage.py"):
         return {
             "name": "Django",
-            "install": ["pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None,
-            "start": ["py", "manage.py", "runserver", f"127.0.0.1:{free_port}"],
+            "install": [PYTHON_CMD, "-m", "pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None,
+            "start": [PYTHON_CMD, "manage.py", "runserver", f"127.0.0.1:{free_port}"],
             "env": {},
             "candidate_ports": [free_port],
             "use_shell": use_shell,
@@ -698,12 +704,12 @@ def detect_project(target_dir):
     if has("requirements.txt") or has("pyproject.toml") or any(has(c) for c in py_entry_names):
         req_text = _read_text(target_dir / "requirements.txt").lower()
         entry = next((c for c in py_entry_names if has(c)), None)
-        install = ["pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None
+        install = [PYTHON_CMD, "-m", "pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None
         if "uvicorn" in req_text or "fastapi" in req_text:
             module = Path(entry).stem if entry else "main"
-            start = ["py", "-m", "uvicorn", f"{module}:app", "--port", str(free_port), "--host", "127.0.0.1"]
+            start = [PYTHON_CMD, "-m", "uvicorn", f"{module}:app", "--port", str(free_port), "--host", "127.0.0.1"]
         elif entry:
-            start = ["py", entry]
+            start = [PYTHON_CMD, entry]
         else:
             return None
         return {
@@ -850,6 +856,19 @@ def list_source_files(target_dir, max_files=150, max_total_chars=40000):
     return files
 
 
+def classify_scan_type(finding):
+    """The regex scanner's own findings don't carry an explicit code/web/
+    network tag, so infer one from the shape of the 'file' field it put the
+    finding under: a URL means the web scan produced it, a bare host:port
+    means the network scan did, anything else is a real source file (code)."""
+    file_field = str(finding.get("file") or "")
+    if file_field.startswith("http://") or file_field.startswith("https://"):
+        return "web"
+    if re.match(r"^[\w.\-]+:\d+$", file_field):
+        return "network"
+    return "code"
+
+
 def ai_code_scan_run(target_dir, job):
     """Has the AI read actual source files and report vulnerabilities in its
     own judgement, instead of only matching the scanner's fixed regex rules."""
@@ -876,6 +895,7 @@ def ai_code_scan_run(target_dir, job):
         return [], len(files)
     for f in findings:
         f["source"] = "ai-code-scan"
+        f["scan_type"] = "code"
     job["log"].append(f"AI code scan found {len(findings)} finding(s).")
     return findings, len(files)
 
@@ -927,6 +947,7 @@ def ai_web_scan_run(base_url, job):
         return []
     for f in findings:
         f["source"] = "ai-web-scan"
+        f["scan_type"] = "web"
     job["log"].append(f"AI web scan found {len(findings)} finding(s).")
     return findings
 
@@ -986,6 +1007,7 @@ def ai_network_scan_run(host, job):
         return []
     for f in findings:
         f["source"] = "ai-network-scan"
+        f["scan_type"] = "network"
     job["log"].append(f"AI network scan found {len(findings)} finding(s).")
     return findings
 
@@ -1163,6 +1185,9 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
         try:
             with open(json_out, "r", encoding="utf-8") as f:
                 report = json.load(f)
+
+            for finding in report.get("findings") or []:
+                finding.setdefault("scan_type", classify_scan_type(finding))
 
             if use_ai:
                 ai_findings = []
