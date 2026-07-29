@@ -1451,14 +1451,15 @@ async function collectUploadedFiles() {
 }
 
 document.getElementById('vuln-scan-web').addEventListener('change', function () {
-  document.getElementById('vuln-web-row').style.display = this.checked ? 'flex' : 'none';
+  const autoBuildChecked = document.getElementById('vuln-web-autobuild').checked;
+  document.getElementById('vuln-web-row').style.display = (this.checked && !autoBuildChecked) ? 'flex' : 'none';
   document.getElementById('vuln-web-autobuild-row').style.display = this.checked ? 'flex' : 'none';
 });
 document.getElementById('vuln-scan-network').addEventListener('change', function () {
   document.getElementById('vuln-network-row').style.display = this.checked ? 'flex' : 'none';
 });
 document.getElementById('vuln-web-autobuild').addEventListener('change', function () {
-  document.getElementById('vuln-web-url').disabled = this.checked;
+  document.getElementById('vuln-web-row').style.display = this.checked ? 'none' : 'flex';
   if (this.checked) document.getElementById('vuln-web-url').value = '';
 });
 
