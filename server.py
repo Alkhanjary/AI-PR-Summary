@@ -694,9 +694,10 @@ def detect_project(target_dir):
             "use_shell": use_shell,
         }
 
-    if has("requirements.txt") or has("pyproject.toml"):
+    py_entry_names = ("app.py", "main.py", "server.py", "run.py", "wsgi.py")
+    if has("requirements.txt") or has("pyproject.toml") or any(has(c) for c in py_entry_names):
         req_text = _read_text(target_dir / "requirements.txt").lower()
-        entry = next((c for c in ("app.py", "main.py", "server.py", "run.py", "wsgi.py") if has(c)), None)
+        entry = next((c for c in py_entry_names if has(c)), None)
         install = ["pip", "install", "-r", "requirements.txt"] if has("requirements.txt") else None
         if "uvicorn" in req_text or "fastapi" in req_text:
             module = Path(entry).stem if entry else "main"
@@ -747,11 +748,19 @@ def detect_project(target_dir):
             "use_shell": use_shell,
         }
 
-    if has("index.html"):
+    # Static sites often keep index.html in a subfolder rather than the repo
+    # root (e.g. this project's own dashboard/index.html) - check the most
+    # common ones before giving up.
+    static_dir = target_dir if has("index.html") else next(
+        (target_dir / sub for sub in ("dashboard", "public", "dist", "build", "www", "static", "src")
+         if (target_dir / sub / "index.html").exists()),
+        None,
+    )
+    if static_dir:
         return {
             "name": "Static HTML",
             "install": None,
-            "start": ["py", "-m", "http.server", str(free_port), "--directory", str(target_dir)],
+            "start": ["py", "-m", "http.server", str(free_port), "--directory", str(static_dir)],
             "env": {},
             "candidate_ports": [free_port],
             "use_shell": use_shell,
