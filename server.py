@@ -130,11 +130,13 @@ CACHE_DIR = Path(__file__).resolve().parent / ".repo-cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
 
-def get_repo_dir(repo):
+def get_repo_dir(repo, branch=None):
     """Returns a local working copy of the given owner/repo, cloning it
     (or fetching updates if already cloned) into a local cache folder.
     This is what lets the Run scan tab follow whichever repo is picked
-    up top, not just the AI-PR-Summary folder this server lives in."""
+    up top, not just the AI-PR-Summary folder this server lives in.
+    If branch is given, checks that branch out (defaults to whatever the
+    clone's default branch is otherwise)."""
     if not repo:
         return Path(__file__).resolve().parent
     local_path = CACHE_DIR / repo.replace("/", "__")
@@ -145,6 +147,10 @@ def get_repo_dir(repo):
         )
     else:
         subprocess.run(["git", "fetch", "--all", "--quiet"], capture_output=True, text=True, cwd=local_path)
+    if branch:
+        short = branch.split("/", 1)[1] if branch.startswith("origin/") else branch
+        subprocess.run(["git", "checkout", short], capture_output=True, text=True, cwd=local_path)
+        subprocess.run(["git", "reset", "--hard", f"origin/{short}"], capture_output=True, text=True, cwd=local_path)
     return local_path
 
 
@@ -153,11 +159,15 @@ def team_stats():
     """Aggregates commit activity per contributor (commits, lines added,
     lines deleted) for the given repo, using GitHub's API for the commit
     list and per-commit stats. Powers the Monitor tab's team overview.
-    Optional ?since=<ISO8601> filters to commits after that date, so the
-    dashboard can offer day/week/month/all-time views."""
+    Optional ?since=<ISO8601>&until=<ISO8601> filters to commits in that
+    window (day/week/month/all-time presets, or a custom range, are all
+    just different since/until values from the dashboard's point of view).
+    Optional ?branch=<name> follows that branch instead of the repo's
+    default branch."""
     repo = request.args.get("repo", "").strip()
     limit = int(request.args.get("limit", 100))
     since = request.args.get("since", "").strip()
+    branch = request.args.get("branch", "").strip()
     if not repo:
         return jsonify({"error": "repo required"}), 400
 
@@ -167,6 +177,8 @@ def team_stats():
         params["since"] = since
     if until:
         params["until"] = until
+    if branch:
+        params["sha"] = branch.split("/", 1)[1] if branch.startswith("origin/") else branch
 
     r = requests.get(
         "https://api.github.com/repos/" + repo + "/commits",
@@ -221,7 +233,7 @@ def team_stats():
 TEAM_BUG_JOBS = {}
 
 
-def run_team_bugs_job(job_id, repo, use_ai):
+def run_team_bugs_job(job_id, repo, use_ai, branch=None):
     job = TEAM_BUG_JOBS[job_id]
     try:
         if not ensure_scanner_available():
@@ -229,8 +241,8 @@ def run_team_bugs_job(job_id, repo, use_ai):
             job["error"] = "Could not find or clone the scanner tool"
             return
 
-        target_dir = get_repo_dir(repo)
-        job["log"].append(f"Target ready: {target_dir}")
+        target_dir = get_repo_dir(repo, branch)
+        job["log"].append(f"Target ready: {target_dir}" + (f" (branch: {branch})" if branch else ""))
 
         import tempfile
         tmpdir = tempfile.mkdtemp()
@@ -347,13 +359,14 @@ def team_bugs_start():
     data = request.get_json(force=True)
     repo = data.get("repo", "").strip()
     use_ai = data.get("ai", False)
+    branch = (data.get("branch") or "").strip() or None
     if not repo:
         return jsonify({"error": "repo required"}), 400
 
     job_id = str(uuid.uuid4())
     TEAM_BUG_JOBS[job_id] = {"status": "running", "log": [], "result": None, "error": None, "started": time.time()}
 
-    thread = threading.Thread(target=run_team_bugs_job, args=(job_id, repo, use_ai), daemon=True)
+    thread = threading.Thread(target=run_team_bugs_job, args=(job_id, repo, use_ai, branch), daemon=True)
     thread.start()
 
     return jsonify({"job_id": job_id})
@@ -1213,4 +1226,8 @@ def vuln_scan_report():
 
 
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
+    # without it, checking out a branch in a cached clone (which touches
+    # file mtimes, including any server.py inside a cloned repo) can
+    # trigger an unwanted restart mid-request.
+    app.run(port=5000, debug=True, exclude_patterns=["*/.repo-cache/*", "*\\.repo-cache\\*"])

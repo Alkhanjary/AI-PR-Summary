@@ -479,6 +479,9 @@
       <label><input type="checkbox" id="vuln-ai" checked><span>AI verification (slower, more accurate)</span></label>
       <label><input type="checkbox" id="vuln-include-tests"><span>Include test files in gate</span></label>
     </div>
+    <div class="row" style="margin-top:-0.75rem;">
+      <span class="hint-text">"Exit code" above (and CI pass/fail) is based only on findings in real app code by default &mdash; issues found in test files don't count against it, since a hardcoded fake password in a test fixture usually isn't a real risk. Check this to make test-file findings count toward that gate too.</span>
+    </div>
     <div class="row">
       <button id="run-vuln-btn">Run vulnerability scan</button>
     </div>
@@ -518,20 +521,42 @@
   <div class="panel-card">
     <div class="row">
       <div class="field-group">
+        <span class="field-label">Branch</span>
+        <select id="monitor-branch" style="max-width:200px;"><option value="">(default branch)</option></select>
+      </div>
+      <div class="field-group">
         <span class="field-label">Range</span>
         <select id="monitor-range" style="max-width:160px;">
           <option value="day">Today</option>
           <option value="week" selected>This week</option>
           <option value="month">This month</option>
           <option value="all">All time</option>
+          <option value="custom">Custom range&hellip;</option>
         </select>
       </div>
       <label><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
+    </div>
+    <div class="row" id="monitor-custom-range-row" style="display:none;">
+      <div class="field-group">
+        <span class="field-label">From</span>
+        <input type="date" id="monitor-date-from">
+      </div>
+      <div class="field-group">
+        <span class="field-label">To</span>
+        <input type="date" id="monitor-date-to">
+      </div>
     </div>
     <div class="row">
       <button id="run-monitor-btn">Load team activity</button>
     </div>
   </div>
+
+  <div class="panel-card" id="monitor-contributor-card" style="display:none;">
+    <div class="panel-card-title">Contributors</div>
+    <div class="panel-card-desc">Uncheck anyone you want to hide from the charts and table below.</div>
+    <div class="row" id="monitor-contributor-filter"></div>
+  </div>
+
   <div class="status" id="monitor-status"></div>
   <div id="monitor-progress-wrap" style="display:none;" class="card">
     <div class="section-label">Progress</div>
@@ -632,12 +657,28 @@ async function loadRepos() {
       repoSelect.value = repos[0].full_name;
       loadDashboard();
       loadPRsForScan();
+      loadMonitorBranches();
     }
   } catch (e) {
     statusEl.textContent = 'Could not reach the local server. Is server.py running?';
   }
 }
-repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); } });
+repoSelect.addEventListener('change', () => { if (repoSelect.value) { loadDashboard(); loadPRsForScan(); loadMonitorBranches(); } });
+
+async function loadMonitorBranches() {
+  const branchSelect = document.getElementById('monitor-branch');
+  const repo = repoSelect.value;
+  if (!repo) { branchSelect.innerHTML = '<option value="">(default branch)</option>'; return; }
+  try {
+    const res = await fetch(API_BASE + '/api/branches?repo=' + encodeURIComponent(repo));
+    const data = await res.json();
+    const branches = data.branches || [];
+    branchSelect.innerHTML = '<option value="">(default branch)</option>' +
+      branches.map(b => '<option value="' + b + '">' + b.replace(/^origin\//, '') + '</option>').join('');
+  } catch (e) {
+    branchSelect.innerHTML = '<option value="">(default branch)</option>';
+  }
+}
 
 function closeSuggestions() {
   usernameSuggestions.classList.remove('open');
@@ -1646,8 +1687,77 @@ let monitorLinesChartInstance = null;
 let monitorTableData = [];
 let monitorSortKey = 'commits';
 let monitorSortDir = -1;
+let monitorRawContributors = [];
+let monitorRawTimeline = [];
+let monitorRawBugsByAuthor = {};
+let monitorPrevTotals = null;
+let monitorPrTurnaround = null;
+let monitorSelectedLogins = null;
+
+function renderMonitorContributorFilter(contributors) {
+  const wrap = document.getElementById('monitor-contributor-filter');
+  const card = document.getElementById('monitor-contributor-card');
+  if (contributors.length <= 1) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  wrap.innerHTML = contributors.map(c =>
+    '<label><input type="checkbox" class="monitor-contributor-cb" data-login="' + c.login + '" checked><span>' + c.login + ' (' + c.commits + ')</span></label>'
+  ).join('');
+  wrap.querySelectorAll('.monitor-contributor-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      monitorSelectedLogins = new Set(
+        [...wrap.querySelectorAll('.monitor-contributor-cb:checked')].map(el => el.dataset.login)
+      );
+      renderMonitorFromState();
+    });
+  });
+}
+
+function renderMonitorFromState() {
+  const selected = monitorSelectedLogins;
+  const contributors = selected ? monitorRawContributors.filter(c => selected.has(c.login)) : monitorRawContributors;
+  const timeline = selected ? monitorRawTimeline.filter(t => selected.has(t.login)) : monitorRawTimeline;
+  const bugsByAuthor = selected
+    ? Object.fromEntries(Object.entries(monitorRawBugsByAuthor).filter(([login]) => selected.has(login)))
+    : monitorRawBugsByAuthor;
+
+  if (contributors.length === 0) {
+    [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap].forEach(w => w.style.display = 'none');
+    monitorTableWrap.innerHTML = '<div class="card">No contributors selected.</div>';
+    monitorHealthMetrics.style.display = 'none';
+    monitorMvpCard.style.display = 'none';
+    return;
+  }
+
+  renderMonitorCommitsChart(contributors);
+  renderTimelineChart(contributors, timeline);
+  renderLinesOverTimeChart(contributors, timeline);
+  renderSeverityChart(contributors, bugsByAuthor);
+
+  monitorTableData = computeRowData(contributors, bugsByAuthor);
+  renderMonitorTable();
+  renderMvpCard(monitorTableData);
+
+  const totalCommits = contributors.reduce((s, c) => s + c.commits, 0);
+  const totalLines = contributors.reduce((s, c) => s + c.additions + c.deletions, 0);
+  const totalBugs = monitorTableData.reduce((s, c) => s + c.total_bugs, 0);
+
+  monitorHealthMetrics.style.display = 'grid';
+  monitorHealthMetrics.innerHTML =
+    '<div class="metric"><div class="metric-label">Total Commits</div><div class="metric-value">' + totalCommits + trendArrow(totalCommits, monitorPrevTotals ? monitorPrevTotals.commits : null) + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Total Lines</div><div class="metric-value">' + totalLines + trendArrow(totalLines, monitorPrevTotals ? monitorPrevTotals.lines : null) + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Total Bugs</div><div class="metric-value">' + totalBugs + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Avg PR Turnaround</div><div class="metric-value">' + (monitorPrTurnaround !== null ? monitorPrTurnaround + 'h' : 'n/a') + '</div></div>';
+}
 
 function rangeToDates(range) {
+  if (range === 'custom') {
+    const fromVal = document.getElementById('monitor-date-from').value;
+    const toVal = document.getElementById('monitor-date-to').value;
+    const since = fromVal ? new Date(fromVal + 'T00:00:00').toISOString() : '';
+    const until = toVal ? new Date(toVal + 'T23:59:59').toISOString() : '';
+    return { since, until, prevSince: '', prevUntil: '' };
+  }
+
   const now = new Date();
   const cur = new Date(now);
   if (range === 'day') cur.setDate(cur.getDate() - 1);
@@ -1663,6 +1773,9 @@ function rangeToDates(range) {
 
   return { since: cur.toISOString(), prevSince: prev.toISOString(), prevUntil: prevUntil.toISOString() };
 }
+document.getElementById('monitor-range').addEventListener('change', function () {
+  document.getElementById('monitor-custom-range-row').style.display = this.value === 'custom' ? 'flex' : 'none';
+});
 
 function riskBadgeFor(level) {
   const lvl = (level || 'low').toLowerCase();
@@ -1872,8 +1985,12 @@ runMonitorBtn.addEventListener('click', async () => {
   monitorStatus.innerHTML = '<span class="spinner"></span>Loading commit activity...';
 
   try {
-    const { since, prevSince, prevUntil } = rangeToDates(monitorRange.value);
-    const statsUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo) + (since ? '&since=' + encodeURIComponent(since) : '');
+    const branch = document.getElementById('monitor-branch').value;
+    const { since, until, prevSince, prevUntil } = rangeToDates(monitorRange.value);
+    let statsUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo);
+    if (since) statsUrl += '&since=' + encodeURIComponent(since);
+    if (until) statsUrl += '&until=' + encodeURIComponent(until);
+    if (branch) statsUrl += '&branch=' + encodeURIComponent(branch);
     const statsRes = await fetch(statsUrl);
     const statsData = await statsRes.json();
     if (!statsRes.ok) { monitorStatus.textContent = statsData.error || 'Could not load team activity.'; monitorProgressWrap.style.display = 'none'; return; }
@@ -1883,7 +2000,8 @@ runMonitorBtn.addEventListener('click', async () => {
 
     let prevTotals = null;
     if (prevSince) {
-      const prevUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo) + '&since=' + encodeURIComponent(prevSince) + '&until=' + encodeURIComponent(prevUntil);
+      let prevUrl = API_BASE + '/api/team-stats?repo=' + encodeURIComponent(repo) + '&since=' + encodeURIComponent(prevSince) + '&until=' + encodeURIComponent(prevUntil);
+      if (branch) prevUrl += '&branch=' + encodeURIComponent(branch);
       try {
         const prevRes = await fetch(prevUrl);
         const prevData = await prevRes.json();
@@ -1904,7 +2022,7 @@ runMonitorBtn.addEventListener('click', async () => {
 
     const startRes = await fetch(API_BASE + '/api/team-bugs/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo, ai: useAi })
+      body: JSON.stringify({ repo, ai: useAi, branch })
     });
     const startData = await startRes.json();
     if (!startRes.ok) { monitorStatus.textContent = startData.error || 'Could not start bug scan.'; monitorProgressWrap.style.display = 'none'; return; }
@@ -1925,25 +2043,19 @@ runMonitorBtn.addEventListener('click', async () => {
     monitorProgressWrap.style.display = 'none';
     monitorStatus.textContent = contributors.length + ' contributor(s) \u2014 ' + monitorRange.options[monitorRange.selectedIndex].text.toLowerCase();
 
-    renderMonitorCommitsChart(contributors);
-    renderTimelineChart(contributors, timeline);
-    renderLinesOverTimeChart(contributors, timeline);
-    renderSeverityChart(contributors, bugsByAuthor);
+    monitorRawContributors = contributors;
+    monitorRawTimeline = timeline;
+    monitorRawBugsByAuthor = bugsByAuthor;
+    monitorPrevTotals = prevTotals;
+    monitorPrTurnaround = prTurnaround;
+    monitorSelectedLogins = null;
 
-    monitorTableData = computeRowData(contributors, bugsByAuthor);
-    renderMonitorTable();
-    renderMvpCard(monitorTableData);
+    renderMonitorContributorFilter(contributors);
+    renderMonitorFromState();
 
     const totalCommits = contributors.reduce((s, c) => s + c.commits, 0);
     const totalLines = contributors.reduce((s, c) => s + c.additions + c.deletions, 0);
     const totalBugs = monitorTableData.reduce((s, c) => s + c.total_bugs, 0);
-
-    monitorHealthMetrics.style.display = 'grid';
-    monitorHealthMetrics.innerHTML =
-      '<div class="metric"><div class="metric-label">Total Commits</div><div class="metric-value">' + totalCommits + trendArrow(totalCommits, prevTotals ? prevTotals.commits : null) + '</div></div>' +
-      '<div class="metric"><div class="metric-label">Total Lines</div><div class="metric-value">' + totalLines + trendArrow(totalLines, prevTotals ? prevTotals.lines : null) + '</div></div>' +
-      '<div class="metric"><div class="metric-label">Total Bugs</div><div class="metric-value">' + totalBugs + '</div></div>' +
-      '<div class="metric"><div class="metric-label">Avg PR Turnaround</div><div class="metric-value">' + (prTurnaround !== null ? prTurnaround + 'h' : 'n/a') + '</div></div>';
 
     monitorSummaryCard.style.display = 'block';
     monitorSummaryCard.textContent = 'Generating executive summary...';
