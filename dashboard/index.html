@@ -510,6 +510,14 @@
   </div>
 
   <div class="status" id="vuln-status"></div>
+  <div id="vuln-ai-note" class="hint-text" style="display:none;margin-bottom:8px;"></div>
+  <div class="panel-card" id="vuln-log-card" style="display:none;">
+    <div class="row" style="margin:0;justify-content:space-between;">
+      <span class="panel-card-title" style="margin:0;">Scan log</span>
+      <button id="vuln-log-toggle">Show details</button>
+    </div>
+    <div id="vuln-log-content" style="display:none;font-family:monospace;font-size:12px;color:var(--text-secondary);max-height:300px;overflow-y:auto;white-space:pre-wrap;margin-top:8px;"></div>
+  </div>
   <div id="vuln-summary" class="metrics" style="display:none;"></div>
   <div class="row" id="vuln-severity-filter" style="display:none;"></div>
 
@@ -1514,6 +1522,13 @@ async function loadVulnScanFromHistory(jobId) {
     lastVulnJobId = jobId;
     vulnReportRow.style.display = findings.length ? 'block' : 'none';
     vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings (from history). Exit code: ' + report.exit_code;
+    const aiCount = findings.filter(f => (f.source || '').startsWith('ai-')).length;
+    const aiNoteEl = document.getElementById('vuln-ai-note');
+    aiNoteEl.style.display = aiCount > 0 ? 'block' : 'none';
+    if (aiCount > 0) aiNoteEl.textContent = 'AI scan contributed ' + aiCount + ' of these finding(s).';
+    const logCard = document.getElementById('vuln-log-card');
+    logCard.style.display = pollData.log && pollData.log.length ? 'block' : 'none';
+    document.getElementById('vuln-log-content').textContent = (pollData.log || []).join('\n');
     vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
@@ -1693,6 +1708,13 @@ document.getElementById('vuln-web-autobuild').addEventListener('change', functio
   if (this.checked) document.getElementById('vuln-web-url').value = '';
 });
 
+document.getElementById('vuln-log-toggle').addEventListener('click', () => {
+  const content = document.getElementById('vuln-log-content');
+  const shown = content.style.display !== 'none';
+  content.style.display = shown ? 'none' : 'block';
+  document.getElementById('vuln-log-toggle').textContent = shown ? 'Show details' : 'Hide details';
+});
+
 let vulnScanInFlight = false;
 runVulnBtn.addEventListener('click', async () => {
   if (vulnScanInFlight) return;
@@ -1742,6 +1764,8 @@ runVulnBtn.addEventListener('click', async () => {
   lastVulnFindings = [];
   currentVulnFilter = 'all';
   vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
+  document.getElementById('vuln-log-card').style.display = 'none';
+  document.getElementById('vuln-ai-note').style.display = 'none';
   vulnReportRow.style.display = 'none';
   lastVulnJobId = null;
   vulnReportStatus.textContent = '';
@@ -1770,7 +1794,7 @@ runVulnBtn.addEventListener('click', async () => {
       if (progressLog) progressLog.scrollTop = progressLog.scrollHeight;
 
       if (pollData.status === 'done') {
-        data = { report: pollData.result };
+        data = { report: pollData.result, log: pollData.log };
         break;
       }
       if (pollData.status === 'error') {
@@ -1788,6 +1812,23 @@ runVulnBtn.addEventListener('click', async () => {
     vulnReportRow.style.display = findings.length ? 'block' : 'none';
 
     vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings. Exit code: ' + report.exit_code;
+
+    const aiCount = findings.filter(f => (f.source || '').startsWith('ai-')).length;
+    const aiNoteEl = document.getElementById('vuln-ai-note');
+    if (body.ai) {
+      aiNoteEl.style.display = 'block';
+      aiNoteEl.textContent = aiCount > 0
+        ? 'AI scan contributed ' + aiCount + ' of these finding(s) (source: ai-code-scan / ai-web-scan / ai-network-scan).'
+        : 'AI scan ran but found no additional issues beyond the pattern-based scanner. See the scan log below for what it checked.';
+    } else {
+      aiNoteEl.style.display = 'none';
+    }
+
+    const logCard = document.getElementById('vuln-log-card');
+    const logContent = document.getElementById('vuln-log-content');
+    logCard.style.display = 'block';
+    logContent.textContent = (data.log || []).join('\n');
+
     vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
