@@ -1,12 +1,14 @@
 import io
 import json
 import re
+import socket
 import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -23,6 +25,9 @@ from summarize_pr import (
     SYSTEM_PROMPT,
     VULN_REPORT_SYSTEM_PROMPT,
     PROJECT_DETECT_SYSTEM_PROMPT,
+    AI_CODE_SCAN_SYSTEM_PROMPT,
+    AI_WEB_SCAN_SYSTEM_PROMPT,
+    AI_NETWORK_SCAN_SYSTEM_PROMPT,
     MAX_CHARS,
 )
 from openai import OpenAI
@@ -594,7 +599,6 @@ def ensure_scanner_available():
     return OTHER_SCANNER_PATH.exists()
 
 
-import socket
 import threading
 import time
 import uuid
@@ -800,6 +804,192 @@ def build_project_snapshot(target_dir, max_files=400, max_chars=6000):
     return "Files:\n" + "\n".join(paths) + "\n\n" + "\n\n".join(snippets)
 
 
+def parse_json_response(raw):
+    """Strips optional markdown code fences an LLM sometimes wraps JSON in,
+    then parses it. Raises if the result still isn't valid JSON."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE)
+    return json.loads(raw)
+
+
+CODE_SCAN_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rb", ".php", ".rs",
+    ".c", ".cpp", ".h", ".hpp", ".cs", ".html", ".yml", ".yaml", ".json", ".sh", ".ps1",
+}
+
+
+def list_source_files(target_dir, max_files=150, max_total_chars=40000):
+    """Collects source files (skipping noise dirs, binaries, huge files) up
+    to a total character budget, for the AI code scan to review directly."""
+    target_dir = Path(target_dir)
+    files = []
+    total = 0
+    for p in sorted(target_dir.rglob("*")):
+        if any(part in IGNORED_SCAN_DIRS for part in p.relative_to(target_dir).parts):
+            continue
+        if not p.is_file() or p.suffix.lower() not in CODE_SCAN_EXTENSIONS:
+            continue
+        try:
+            if p.stat().st_size > 200_000:
+                continue
+        except OSError:
+            continue
+        text = _read_text(p)
+        if not text:
+            continue
+        if total + len(text) > max_total_chars:
+            remaining = max_total_chars - total
+            if remaining < 200:
+                break
+            text = text[:remaining]
+        files.append((str(p.relative_to(target_dir)).replace("\\", "/"), text))
+        total += len(text)
+        if len(files) >= max_files or total >= max_total_chars:
+            break
+    return files
+
+
+def ai_code_scan_run(target_dir, job):
+    """Has the AI read actual source files and report vulnerabilities in its
+    own judgement, instead of only matching the scanner's fixed regex rules."""
+    client, model = get_client()
+    if not client:
+        job["log"].append("AI code scan skipped: no LLM configured.")
+        return [], 0
+    files = list_source_files(target_dir)
+    if not files:
+        job["log"].append("AI code scan: no source files found to review.")
+        return [], 0
+    body = "\n\n".join(
+        f"=== {path} ===\n" + "\n".join(f"{i + 1}: {line}" for i, line in enumerate(text.splitlines()))
+        for path, text in files
+    )
+    job["log"].append(f"AI code scan: reviewing {len(files)} file(s)...")
+    try:
+        raw = call_llm(client, model, body, system_prompt=AI_CODE_SCAN_SYSTEM_PROMPT)
+        findings = parse_json_response(raw)
+        if not isinstance(findings, list):
+            findings = []
+    except Exception as e:
+        job["log"].append(f"AI code scan failed: {e}")
+        return [], len(files)
+    for f in findings:
+        f["source"] = "ai-code-scan"
+    job["log"].append(f"AI code scan found {len(findings)} finding(s).")
+    return findings, len(files)
+
+
+def probe_url(url, timeout=8):
+    try:
+        r = requests.get(url, timeout=timeout, allow_redirects=True)
+        return {"url": url, "status": r.status_code, "headers": dict(r.headers), "body_snippet": r.text[:1500]}
+    except requests.RequestException as e:
+        return {"url": url, "error": str(e)}
+
+
+def ai_web_scan_run(base_url, job):
+    """AI-guided web scan: our code performs the actual HTTP requests, the
+    AI decides what's worth checking next and interprets the results - it
+    never touches the network itself."""
+    client, model = get_client()
+    if not client:
+        job["log"].append("AI web scan skipped: no LLM configured.")
+        return []
+    common_paths = ["/", "/robots.txt", "/.well-known/security.txt", "/.env", "/.git/config", "/admin", "/api"]
+    evidence = [probe_url(urljoin(base_url, p)) for p in common_paths]
+    job["log"].append(f"AI web scan: probed {len(evidence)} path(s), asking AI what else to check...")
+
+    extra_paths = []
+    try:
+        ask = call_llm(
+            client, model,
+            json.dumps(evidence, indent=2)[:20000] + "\n\nReturn additional_checks as instructed.",
+            system_prompt=AI_WEB_SCAN_SYSTEM_PROMPT,
+        )
+        extra = parse_json_response(ask)
+        if isinstance(extra, dict):
+            extra_paths = (extra.get("additional_paths") or [])[:5]
+    except Exception:
+        pass
+
+    if extra_paths:
+        job["log"].append(f"AI requested {len(extra_paths)} more check(s): {extra_paths}")
+        evidence += [probe_url(urljoin(base_url, p)) for p in extra_paths]
+
+    try:
+        raw = call_llm(client, model, json.dumps(evidence, indent=2)[:30000], system_prompt=AI_WEB_SCAN_SYSTEM_PROMPT)
+        findings = parse_json_response(raw)
+        if not isinstance(findings, list):
+            findings = []
+    except Exception as e:
+        job["log"].append(f"AI web scan analysis failed: {e}")
+        return []
+    for f in findings:
+        f["source"] = "ai-web-scan"
+    job["log"].append(f"AI web scan found {len(findings)} finding(s).")
+    return findings
+
+
+COMMON_NETWORK_PORTS = [
+    21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995,
+    1433, 1521, 3000, 3306, 3389, 5432, 5900, 5984, 6379, 8000, 8080, 8443, 9200, 11211, 27017,
+]
+
+
+def simple_port_scan(host, ports=None, timeout=1.0, max_workers=30):
+    ports = ports or COMMON_NETWORK_PORTS
+
+    def check(port):
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as s:
+                banner = None
+                try:
+                    s.settimeout(1.0)
+                    banner = s.recv(128).decode(errors="replace").strip() or None
+                except OSError:
+                    pass
+                return {"port": port, "banner": banner}
+        except OSError:
+            return None
+
+    open_ports = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for res in ex.map(check, ports):
+            if res:
+                open_ports.append(res)
+    return sorted(open_ports, key=lambda x: x["port"])
+
+
+def ai_network_scan_run(host, job):
+    """AI-guided network scan: our code performs the real port scan, the AI
+    interprets which open ports/services are actually risky."""
+    client, model = get_client()
+    if not client:
+        job["log"].append("AI network scan skipped: no LLM configured.")
+        return []
+    job["log"].append(f"AI network scan: probing common ports on {host}...")
+    open_ports = simple_port_scan(host)
+    job["log"].append(f"Found {len(open_ports)} open port(s).")
+    if not open_ports:
+        return []
+    try:
+        raw = call_llm(
+            client, model, json.dumps({"host": host, "open_ports": open_ports}, indent=2),
+            system_prompt=AI_NETWORK_SCAN_SYSTEM_PROMPT,
+        )
+        findings = parse_json_response(raw)
+        if not isinstance(findings, list):
+            findings = []
+    except Exception as e:
+        job["log"].append(f"AI network scan analysis failed: {e}")
+        return []
+    for f in findings:
+        f["source"] = "ai-network-scan"
+    job["log"].append(f"AI network scan found {len(findings)} finding(s).")
+    return findings
+
+
 def ai_detect_project(target_dir, job):
     """Uses the LLM to look at the actual project files (not a fixed list of
     marker files) and decide whether this is a runnable web app and how to
@@ -811,10 +1001,7 @@ def ai_detect_project(target_dir, job):
     try:
         snapshot = build_project_snapshot(target_dir)
         raw = call_llm(client, model, snapshot, system_prompt=PROJECT_DETECT_SYSTEM_PROMPT)
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
-        info = json.loads(raw)
+        info = parse_json_response(raw)
     except Exception as e:
         job["log"].append(f"AI project detection failed ({e}); falling back to heuristics.")
         return None
@@ -971,6 +1158,23 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
         try:
             with open(json_out, "r", encoding="utf-8") as f:
                 report = json.load(f)
+
+            if use_ai:
+                ai_findings = []
+                if "code" in scan_types:
+                    code_findings, code_files = ai_code_scan_run(target_dir, job)
+                    ai_findings += code_findings
+                    report["files_scanned"] = max(report.get("files_scanned", 0), code_files)
+                if "web" in scan_types and url:
+                    ai_findings += ai_web_scan_run(url, job)
+                if "network" in scan_types:
+                    net_host = net_target.split("/")[0] if net_target else (urlparse(url).hostname if url else None)
+                    if net_host:
+                        ai_findings += ai_network_scan_run(net_host, job)
+                if ai_findings:
+                    job["log"].append(f"AI scan pass added {len(ai_findings)} additional finding(s) total.")
+                    report["findings"] = (report.get("findings") or []) + ai_findings
+
             job["status"] = "done"
             job["result"] = report
         except (FileNotFoundError, json.JSONDecodeError):
