@@ -568,7 +568,7 @@
       <canvas id="monitorChart" role="img" aria-label="Bar chart of commits per contributor"></canvas>
     </div>
     <div class="chart-wrap" id="monitor-severity-chart-wrap" style="display:none;">
-      <canvas id="monitorSeverityChart" role="img" aria-label="Stacked bar chart of bugs by severity per contributor"></canvas>
+      <canvas id="monitorSeverityChart" role="img" aria-label="Horizontal bar chart ranking contributors by weighted bug risk score"></canvas>
     </div>
     <div class="chart-wrap" id="monitor-timeline-chart-wrap" style="display:none;">
       <canvas id="monitorTimelineChart" role="img" aria-label="Line chart of commits over time per contributor"></canvas>
@@ -576,9 +576,12 @@
     <div class="chart-wrap" id="monitor-scatter-chart-wrap" style="display:none;">
       <canvas id="monitorScatterChart" role="img" aria-label="Scatter chart comparing lines changed to bugs found per contributor"></canvas>
     </div>
+    <div class="chart-wrap" id="monitor-coverage-chart-wrap" style="display:none;">
+      <canvas id="monitorCoverageChart" role="img" aria-label="Bar chart of test coverage percentage per contributor"></canvas>
+    </div>
   </div>
 
-  <div id="monitor-summary-card" class="card" style="display:none;font-size:14px;line-height:1.6;color:#374151;"></div>
+  <div id="monitor-summary-card" class="card" style="display:none;font-size:14px;line-height:1.6;color:var(--text-tertiary);"></div>
 
   <div class="metrics" id="monitor-health-metrics" style="display:none;"></div>
 
@@ -615,7 +618,7 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
     Chart.defaults.color = next === 'dark' ? '#c3c6d4' : '#374151';
     Chart.defaults.borderColor = next === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
     [chartInstance, langChartInstance, repoTimelineChartInstance, monitorChartInstance,
-     monitorSeverityChartInstance, monitorTimelineChartInstance, monitorLinesChartInstance]
+     monitorSeverityChartInstance, monitorTimelineChartInstance, monitorLinesChartInstance, monitorCoverageChartInstance]
       .forEach(inst => { if (inst) inst.update(); });
   }
 });
@@ -1676,6 +1679,7 @@ const monitorChartWrap = document.getElementById('monitor-chart-wrap');
 const monitorSeverityChartWrap = document.getElementById('monitor-severity-chart-wrap');
 const monitorTimelineChartWrap = document.getElementById('monitor-timeline-chart-wrap');
 const monitorScatterChartWrap = document.getElementById('monitor-scatter-chart-wrap');
+const monitorCoverageChartWrap = document.getElementById('monitor-coverage-chart-wrap');
 const monitorTableWrap = document.getElementById('monitor-table-wrap');
 const monitorSummaryCard = document.getElementById('monitor-summary-card');
 const monitorHealthMetrics = document.getElementById('monitor-health-metrics');
@@ -1684,6 +1688,7 @@ let monitorChartInstance = null;
 let monitorSeverityChartInstance = null;
 let monitorTimelineChartInstance = null;
 let monitorLinesChartInstance = null;
+let monitorCoverageChartInstance = null;
 let monitorTableData = [];
 let monitorSortKey = 'commits';
 let monitorSortDir = -1;
@@ -1721,7 +1726,7 @@ function renderMonitorFromState() {
     : monitorRawBugsByAuthor;
 
   if (contributors.length === 0) {
-    [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap].forEach(w => w.style.display = 'none');
+    [monitorChartWrap, monitorSeverityChartWrap, monitorTimelineChartWrap, monitorScatterChartWrap, monitorCoverageChartWrap].forEach(w => w.style.display = 'none');
     monitorTableWrap.innerHTML = '<div class="card">No contributors selected.</div>';
     monitorHealthMetrics.style.display = 'none';
     monitorMvpCard.style.display = 'none';
@@ -1732,6 +1737,7 @@ function renderMonitorFromState() {
   renderTimelineChart(contributors, timeline);
   renderLinesOverTimeChart(contributors, timeline);
   renderSeverityChart(contributors, bugsByAuthor);
+  renderCoverageChart(contributors);
 
   monitorTableData = computeRowData(contributors, bugsByAuthor);
   renderMonitorTable();
@@ -1801,21 +1807,67 @@ function renderMonitorCommitsChart(contributors) {
   });
 }
 
+const SEVERITY_WEIGHTS = { critical: 8, high: 4, medium: 2, low: 1 };
+const SEVERITY_CHART_COLORS = { critical: '#7f1d1d', high: '#dc2626', medium: '#d97706', low: '#059669' };
+
 function renderSeverityChart(contributors, bugsByAuthor) {
   const ctx = document.getElementById('monitorSeverityChart');
   if (monitorSeverityChartInstance) monitorSeverityChartInstance.destroy();
   monitorSeverityChartWrap.style.display = 'block';
-  const labels = contributors.map(c => c.login);
-  const sevColors = { critical: '#7f1d1d', high: '#dc2626', medium: '#d97706', low: '#059669' };
-  const datasets = ['critical', 'high', 'medium', 'low'].map(sev => ({
-    label: sev,
-    data: labels.map(login => (bugsByAuthor[login] ? bugsByAuthor[login].by_severity[sev] : 0)),
-    backgroundColor: sevColors[sev],
-  }));
+
+  const rows = contributors.map(c => {
+    const bySev = bugsByAuthor[c.login] ? bugsByAuthor[c.login].by_severity : { critical: 0, high: 0, medium: 0, low: 0 };
+    const score = SEVERITY_LEVELS.reduce((s, lvl) => s + bySev[lvl] * SEVERITY_WEIGHTS[lvl], 0);
+    const worst = SEVERITY_LEVELS.find(lvl => bySev[lvl] > 0) || 'low';
+    return { login: c.login, score, worst };
+  }).sort((a, b) => b.score - a.score);
+
   monitorSeverityChartInstance = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Bugs by severity per contributor' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+    data: {
+      labels: rows.map(r => r.login),
+      datasets: [{
+        label: 'Risk score',
+        data: rows.map(r => r.score),
+        backgroundColor: rows.map(r => SEVERITY_CHART_COLORS[r.worst]),
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: 'Bug risk score by contributor (weighted by severity, bar color = worst severity)' },
+      },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+}
+
+function renderCoverageChart(contributors) {
+  const ctx = document.getElementById('monitorCoverageChart');
+  if (monitorCoverageChartInstance) monitorCoverageChartInstance.destroy();
+  monitorCoverageChartWrap.style.display = 'block';
+  const sorted = [...contributors].sort((a, b) => (b.test_coverage_pct || 0) - (a.test_coverage_pct || 0));
+  monitorCoverageChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(c => c.login),
+      datasets: [{
+        label: 'Test coverage %',
+        data: sorted.map(c => c.test_coverage_pct || 0),
+        backgroundColor: (sorted.map(c => c.test_coverage_pct || 0)).map(pct => pct >= 50 ? '#059669' : pct >= 20 ? '#d97706' : '#dc2626'),
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: true, text: '% of commits touching a test file, per contributor' } },
+      scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } },
+    },
   });
 }
 
@@ -1877,18 +1929,18 @@ function severityBadgeSmall(level) {
 
 function renderFindingsDetail(row) {
   if (row.findings.length === 0) {
-    return '<div style="padding:12px;color:#9ca3af;font-size:13px;">No bugs found for this contributor.</div>';
+    return '<div style="padding:12px;color:var(--text-muted);font-size:13px;">No bugs found for this contributor.</div>';
   }
   return row.findings.map(f =>
-    '<div style="padding:10px 12px;border-top:1px solid #f0f0f5;">' +
+    '<div style="padding:10px 12px;border-top:1px solid var(--divider);">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;">' +
     '<span style="font-family:monospace;font-size:12px;font-weight:700;">' + f.file + ':' + f.line + '</span>' +
     severityBadgeSmall(f.severity) +
     '</div>' +
-    '<div style="font-size:13px;color:#374151;margin-top:4px;">' + f.description + '</div>' +
-    (f.evidence ? '<div style="font-family:monospace;font-size:11px;color:#6b7280;margin-top:4px;">' + f.evidence + '</div>' : '') +
-    (f.impact ? '<div style="font-size:12px;color:#6b7280;margin-top:4px;"><b>Impact:</b> ' + f.impact + '</div>' : '') +
-    (f.improvement ? '<div style="font-size:12px;color:#6b7280;"><b>Fix:</b> ' + f.improvement + '</div>' : '') +
+    '<div style="font-size:13px;color:var(--text-tertiary);margin-top:4px;">' + f.description + '</div>' +
+    (f.evidence ? '<div style="font-family:monospace;font-size:11px;color:var(--text-secondary);margin-top:4px;">' + f.evidence + '</div>' : '') +
+    (f.impact ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;"><b>Impact:</b> ' + f.impact + '</div>' : '') +
+    (f.improvement ? '<div style="font-size:12px;color:var(--text-secondary);"><b>Fix:</b> ' + f.improvement + '</div>' : '') +
     '</div>'
   ).join('');
 }
@@ -1909,10 +1961,10 @@ function renderMonitorTable() {
   const head = cols.map(col =>
     '<th data-key="' + col.key + '" style="padding:10px;text-align:right;cursor:pointer;user-select:none;">' + col.label + (monitorSortKey === col.key ? (monitorSortDir === -1 ? ' \u25bc' : ' \u25b2') : '') + '</th>'
   ).join('');
-  const rows = sorted.map((c, idx) => '<tr data-idx="' + idx + '" style="cursor:pointer;" title="Click to see this person\'s findings">' +
+  const rows = sorted.map((c, idx) => '<tr data-idx="' + idx + '" style="cursor:pointer;border-top:1px solid var(--divider);" title="Click to see this person\'s findings">' +
     '<td style="padding:10px;display:flex;align-items:center;gap:8px;">' +
     (c.avatar_url ? '<img src="' + c.avatar_url + '" style="width:28px;height:28px;border-radius:50%;">' : '') +
-    '<b>' + c.login + '</b> <span style="font-size:11px;color:#9ca3af;">&#9660;</span></td>' +
+    '<b>' + c.login + '</b> <span style="font-size:11px;color:var(--text-muted);">&#9660;</span></td>' +
     '<td style="padding:10px;text-align:right;">' + c.commits + '</td>' +
     '<td style="padding:10px;text-align:right;"><span class="file-add">+' + c.additions + '</span> <span class="file-del">-' + c.deletions + '</span></td>' +
     '<td style="padding:10px;text-align:right;">' + c.churn_pct + '%</td>' +
@@ -1922,11 +1974,11 @@ function renderMonitorTable() {
     '<td style="padding:10px;text-align:right;">' + c.total_bugs + '</td>' +
     '<td style="padding:10px;text-align:center;">' + riskBadgeFor(c.worst) + '</td>' +
     '</tr>' +
-    '<tr class="detail-row" data-detail-idx="' + idx + '" style="display:none;"><td colspan="9" style="padding:0;background:#f9f9fc;">' + renderFindingsDetail(c) + '</td></tr>'
+    '<tr class="detail-row" data-detail-idx="' + idx + '" style="display:none;"><td colspan="9" style="padding:0;background:var(--surface-alt);">' + renderFindingsDetail(c) + '</td></tr>'
   ).join('');
   monitorTableWrap.innerHTML =
-    '<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);">' +
-    '<thead><tr style="background:#f4f5fb;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    '<table style="width:100%;border-collapse:collapse;background:var(--surface);color:var(--text-primary);border-radius:12px;overflow:hidden;box-shadow:0 1px 3px var(--shadow-soft);">' +
+    '<thead><tr style="background:var(--surface-alt);font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
   monitorTableWrap.querySelectorAll('th[data-key]').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.key;

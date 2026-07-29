@@ -387,7 +387,6 @@ def team_bugs_status(job_id):
 
 
 @app.route("/api/branches")
-@app.route("/api/branches")
 def branches():
     """Lists ALL remote branches for the given repo (cloning/fetching it
     into a local cache first), so the dashboard can offer a GitHub-style
@@ -400,7 +399,10 @@ def branches():
     current = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=cwd)
     branch_list = [
         b.strip() for b in result.stdout.splitlines()
-        if b.strip() and not b.strip().endswith("HEAD")
+        # "origin/main" etc only - excludes the bare "origin" line git prints
+        # for the remote's symbolic HEAD ref (origin/HEAD -> origin/main),
+        # which isn't a real branch you can check out.
+        if b.strip() and "/" in b.strip() and not b.strip().endswith("/HEAD")
     ]
     return jsonify({"branches": branch_list, "current": current.stdout.strip()})
 
