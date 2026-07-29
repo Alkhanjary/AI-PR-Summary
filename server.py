@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -128,27 +129,21 @@ def github_search_users():
     return jsonify({"items": items})
 
 
-CACHE_DIR = Path(__file__).resolve().parent / ".repo-cache"
-CACHE_DIR.mkdir(exist_ok=True)
-
-
 def get_repo_dir(repo, branch=None):
-    """Returns a local working copy of the given owner/repo, cloning it
-    (or fetching updates if already cloned) into a local cache folder.
-    This is what lets the Run scan tab follow whichever repo is picked
-    up top, not just the AI-PR-Summary folder this server lives in.
-    If branch is given, checks that branch out (defaults to whatever the
-    clone's default branch is otherwise)."""
+    """Clones a fresh temporary working copy of the given owner/repo for
+    this one operation. No on-disk cache is kept between calls (each call
+    clones from scratch into a new temp directory) - this is what lets the
+    Run scan tab follow whichever repo is picked up top, not just the
+    AI-PR-Summary folder this server lives in. If branch is given, checks
+    that branch out (defaults to whatever the clone's default branch is
+    otherwise)."""
     if not repo:
         return Path(__file__).resolve().parent
-    local_path = CACHE_DIR / repo.replace("/", "__")
-    if not local_path.exists():
-        subprocess.run(
-            ["git", "clone", "--no-single-branch", f"https://github.com/{repo}.git", str(local_path)],
-            capture_output=True, text=True,
-        )
-    else:
-        subprocess.run(["git", "fetch", "--all", "--quiet"], capture_output=True, text=True, cwd=local_path)
+    local_path = Path(tempfile.mkdtemp(prefix="repo_"))
+    subprocess.run(
+        ["git", "clone", "--no-single-branch", f"https://github.com/{repo}.git", str(local_path)],
+        capture_output=True, text=True,
+    )
     if branch:
         short = branch.split("/", 1)[1] if branch.startswith("origin/") else branch
         subprocess.run(["git", "checkout", short], capture_output=True, text=True, cwd=local_path)
