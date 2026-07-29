@@ -1045,6 +1045,7 @@ def build_and_start_project(target_dir, job):
     run_env.update(detection.get("env", {}))
     run_env["PYTHONIOENCODING"] = "utf-8"
 
+    start_is_docker = "docker" in cmd_display(detection.get("start", "")).lower()
     if detection.get("install"):
         job["log"].append("Installing dependencies: " + cmd_display(detection["install"]))
         try:
@@ -1054,10 +1055,14 @@ def build_and_start_project(target_dir, job):
             )
             if install_proc.returncode != 0:
                 job["log"].append("Dependency install failed:\n" + (install_proc.stderr or "")[-1500:])
-                return None, None
+                if not start_is_docker:
+                    return None, None
+                job["log"].append("Continuing anyway since the start command builds/runs via Docker.")
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             job["log"].append(f"Could not install dependencies: {e}")
-            return None, None
+            if not start_is_docker:
+                return None, None
+            job["log"].append("Continuing anyway since the start command builds/runs via Docker.")
 
     job["log"].append("Starting app: " + cmd_display(detection["start"]))
     try:
