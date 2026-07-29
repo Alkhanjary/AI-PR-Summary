@@ -21,6 +21,7 @@ from summarize_pr import (
     call_llm,
     SYSTEM_PROMPT,
     VULN_REPORT_SYSTEM_PROMPT,
+    PROJECT_DETECT_SYSTEM_PROMPT,
     MAX_CHARS,
 )
 from openai import OpenAI
@@ -769,15 +770,92 @@ def detect_project(target_dir):
     return None
 
 
+IGNORED_SCAN_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".repo-cache",
+                     "dist", "build", ".next", ".pytest_cache", "vendor", "target"}
+MANIFEST_FILES = (
+    "package.json", "requirements.txt", "pyproject.toml", "Pipfile", "Gemfile",
+    "composer.json", "go.mod", "Cargo.toml", "pom.xml", "build.gradle",
+    "Dockerfile", "docker-compose.yml", "docker-compose.yaml", "README.md",
+)
+
+
+def build_project_snapshot(target_dir, max_files=400, max_chars=6000):
+    """Builds a compact description of the project - a capped file listing
+    plus the content of any manifest/entrypoint-ish files present - for the
+    AI project detector to reason about, without shipping the whole repo."""
+    target_dir = Path(target_dir)
+    paths = []
+    for p in sorted(target_dir.rglob("*")):
+        if any(part in IGNORED_SCAN_DIRS for part in p.relative_to(target_dir).parts):
+            continue
+        if p.is_file():
+            paths.append(str(p.relative_to(target_dir)).replace("\\", "/"))
+        if len(paths) >= max_files:
+            break
+
+    snippets = []
+    remaining = max_chars
+    for name in MANIFEST_FILES:
+        fp = target_dir / name
+        if fp.exists() and fp.is_file() and remaining > 200:
+            text = _read_text(fp)[:remaining]
+            snippets.append(f"--- {name} ---\n{text}")
+            remaining -= len(text)
+
+    return "Files:\n" + "\n".join(paths) + "\n\n" + "\n\n".join(snippets)
+
+
+def ai_detect_project(target_dir, job):
+    """Uses the LLM to look at the actual project files (not a fixed list of
+    marker files) and decide whether this is a runnable web app and how to
+    install/start it. Returns a detection dict (matching detect_project's
+    shape) or None if the AI says it's not a web project, or the call fails."""
+    client, model = get_client()
+    if not client:
+        return None
+    try:
+        snapshot = build_project_snapshot(target_dir)
+        raw = call_llm(client, model, snapshot, system_prompt=PROJECT_DETECT_SYSTEM_PROMPT)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
+        info = json.loads(raw)
+    except Exception as e:
+        job["log"].append(f"AI project detection failed ({e}); falling back to heuristics.")
+        return None
+
+    job["log"].append(f"AI project analysis: {info.get('reasoning', '')}")
+    if not info.get("is_web_project") or not info.get("start_command"):
+        return None
+
+    free_port = find_free_port()
+    port_env_var = info.get("port_env_var")
+    env = {port_env_var: str(free_port)} if port_env_var else {}
+    likely_ports = [p for p in (info.get("likely_ports") or []) if isinstance(p, int)]
+    return {
+        "name": info.get("framework") or "AI-detected project",
+        "install": info.get("install_command"),
+        "start": info["start_command"],
+        "env": env,
+        "candidate_ports": [free_port] + likely_ports,
+        "use_shell": True,
+    }
+
+
+def cmd_display(cmd):
+    return cmd if isinstance(cmd, str) else " ".join(cmd)
+
+
 def build_and_start_project(target_dir, job):
     """Installs deps and starts the detected project in the background.
+    Tries AI-based detection first (reads the actual files to figure out
+    what this project is, not a fixed list of frameworks), falling back to
+    filename-heuristic detection if no LLM is configured or it fails.
     Returns (process, url) on success, or (None, None) if nothing could be
     detected/started (details are appended to job['log'] either way)."""
-    detection = detect_project(target_dir)
+    detection = ai_detect_project(target_dir, job) or detect_project(target_dir)
     if not detection:
-        job["log"].append("Could not detect a runnable web project in this folder "
-                           "(looked for package.json, manage.py, requirements.txt, Gemfile, "
-                           "composer.json, go.mod, index.html).")
+        job["log"].append("Could not detect a runnable web project in this folder.")
         return None, None
 
     job["log"].append(f"Detected: {detection['name']}")
@@ -786,7 +864,7 @@ def build_and_start_project(target_dir, job):
     run_env["PYTHONIOENCODING"] = "utf-8"
 
     if detection.get("install"):
-        job["log"].append("Installing dependencies: " + " ".join(detection["install"]))
+        job["log"].append("Installing dependencies: " + cmd_display(detection["install"]))
         try:
             install_proc = subprocess.run(
                 detection["install"], cwd=target_dir, capture_output=True, text=True,
@@ -799,7 +877,7 @@ def build_and_start_project(target_dir, job):
             job["log"].append(f"Could not install dependencies: {e}")
             return None, None
 
-    job["log"].append("Starting app: " + " ".join(detection["start"]))
+    job["log"].append("Starting app: " + cmd_display(detection["start"]))
     try:
         process = subprocess.Popen(
             detection["start"], cwd=target_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
