@@ -1096,9 +1096,15 @@ def build_and_start_project(target_dir, job):
         job["log"].append(f"Could not start the app: {e}")
         return None, None
 
-    port = wait_for_any_port("127.0.0.1", detection["candidate_ports"], timeout_s=60, process=process)
+    # Docker has to build the image (installing deps inside the container)
+    # before the app even starts, which routinely takes well over a minute
+    # on a first run - a plain script/dev-server start doesn't need nearly
+    # as long, so only the Docker case gets the longer allowance.
+    startup_timeout = 240 if start_is_docker else 60
+    job["log"].append(f"Waiting up to {startup_timeout}s for it to start listening...")
+    port = wait_for_any_port("127.0.0.1", detection["candidate_ports"], timeout_s=startup_timeout, process=process)
     if not port:
-        job["log"].append("Timed out waiting for the app to start listening (60s). Stopping it.")
+        job["log"].append(f"Timed out waiting for the app to start listening ({startup_timeout}s). Stopping it.")
         process.terminate()
         return None, None
 
