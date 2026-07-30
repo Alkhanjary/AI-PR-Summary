@@ -1555,7 +1555,7 @@ async function loadVulnScanFromHistory(jobId) {
     if (aiCount > 0) aiNoteEl.textContent = 'AI scan contributed ' + aiCount + ' of these finding(s).';
     const logCard = document.getElementById('vuln-log-card');
     logCard.style.display = pollData.log && pollData.log.length ? 'block' : 'none';
-    document.getElementById('vuln-log-content').textContent = (pollData.log || []).join('\n');
+    document.getElementById('vuln-log-content').innerHTML = formatScanLogLines(pollData.log);
     vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
@@ -1665,6 +1665,16 @@ vulnReportBtn.addEventListener('click', async () => {
 });
 
 const SEVERITY_LEVELS = ['critical', 'high', 'medium', 'low'];
+function formatScanLogLines(lines) {
+  const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return (lines || []).map(line => {
+    const esc = escapeHtml(line);
+    if (line.trim().startsWith('[app]')) return '<div style="color:#0891b2;">' + esc + '</div>';
+    if (line.trim().startsWith('[install]')) return '<div style="color:#9333ea;">' + esc + '</div>';
+    return '<div>' + esc + '</div>';
+  }).join('');
+}
+
 function vulnSeverityClass(level) {
   const lvl = (level || '').toLowerCase();
   return lvl === 'critical' ? 'critical' : lvl === 'high' ? 'high' : lvl === 'medium' ? 'medium' : 'low';
@@ -1823,7 +1833,7 @@ runVulnBtn.addEventListener('click', async () => {
       const pollRes = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
       const pollData = await pollRes.json();
       vulnStatus.innerHTML = '<span class="spinner"></span>Running... (' + pollData.elapsed + 's elapsed)';
-      if (progressLog) progressLog.textContent = pollData.log.join('\n');
+      if (progressLog) progressLog.innerHTML = formatScanLogLines(pollData.log);
       if (progressLog) progressLog.scrollTop = progressLog.scrollHeight;
 
       if (pollData.status === 'done') {
@@ -1860,7 +1870,7 @@ runVulnBtn.addEventListener('click', async () => {
     const logCard = document.getElementById('vuln-log-card');
     const logContent = document.getElementById('vuln-log-content');
     logCard.style.display = 'block';
-    logContent.textContent = (data.log || []).join('\n');
+    logContent.innerHTML = formatScanLogLines(data.log);
 
     vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
