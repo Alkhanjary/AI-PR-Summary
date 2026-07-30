@@ -1050,6 +1050,51 @@ def cmd_display(cmd):
     return cmd if isinstance(cmd, str) else " ".join(cmd)
 
 
+def stream_subprocess(cmd, cwd, env, shell, job, prefix="", timeout=None):
+    """Runs cmd, appending every line of its output to job['log'] as it is
+    produced (not just a summary once it finishes) - this is also what
+    keeps the child's stdout pipe drained, which matters: a verbose build
+    (npm install, docker build, etc.) can otherwise fill the OS pipe buffer
+    and hang the whole subprocess, since nothing would be reading it.
+    A background Timer enforces a hard wall-clock kill if given, since the
+    read loop alone only checks between output lines and a stalled process
+    with no output at all wouldn't otherwise be caught."""
+    job["log"].append(f"$ {cmd_display(cmd)}")
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1, env=env, shell=shell, errors="replace",
+    )
+    timer = None
+    if timeout:
+        timer = threading.Timer(timeout, proc.kill)
+        timer.daemon = True
+        timer.start()
+    try:
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                job["log"].append(prefix + line)
+        proc.wait()
+    finally:
+        if timer:
+            timer.cancel()
+    return proc.returncode
+
+
+def drain_process_stdout(process, job, prefix=""):
+    """Keeps reading a long-running (Popen) process's stdout for its whole
+    lifetime, appending each line to job['log'] live - used for the started
+    app itself (e.g. 'docker compose up'), which keeps producing output
+    long after the port opens and scanning begins."""
+    try:
+        for line in process.stdout:
+            line = line.rstrip()
+            if line:
+                job["log"].append(prefix + line)
+    except (ValueError, OSError):
+        pass
+
+
 def build_and_start_project(target_dir, job):
     """Installs deps and starts the detected project in the background.
     Tries AI-based detection first (reads the actual files to figure out
@@ -1069,18 +1114,18 @@ def build_and_start_project(target_dir, job):
 
     start_is_docker = "docker" in cmd_display(detection.get("start", "")).lower()
     if detection.get("install"):
-        job["log"].append("Installing dependencies: " + cmd_display(detection["install"]))
+        job["log"].append("Installing dependencies...")
         try:
-            install_proc = subprocess.run(
-                detection["install"], cwd=target_dir, capture_output=True, text=True,
-                timeout=300, env=run_env, shell=detection["use_shell"], errors="replace",
+            returncode = stream_subprocess(
+                detection["install"], target_dir, run_env, detection["use_shell"], job,
+                prefix="  [install] ", timeout=300,
             )
-            if install_proc.returncode != 0:
-                job["log"].append("Dependency install failed:\n" + (install_proc.stderr or "")[-1500:])
+            if returncode != 0:
+                job["log"].append(f"Dependency install exited with code {returncode}.")
                 if not start_is_docker:
                     return None, None
                 job["log"].append("Continuing anyway since the start command builds/runs via Docker.")
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        except (FileNotFoundError, OSError) as e:
             job["log"].append(f"Could not install dependencies: {e}")
             if not start_is_docker:
                 return None, None
@@ -1090,11 +1135,14 @@ def build_and_start_project(target_dir, job):
     try:
         process = subprocess.Popen(
             detection["start"], cwd=target_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, env=run_env, shell=detection["use_shell"], errors="replace",
+            text=True, bufsize=1, env=run_env, shell=detection["use_shell"], errors="replace",
         )
     except (FileNotFoundError, OSError) as e:
         job["log"].append(f"Could not start the app: {e}")
         return None, None
+
+    drain_thread = threading.Thread(target=drain_process_stdout, args=(process, job, "  [app] "), daemon=True)
+    drain_thread.start()
 
     # Docker has to build the image (installing deps inside the container)
     # before the app even starts, which routinely takes well over a minute
