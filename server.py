@@ -808,6 +808,26 @@ def build_project_snapshot(target_dir, max_files=400, max_chars=6000):
             snippets.append(f"--- {name} ---\n{text}")
             remaining -= len(text)
 
+    # Root-only manifest lookup above misses Dockerfiles/compose files
+    # nested per-service in a monorepo (e.g. backend/Dockerfile) - search
+    # the whole tree for a few of those specifically so a Dockerized
+    # project still gets recognized as one even without a root Dockerfile.
+    seen_docker_paths = set()
+    for pattern in ("Dockerfile*", "docker-compose*.yml", "docker-compose*.yaml", "compose*.yml", "compose*.yaml"):
+        if remaining <= 200:
+            break
+        for fp in sorted(target_dir.rglob(pattern))[:3]:
+            rel_parts = fp.relative_to(target_dir).parts
+            if any(part in IGNORED_SCAN_DIRS for part in rel_parts):
+                continue
+            rel_path = str(fp.relative_to(target_dir)).replace("\\", "/")
+            if not fp.is_file() or rel_path in seen_docker_paths or remaining <= 200:
+                continue
+            seen_docker_paths.add(rel_path)
+            text = _read_text(fp)[:remaining]
+            snippets.append(f"--- {rel_path} ---\n{text}")
+            remaining -= len(text)
+
     return "Files:\n" + "\n".join(paths) + "\n\n" + "\n\n".join(snippets)
 
 
@@ -826,35 +846,49 @@ CODE_SCAN_EXTENSIONS = {
 }
 
 
-def list_source_files(target_dir, max_files=150, max_total_chars=40000):
-    """Collects source files (skipping noise dirs, binaries, huge files) up
-    to a total character budget, for the AI code scan to review directly."""
+def list_source_files(target_dir, max_files=5000):
+    """Collects EVERY matching source file (skipping noise dirs, binaries,
+    absurdly large generated files) - no total-size cutoff, since the AI
+    code scan batches these across as many calls as it takes instead of
+    truncating the review."""
     target_dir = Path(target_dir)
     files = []
-    total = 0
     for p in sorted(target_dir.rglob("*")):
         if any(part in IGNORED_SCAN_DIRS for part in p.relative_to(target_dir).parts):
             continue
         if not p.is_file() or p.suffix.lower() not in CODE_SCAN_EXTENSIONS:
             continue
         try:
-            if p.stat().st_size > 200_000:
+            if p.stat().st_size > 300_000:
                 continue
         except OSError:
             continue
         text = _read_text(p)
         if not text:
             continue
-        if total + len(text) > max_total_chars:
-            remaining = max_total_chars - total
-            if remaining < 200:
-                break
-            text = text[:remaining]
         files.append((str(p.relative_to(target_dir)).replace("\\", "/"), text))
-        total += len(text)
-        if len(files) >= max_files or total >= max_total_chars:
+        if len(files) >= max_files:
             break
     return files
+
+
+def batch_files_by_char_budget(files, budget=30000):
+    """Groups (path, text) pairs into batches that each fit a character
+    budget, so a large codebase gets reviewed across multiple AI calls
+    (each file staying whole - never split mid-file) instead of being cut
+    off once one call's budget runs out."""
+    batches = []
+    current, current_size = [], 0
+    for path, text in files:
+        entry_size = len(text) + len(path) + 20
+        if current and current_size + entry_size > budget:
+            batches.append(current)
+            current, current_size = [], 0
+        current.append((path, text))
+        current_size += entry_size
+    if current:
+        batches.append(current)
+    return batches
 
 
 def classify_scan_type(finding):
@@ -871,8 +905,11 @@ def classify_scan_type(finding):
 
 
 def ai_code_scan_run(target_dir, job):
-    """Has the AI read actual source files and report vulnerabilities in its
-    own judgement, instead of only matching the scanner's fixed regex rules."""
+    """Has the AI read EVERY matching source file and report vulnerabilities
+    in its own judgement, instead of only matching the scanner's fixed regex
+    rules. Batches the files across as many AI calls as it takes (each file
+    kept whole, never split) so a large codebase gets fully reviewed instead
+    of silently truncated to whatever fits one call's budget."""
     client, model = get_client()
     if not client:
         job["log"].append("AI code scan skipped: no LLM configured.")
@@ -881,24 +918,33 @@ def ai_code_scan_run(target_dir, job):
     if not files:
         job["log"].append("AI code scan: no source files found to review.")
         return [], 0
-    body = "\n\n".join(
-        f"=== {path} ===\n" + "\n".join(f"{i + 1}: {line}" for i, line in enumerate(text.splitlines()))
-        for path, text in files
-    )
-    job["log"].append(f"AI code scan: reviewing {len(files)} file(s)...")
-    try:
-        raw = call_llm(client, model, body, system_prompt=AI_CODE_SCAN_SYSTEM_PROMPT)
-        findings = parse_json_response(raw)
-        if not isinstance(findings, list):
-            findings = []
-    except Exception as e:
-        job["log"].append(f"AI code scan failed: {e}")
-        return [], len(files)
-    for f in findings:
+
+    batches = batch_files_by_char_budget(files)
+    job["log"].append(f"AI code scan: reviewing {len(files)} file(s) across {len(batches)} batch(es)...")
+
+    all_findings = []
+    for i, batch in enumerate(batches, 1):
+        job["log"].append(f"AI code scan: batch {i}/{len(batches)} ({len(batch)} file(s): " +
+                           ", ".join(p for p, _ in batch[:5]) + (", ..." if len(batch) > 5 else "") + ")")
+        body = "\n\n".join(
+            f"=== {path} ===\n" + "\n".join(f"{j + 1}: {line}" for j, line in enumerate(text.splitlines()))
+            for path, text in batch
+        )
+        try:
+            raw = call_llm(client, model, body, system_prompt=AI_CODE_SCAN_SYSTEM_PROMPT)
+            findings = parse_json_response(raw)
+            if isinstance(findings, list):
+                all_findings += findings
+        except Exception as e:
+            job["log"].append(f"AI code scan batch {i}/{len(batches)} failed: {e}")
+
+    for f in all_findings:
         f["source"] = "ai-code-scan"
         f["scan_type"] = "code"
-    job["log"].append(f"AI code scan found {len(findings)} finding(s).")
-    return findings, len(files)
+        if isinstance(f.get("file"), str):
+            f["file"] = re.sub(r"^===\s*|\s*===$", "", f["file"]).strip()
+    job["log"].append(f"AI code scan found {len(all_findings)} finding(s) across {len(files)} file(s).")
+    return all_findings, len(files)
 
 
 def probe_url(url, timeout=8):

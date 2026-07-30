@@ -175,7 +175,7 @@ you are not limited to a fixed rule list.
 
 Return ONLY a JSON array (no markdown fences, no commentary), each element:
 {
-  "file": "path exactly as shown in the header",
+  "file": "ONLY the path itself, e.g. src/app.py - never include the '=== ' / ' ===' markers around it in the header",
   "line": integer line number (best estimate from the numbering shown),
   "severity": "critical" | "high" | "medium" | "low",
   "category": "short kebab-case slug, e.g. sql-injection",
