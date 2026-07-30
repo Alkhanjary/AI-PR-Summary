@@ -158,6 +158,14 @@
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d1d5db; border-top-color: #4f46e5; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 7px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  .simple-steps { display: flex; flex-direction: column; gap: 9px; }
+  .simple-step { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text-secondary); }
+  .simple-step-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .simple-step-dot-done { background: #22c55e; }
+  .simple-step-dot-active { background: #4f46e5; box-shadow: 0 0 0 4px rgba(79,70,229,0.18); animation: pulse-dot 1.2s ease-in-out infinite; }
+  .simple-step-dot-warn { background: #f59e0b; }
+  @keyframes pulse-dot { 0%, 100% { box-shadow: 0 0 0 4px rgba(79,70,229,0.18); } 50% { box-shadow: 0 0 0 7px rgba(79,70,229,0.1); } }
+
   .empty-state { text-align: center; padding: 3.5rem 2rem; border: 1.5px dashed var(--border-soft); border-radius: 16px; background: var(--surface-alt); }
   .empty-state-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%; background: var(--surface-alt); color: #a78bfa; display: flex; align-items: center; justify-content: center; }
   .empty-state-icon svg { width: 26px; height: 26px; }
@@ -1665,6 +1673,57 @@ vulnReportBtn.addEventListener('click', async () => {
 });
 
 const SEVERITY_LEVELS = ['critical', 'high', 'medium', 'low'];
+const SIMPLE_STEP_RULES = [
+  [/^Uploaded (\d+) file/, m => 'Received your ' + m[1] + ' uploaded file(s)'],
+  [/^Target ready/, () => 'Project files ready'],
+  [/^AI project analysis: (.+)/, m => 'Looked at your project: ' + m[1]],
+  [/^Detected: (.+)/, m => 'Detected project type: ' + m[1]],
+  [/^Installing dependencies/, () => 'Installing dependencies'],
+  [/^Dependency install exited with code (\d+)/, m => 'Dependency install finished with some issues (code ' + m[1] + ')'],
+  [/^Continuing anyway since the start command builds\/runs via Docker/, () => 'Continuing on to Docker anyway'],
+  [/^Starting app: (.+)/, () => 'Starting the app'],
+  [/^Waiting up to (\d+)s/, m => 'Waiting for the app to come up (up to ' + m[1] + 's)'],
+  [/^App is up at (.+)/, m => 'App is running at ' + m[1]],
+  [/^Timed out waiting/, () => 'The app took too long to start'],
+  [/^Could not start the app/, () => 'Could not start the app'],
+  [/^Could not install dependencies/, () => 'Could not install dependencies'],
+  [/^Stopped the auto-started app/, () => 'Stopped the app'],
+  [/^Starting scan:/, () => 'Running the pattern-based vulnerability scanner'],
+  [/^Scan scope: (.+)/, m => 'Scanning: ' + m[1]],
+  [/^AI code scan: reviewing (\d+) file\(s\) across (\d+) batch/, m => 'AI reviewing your code (' + m[1] + ' files)'],
+  [/^AI code scan found (\d+) finding/, m => 'AI code review complete — ' + m[1] + ' finding(s)'],
+  [/^AI web scan: probed/, () => 'AI testing the live web app'],
+  [/^AI web scan found (\d+) finding/, m => 'AI web scan complete — ' + m[1] + ' finding(s)'],
+  [/^AI network scan: probing/, () => 'Scanning the network for open ports'],
+  [/^AI network scan found (\d+) finding/, m => 'AI network scan complete — ' + m[1] + ' finding(s)'],
+  [/^AI scan pass added (\d+)/, m => 'AI added ' + m[1] + ' more finding(s) on top of the pattern scan'],
+  [/^Skipping (web|network) scan: (.+)/, m => 'Skipped the ' + m[1] + ' scan — ' + m[2]],
+  [/^\[\*\] JSON report written/, () => 'Report saved'],
+];
+
+function toSimpleStep(line) {
+  for (const [pattern, format] of SIMPLE_STEP_RULES) {
+    const m = line.match(pattern);
+    if (m) return format(m);
+  }
+  return null;
+}
+
+function renderSimpleProgress(lines) {
+  const steps = [];
+  (lines || []).forEach(line => {
+    const simple = toSimpleStep(line.trim());
+    if (simple && steps[steps.length - 1] !== simple) steps.push(simple);
+  });
+  if (steps.length === 0) return '<div class="hint-text">Getting started...</div>';
+  return '<div class="simple-steps">' + steps.map((s, i) => {
+    const isLast = i === steps.length - 1;
+    const looksLikeIssue = /could not|timed out|skipped|issues/i.test(s);
+    const dotClass = looksLikeIssue ? 'simple-step-dot-warn' : (isLast ? 'simple-step-dot-active' : 'simple-step-dot-done');
+    return '<div class="simple-step"><span class="simple-step-dot ' + dotClass + '"></span>' + s + '</div>';
+  }).join('') + '</div>';
+}
+
 function formatScanLogLines(lines) {
   const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return (lines || []).map(line => {
@@ -1806,7 +1865,22 @@ runVulnBtn.addEventListener('click', async () => {
   lastVulnFindings = [];
   currentVulnFilter = 'all';
   currentVulnTypeFilter = 'all';
-  vulnResults.innerHTML = '<div class="card"><div class="section-label">Progress</div><div id="vuln-progress-log" style="font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div></div>';
+  vulnResults.innerHTML =
+    '<div class="card">' +
+    '<div class="row" style="margin:0;justify-content:space-between;">' +
+    '<span class="section-label" style="margin:0;">Progress</span>' +
+    '<button id="vuln-progress-toggle" style="font-size:11px;padding:4px 10px;">Show technical details</button>' +
+    '</div>' +
+    '<div id="vuln-progress-simple" style="margin-top:8px;"></div>' +
+    '<div id="vuln-progress-log" style="display:none;font-family:monospace;font-size:12px;color:#374151;max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-top:8px;"></div>' +
+    '</div>';
+  let vulnProgressShowRaw = false;
+  document.getElementById('vuln-progress-toggle').addEventListener('click', function () {
+    vulnProgressShowRaw = !vulnProgressShowRaw;
+    document.getElementById('vuln-progress-simple').style.display = vulnProgressShowRaw ? 'none' : 'block';
+    document.getElementById('vuln-progress-log').style.display = vulnProgressShowRaw ? 'block' : 'none';
+    this.textContent = vulnProgressShowRaw ? 'Show simple view' : 'Show technical details';
+  });
   document.getElementById('vuln-log-card').style.display = 'none';
   document.getElementById('vuln-ai-note').style.display = 'none';
   vulnReportRow.style.display = 'none';
@@ -1826,6 +1900,7 @@ runVulnBtn.addEventListener('click', async () => {
     }
     const jobId = startData.job_id;
     const progressLog = document.getElementById('vuln-progress-log');
+    const progressSimple = document.getElementById('vuln-progress-simple');
 
     let data;
     while (true) {
@@ -1833,6 +1908,7 @@ runVulnBtn.addEventListener('click', async () => {
       const pollRes = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
       const pollData = await pollRes.json();
       vulnStatus.innerHTML = '<span class="spinner"></span>Running... (' + pollData.elapsed + 's elapsed)';
+      if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(pollData.log);
       if (progressLog) progressLog.innerHTML = formatScanLogLines(pollData.log);
       if (progressLog) progressLog.scrollTop = progressLog.scrollHeight;
 
