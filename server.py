@@ -1059,6 +1059,29 @@ def ai_network_scan_run(host, job):
     return findings
 
 
+# CLI tools that are normally installed as pip packages (not guaranteed to
+# be on PATH as a standalone executable, even when the package itself is
+# installed) - invoking them as "python -m <tool>" always works as long as
+# the package is installed in that same Python environment, sidestepping
+# PATH entirely. The AI detector doesn't know which "python" we'll actually
+# run it with, so its raw suggestion gets normalized to PYTHON_CMD here.
+PYTHON_MODULE_TOOLS = {
+    "uvicorn", "gunicorn", "hypercorn", "flask", "pytest", "black", "mypy",
+    "celery", "streamlit", "pip", "django-admin", "fastapi",
+}
+
+
+def normalize_python_command(cmd_str):
+    if not isinstance(cmd_str, str) or not cmd_str.strip():
+        return cmd_str
+    parts = cmd_str.strip().split(None, 1)
+    first = parts[0]
+    rest = parts[1] if len(parts) > 1 else ""
+    if first in PYTHON_MODULE_TOOLS:
+        return f'"{PYTHON_CMD}" -m {first}' + (f" {rest}" if rest else "")
+    return cmd_str
+
+
 def ai_detect_project(target_dir, job):
     """Uses the LLM to look at the actual project files (not a fixed list of
     marker files) and decide whether this is a runnable web app and how to
@@ -1083,10 +1106,14 @@ def ai_detect_project(target_dir, job):
     port_env_var = info.get("port_env_var")
     env = {port_env_var: str(free_port)} if port_env_var else {}
     likely_ports = [p for p in (info.get("likely_ports") or []) if isinstance(p, int)]
+    start_cmd = normalize_python_command(info["start_command"])
+    install_cmd = normalize_python_command(info.get("install_command"))
+    if start_cmd != info["start_command"]:
+        job["log"].append(f"Normalized start command to use this Python directly: {start_cmd}")
     return {
         "name": info.get("framework") or "AI-detected project",
-        "install": info.get("install_command"),
-        "start": info["start_command"],
+        "install": install_cmd,
+        "start": start_cmd,
         "env": env,
         "candidate_ports": [free_port] + likely_ports,
         "use_shell": True,
