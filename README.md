@@ -381,6 +381,26 @@ HTML file that talks to it, so `dashboard/index.html` can be opened directly
   needs (`npm`, `pip`, `docker`, etc.) - only use it against projects/URLs
   you trust, since it executes real build/run commands from that folder.
 
+### Docker (only needed if the project you're scanning uses it)
+
+If the folder you want to auto-build-and-scan only runs via a Dockerfile or
+docker-compose file (no plain `npm start`/`python app.py`/etc. alternative),
+install Docker Desktop on the machine running `server.py`:
+
+1. Download "Docker Desktop for Windows" from
+   https://www.docker.com/products/docker-desktop/
+2. Run the installer (needs admin rights) - if it prompts to enable WSL2,
+   follow that prompt
+3. Restart your machine if the installer asks you to
+4. Launch Docker Desktop and wait for it to fully start (the whale icon in
+   the system tray stops animating once it's ready)
+5. Confirm it worked from a terminal: `docker --version`
+
+Nothing else in this tool needs Docker - code scanning just reads files, and
+web/network scanning works against any URL/IP regardless of how it was
+started. It's only required for the specific case of auto-building a
+Docker-only project.
+
 ## Notes
 
 - Diffs over ~8,000 characters are truncated automatically.
