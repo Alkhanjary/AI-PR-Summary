@@ -143,6 +143,12 @@ paths not shown in the file listing). If truly nothing in the evidence suggests
 a runnable web app (e.g. it's a library, CLI tool, or data/config-only repo),
 set is_web_project to false and leave the command fields null.
 
+Never use a file inside a generated/build-output path as an install or start
+target - e.g. *.egg-info/, *.dist-info/, dist/, build/, .next/, __pycache__/,
+or anything similar. These are produced BY building/installing the project,
+not meant to be read to install it; a real requirements.txt/pyproject.toml/
+package.json lives at (or near) the project root, not inside one of these.
+
 If a Dockerfile or docker-compose file is the right way to run this project,
 prefer that over guessing at a raw language command - but keep the start
 command running in the FOREGROUND (e.g. "docker compose up", never "-d" /

@@ -766,7 +766,7 @@ def detect_project(target_dir):
         return {
             "name": "Static HTML",
             "install": None,
-            "start": ["py", "-m", "http.server", str(free_port), "--directory", str(static_dir)],
+            "start": [PYTHON_CMD, "-m", "http.server", str(free_port), "--directory", str(static_dir)],
             "env": {},
             "candidate_ports": [free_port],
             "use_shell": use_shell,
@@ -791,7 +791,8 @@ def build_project_snapshot(target_dir, max_files=400, max_chars=6000):
     target_dir = Path(target_dir)
     paths = []
     for p in sorted(target_dir.rglob("*")):
-        if any(part in IGNORED_SCAN_DIRS for part in p.relative_to(target_dir).parts):
+        rel_parts = p.relative_to(target_dir).parts
+        if any(part in IGNORED_SCAN_DIRS or part.endswith((".egg-info", ".dist-info")) for part in rel_parts):
             continue
         if p.is_file():
             paths.append(str(p.relative_to(target_dir)).replace("\\", "/"))
@@ -1200,11 +1201,24 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             if built_url:
                 url = built_url
 
+        # Stop clearly and say exactly what's missing, rather than letting
+        # the external scanner abort the whole run with a generic message
+        # that doesn't say which requested scan type actually caused it.
+        missing_targets = []
+        if "web" in scan_types and not url:
+            missing_targets.append("web scan: no target URL (auto-build didn't produce one, and none was entered)")
+        if "network" in scan_types and not net_target and not url:
+            missing_targets.append("network scan: no host/IP available")
+        if missing_targets:
+            job["status"] = "error"
+            job["error"] = "Scan stopped before running - could not proceed with: " + "; ".join(missing_targets)
+            return
+
         tmpdir = tempfile.mkdtemp()
         json_out = str(Path(tmpdir) / "report.json")
         scan_arg = ",".join(scan_types) if scan_types else "code"
         cmd = [
-            "py", str(OTHER_SCANNER_PATH), str(target_dir),
+            PYTHON_CMD, str(OTHER_SCANNER_PATH), str(target_dir),
             "--json", json_out,
             "--scan", scan_arg,
             "--fail-on", fail_on,
