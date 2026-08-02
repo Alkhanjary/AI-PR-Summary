@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -471,7 +471,7 @@ def team_report():
 
     title = "Team Performance Report"
     subtitle = (range_label + " &middot; " if range_label else "") + \
-        "generated " + datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        "generated " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     subtitle_plain = subtitle.replace("&middot;", "-")
 
     if fmt == "markdown":
@@ -1678,6 +1678,27 @@ def cmd_display(cmd):
     return cmd if isinstance(cmd, str) else " ".join(cmd)
 
 
+# Env vars holding this tool's own credentials. The auto-build feature runs
+# build/start commands that come from the scanned project itself (npm
+# postinstall hooks, Dockerfiles, arbitrary start scripts), so that code is
+# untrusted - handing it the server's full environment would leak the user's
+# GitHub token and LLM API key to any repo they scan.
+_SECRET_ENV_KEYS = {
+    "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "GITHUB_TOKEN",
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN",
+}
+
+
+def _sanitized_child_env():
+    """A copy of the environment with this tool's own secrets removed, for
+    subprocesses whose command line originates from scanned/untrusted code."""
+    env = os.environ.copy()
+    for key in list(env):
+        if key in _SECRET_ENV_KEYS or key.endswith(("_API_KEY", "_TOKEN", "_SECRET")):
+            env.pop(key, None)
+    return env
+
+
 def stream_subprocess(cmd, cwd, env, shell, job, prefix="", timeout=None):
     """Runs cmd, appending every line of its output to job['log'] as it is
     produced (not just a summary once it finishes) - this is also what
@@ -2043,7 +2064,7 @@ def build_and_start_project(target_dir, job):
         det = _ensure_install_step(det, target_dir, job)
         run_cwd = Path(det.get("cwd") or target_dir)
         job["log"].append(f"Trying: {det['name']}" + (f" (from {run_cwd.name}/)" if run_cwd != Path(target_dir) else ""))
-        run_env = os.environ.copy()
+        run_env = _sanitized_child_env()
         run_env.update(det.get("env", {}))
         run_env["PYTHONIOENCODING"] = "utf-8"
 
@@ -2287,15 +2308,30 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             job["log"].append(f"Scanning folder in place (no upload): {target_dir}")
         elif files:
             upload_dir = Path(tempfile.mkdtemp())
+            upload_root = upload_dir.resolve()
+            rejected = 0
             for f in files:
                 rel_path = f.get("path", "").lstrip("/\\")
                 if not rel_path:
                     continue
                 dest = upload_dir / rel_path
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(f.get("content", ""), encoding="utf-8", errors="replace")
+                # Path traversal guard: the client controls these paths, and
+                # neither lstrip() nor pathlib stops "../.." from climbing out
+                # of the temp dir (on Windows an absolute "C:/..." entry even
+                # replaces the base entirely). Resolve and confirm the result
+                # is still inside the upload dir before writing anything.
+                try:
+                    resolved = dest.resolve()
+                    resolved.relative_to(upload_root)
+                except (ValueError, OSError):
+                    rejected += 1
+                    continue
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                resolved.write_text(f.get("content", ""), encoding="utf-8", errors="replace")
             target_dir = upload_dir
-            job["log"].append(f"Uploaded {len(files)} file(s) to scan: {target_dir}")
+            job["log"].append(f"Uploaded {len(files) - rejected} file(s) to scan: {target_dir}")
+            if rejected:
+                job["log"].append(f"Ignored {rejected} upload path(s) that pointed outside the scan folder.")
             _warn_missing_manifests(target_dir, job, auto_build and "web" in scan_types)
         else:
             job["log"].append(f"Cloning {repo}...")
@@ -3653,23 +3689,59 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             ("RIGHTPADDING",  (1, 0), (1,  -1), 8),
         ]))
 
+        # A Paragraph inside a table cell cannot be split by reportlab, so a
+        # single very long value (a verbose AI write-up, a huge minified
+        # evidence line) would be an unsplittable flowable taller than the
+        # page and abort the whole document. Splitting the RAW text into
+        # page-sized chunks first keeps every row small enough to lay out.
+        CHUNK = 1400
+
+        def _chunk_raw(raw):
+            raw = raw or ""
+            if len(raw) <= CHUNK:
+                return [raw]
+            out, rest = [], raw
+            while len(rest) > CHUNK:
+                cut = rest.rfind(" ", 0, CHUNK)
+                if cut <= 0:
+                    cut = CHUNK
+                out.append(rest[:cut])
+                rest = rest[cut:].lstrip()
+            if rest:
+                out.append(rest)
+            return out
+
         body_paras = []
         for bkind, btext in card_blocks:
+            # A pipe-table can land inside a card when AI-written prose happens
+            # to contain "|" characters. btext is then a list of rows, so it
+            # must be flattened before any string handling below.
+            if bkind == "table" or not isinstance(btext, str):
+                for row in (btext if isinstance(btext, list) else []):
+                    cells = [c for c in row if str(c).strip()]
+                    if cells:
+                        body_paras.append(Paragraph(_rich(" | ".join(str(c) for c in cells)), S_FBOD))
+                continue
             lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", btext)
             if lbl_m and bkind == "bullet":
                 lbl = xml_escape(lbl_m.group(1))
-                val = _rich(lbl_m.group(2))
                 # Evidence / code lines get monospace treatment
                 if lbl_m.group(1).lower() in ("evidence", "code"):
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>', S_FBOD))
-                    body_paras.append(Paragraph(
-                        xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY)),
-                        S_FCOD))
+                    raw_code = _ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY)
+                    for piece in _chunk_raw(raw_code):
+                        body_paras.append(Paragraph(xml_escape(piece), S_FCOD))
                 else:
-                    body_paras.append(Paragraph(f'<b>{lbl}:</b>  {val}', S_FBOD))
+                    pieces = _chunk_raw(lbl_m.group(2))
+                    body_paras.append(Paragraph(f'<b>{lbl}:</b>  {_rich(pieces[0])}', S_FBOD))
+                    for piece in pieces[1:]:
+                        body_paras.append(Paragraph(_rich(piece), S_FBOD))
             else:
                 prefix = "• " if bkind == "bullet" else ""
-                body_paras.append(Paragraph(prefix + _rich(btext), S_FBOD))
+                pieces = _chunk_raw(btext)
+                body_paras.append(Paragraph(prefix + _rich(pieces[0]), S_FBOD))
+                for piece in pieces[1:]:
+                    body_paras.append(Paragraph(_rich(piece), S_FBOD))
 
         # The card's border is drawn per-section rather than by wrapping the
         # whole thing in an outer Table. A KeepTogether nested inside a table
@@ -3683,13 +3755,19 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
 
         elements = [hdr]
         if body_paras:
-            body_tbl = Table([[body_paras]], colWidths=[CNTW])
+            # One row PER paragraph, not one cell holding them all. reportlab
+            # can only split a table between rows - a single row taller than
+            # the page raises LayoutError and kills the whole document, which
+            # is exactly what a long AI write-up produces.
+            body_tbl = Table([[p] for p in body_paras], colWidths=[CNTW], repeatRows=0)
             body_tbl.setStyle(TableStyle([
                 ("BACKGROUND",    (0, 0), (-1, -1), bg),
                 ("LEFTPADDING",   (0, 0), (-1, -1), 10),
                 ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
-                ("TOPPADDING",    (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING",    (0, 0), (0, 0), 8),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 8),
+                ("TOPPADDING",    (0, 1), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -2), 1),
                 ("VALIGN",        (0, 0), (-1, -1), "TOP"),
                 ("LINEBEFORE",    (0, 0), (0, -1), 1, fg),
                 ("LINEAFTER",     (-1, 0), (-1, -1), 1, fg),
@@ -3699,8 +3777,12 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         else:
             hdr.setStyle(TableStyle([("LINEBELOW", (0, -1), (-1, -1), 1, fg)]))
 
-        # KeepTogether at the top level is fine - it only breaks inside a cell.
-        return [Spacer(1, 6), KeepTogether(elements)]
+        # Only keep the card intact when it's short enough to actually fit on
+        # one page; forcing KeepTogether on a long card re-creates the same
+        # unsplittable-flowable crash it's meant to avoid.
+        if len(body_paras) <= 6:
+            return [Spacer(1, 6), KeepTogether(elements)]
+        return [Spacer(1, 6)] + elements
 
     # ── Pre-group blocks: flatten h4 + following bullets into finding cards ─
     raw_blocks = parse_markdown_blocks(md_text)
@@ -3846,7 +3928,7 @@ def _report_filename(label, timestamp, ext):
     try:
         stamp = datetime.fromtimestamp(float(timestamp)).strftime("%Y-%m-%d_%H%M")
     except (TypeError, ValueError, OSError):
-        stamp = datetime.utcnow().strftime("%Y-%m-%d_%H%M")
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
 
     return f"{slug}_{stamp}_vuln-report.{ext}"
 
@@ -3939,7 +4021,7 @@ def vuln_scan_report():
     target_bit = f"{scan_label} &middot; " if scan_label else ""
     subtitle = (
         f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
-        f"&middot; generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+        f"&middot; generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     subtitle_plain = subtitle.replace("&middot;", "-")
 
