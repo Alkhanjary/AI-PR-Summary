@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__get_page_text",
+      "mcp__Claude_Browser__read_network_requests",
+      "mcp__Claude_Browser__preview_logs",
+      "mcp__Claude_Browser__preview_list",
+      "mcp__Claude_Browser__tabs_context",
+      "mcp__Claude_Browser__find",
+      "Bash(curl -s http://127.0.0.1:5000/*)",
+      "Bash(curl -s \"http://127.0.0.1:5000/*)",
+      "Bash(curl -s http://127.0.0.1:*)",
+      "Bash(curl -s \"http://127.0.0.1:*)",
+      "Bash(curl -sI http://127.0.0.1:*)",
+      "Bash(py -m pip show *)",
+      "Bash(py -m pip list*)",
+      "Bash(py -m py_compile *)",
+      "Bash(py -m pytest)",
+      "Bash(py -m pytest *)",
+      "Bash(py --version)",
+      "Bash(py -V)",
+      "Bash(tasklist*)",
+      "Bash(where *)"
+    ]
+  }
+}

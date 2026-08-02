@@ -585,8 +585,10 @@
     <div id="vuln-log-content" style="display:none;font-family:monospace;font-size:12px;color:var(--text-secondary);max-height:300px;overflow-y:auto;white-space:pre-wrap;margin-top:8px;"></div>
   </div>
   <div id="vuln-summary" class="metrics" style="display:none;"></div>
+  <div class="row" id="vuln-review-tabs" style="display:none;"></div>
   <div class="row" id="vuln-severity-filter" style="display:none;"></div>
   <div class="row" id="vuln-type-filter" style="display:none;"></div>
+  <div id="vuln-dismissed-note" class="hint-text" style="display:none;margin:0 0 0.5rem;"></div>
 
   <div class="panel-card report-card" id="vuln-report-row" style="display:none;">
     <div class="panel-card-title">AI-generated report</div>
@@ -1642,10 +1644,83 @@ const vulnReportBtn = document.getElementById('vuln-report-btn');
 const vulnReportStatus = document.getElementById('vuln-report-status');
 const vulnSeverityFilterEl = document.getElementById('vuln-severity-filter');
 const vulnTypeFilterEl = document.getElementById('vuln-type-filter');
+const vulnReviewTabsEl = document.getElementById('vuln-review-tabs');
+const vulnDismissedNoteEl = document.getElementById('vuln-dismissed-note');
 let lastVulnJobId = null;
 let lastVulnFindings = [];
 let currentVulnFilter = 'all';
 let currentVulnTypeFilter = 'all';
+// 'review' = findings still worth looking at, 'dismissed' = judged false
+// positives. Kept apart because a scan of 27 files produced 178 detections of
+// which most were test fixtures, and mixing them buries the real work.
+let currentVulnBucket = 'review';
+
+function isDismissedFinding(f) {
+  const v = String(f.ai_verdict || '').trim().toLowerCase();
+  if (['false_positive', 'false-positive', 'falsepositive', 'not_a_finding', 'dismissed'].includes(v)) return true;
+  return !!f.likely_test_fixture;
+}
+
+function vulnBucketFindings(bucket) {
+  return lastVulnFindings.filter(f => isDismissedFinding(f) === (bucket === 'dismissed'));
+}
+
+function renderVulnReviewTabs() {
+  const nDismissed = lastVulnFindings.filter(isDismissedFinding).length;
+  const nReview = lastVulnFindings.length - nDismissed;
+  if (!lastVulnFindings.length || !nDismissed) {
+    vulnReviewTabsEl.style.display = 'none';
+    vulnReviewTabsEl.innerHTML = '';
+    currentVulnBucket = 'review';
+    return;
+  }
+  const opts = [
+    ['review', 'Needs review', nReview],
+    ['dismissed', 'Possible false positives', nDismissed],
+  ];
+  vulnReviewTabsEl.style.display = 'flex';
+  vulnReviewTabsEl.innerHTML = '<div class="segmented" id="vuln-bucket-segmented">' +
+    opts.map(([key, label, n]) =>
+      '<div class="segmented-option' + (key === currentVulnBucket ? ' active' : '') +
+      '" data-bucket="' + key + '">' + label + ' (' + n + ')</div>'
+    ).join('') + '</div>';
+  vulnReviewTabsEl.querySelectorAll('.segmented-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      currentVulnBucket = opt.dataset.bucket;
+      vulnReviewTabsEl.querySelectorAll('.segmented-option').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      // Severity/type pills describe whichever bucket is showing, so reset
+      // both filters rather than carrying a stale selection across tabs.
+      currentVulnFilter = 'all';
+      currentVulnTypeFilter = 'all';
+      refreshVulnBucketView();
+    });
+  });
+}
+
+// Re-renders the pills and the card list for the bucket currently selected.
+function refreshVulnBucketView() {
+  const bucket = vulnBucketFindings(currentVulnBucket);
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  bucket.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+  renderVulnFilterPills(counts);
+  renderVulnTypeFilterPills(bucket);
+  renderVulnFindingsList();
+}
+
+// Single entry point after a scan finishes or is loaded from history.
+function showVulnFindings(findings) {
+  lastVulnFindings = findings || [];
+  currentVulnFilter = 'all';
+  currentVulnTypeFilter = 'all';
+  currentVulnBucket = 'review';
+  // If everything got dismissed, land on that tab rather than an empty one.
+  if (lastVulnFindings.length && !vulnBucketFindings('review').length) {
+    currentVulnBucket = 'dismissed';
+  }
+  renderVulnReviewTabs();
+  refreshVulnBucketView();
+}
 
 function renderVulnTypeFilterPills(findings) {
   const typeCounts = { code: 0, web: 0, network: 0 };
@@ -2281,8 +2356,11 @@ async function loadVulnScanFromHistory(jobId) {
     if (pollData.status !== 'done' || !pollData.result) return;
     const report = pollData.result;
     const findings = report.findings || [];
+    // Tiles reflect findings that still need review; dismissed detections are
+    // counted separately in their own tab so they can't inflate the headline.
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-    findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+    findings.filter(f => !isDismissedFinding(f))
+            .forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
     lastVulnJobId = jobId;
     vulnReportRow.style.display = findings.length ? 'block' : 'none';
     vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings (from history). Exit code: ' + report.exit_code;
@@ -2297,12 +2375,7 @@ async function loadVulnScanFromHistory(jobId) {
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
     ).join('');
-    lastVulnFindings = findings;
-    currentVulnFilter = 'all';
-    currentVulnTypeFilter = 'all';
-    renderVulnFilterPills(counts);
-    renderVulnTypeFilterPills(findings);
-    renderVulnFindingsList();
+    showVulnFindings(findings);
   } catch (e) {}
 }
 
@@ -2350,13 +2423,32 @@ function buildFindingCard(f) {
 }
 
 function renderVulnFindingsList() {
-  const findings = lastVulnFindings.filter(f =>
+  const bucket = vulnBucketFindings(currentVulnBucket);
+  const findings = bucket.filter(f =>
     (currentVulnFilter === 'all' || (f.severity || '').toLowerCase() === currentVulnFilter) &&
     (currentVulnTypeFilter === 'all' || f.scan_type === currentVulnTypeFilter)
   );
 
+  // Explain what the dismissed tab is, and be honest that it's a best guess.
+  if (currentVulnBucket === 'dismissed' && bucket.length) {
+    vulnDismissedNoteEl.style.display = 'block';
+    vulnDismissedNoteEl.textContent =
+      'These were dismissed by AI review or matched inside test fixtures — not confirmed safe. '
+      + 'They are excluded from the counts and from the report’s main sections. '
+      + 'Treat this as a best guess and review before trusting it.';
+  } else {
+    vulnDismissedNoteEl.style.display = 'none';
+  }
+
   if (lastVulnFindings.length === 0) {
     vulnResults.innerHTML = '<div class="card">No findings.</div>';
+    return;
+  }
+  if (bucket.length === 0) {
+    vulnResults.innerHTML = '<div class="card">' + (currentVulnBucket === 'dismissed'
+      ? 'Nothing was dismissed in this scan.'
+      : 'Every detection in this scan was dismissed as a likely false positive. '
+        + 'Check the other tab.') + '</div>';
     return;
   }
   if (findings.length === 0) {
@@ -2367,7 +2459,8 @@ function renderVulnFindingsList() {
   vulnSortedFindings = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
   vulnRenderedCount = 0;
 
-  vulnResults.innerHTML = '<div class="section-label">Findings (' + vulnSortedFindings.length + ')</div><div id="vuln-cards"></div>';
+  const label = currentVulnBucket === 'dismissed' ? 'Possible false positives' : 'Findings';
+  vulnResults.innerHTML = '<div class="section-label">' + label + ' (' + vulnSortedFindings.length + ')</div><div id="vuln-cards"></div>';
   appendVulnCards();
 }
 
@@ -2658,6 +2751,10 @@ runVulnBtn.addEventListener('click', async () => {
   vulnSeverityFilterEl.innerHTML = '';
   vulnTypeFilterEl.style.display = 'none';
   vulnTypeFilterEl.innerHTML = '';
+  vulnReviewTabsEl.style.display = 'none';
+  vulnReviewTabsEl.innerHTML = '';
+  vulnDismissedNoteEl.style.display = 'none';
+  currentVulnBucket = 'review';
   lastVulnFindings = [];
   currentVulnFilter = 'all';
   currentVulnTypeFilter = 'all';
@@ -2781,8 +2878,11 @@ runVulnBtn.addEventListener('click', async () => {
 
     const report = data.report;
     const findings = report.findings || [];
+    // Tiles reflect findings that still need review; dismissed detections are
+    // counted separately in their own tab so they can't inflate the headline.
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-    findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+    findings.filter(f => !isDismissedFinding(f))
+            .forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
 
     lastVulnJobId = jobId;
     vulnReportRow.style.display = findings.length ? 'block' : 'none';
@@ -2810,12 +2910,7 @@ runVulnBtn.addEventListener('click', async () => {
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
     ).join('');
 
-    lastVulnFindings = findings;
-    currentVulnFilter = 'all';
-    currentVulnTypeFilter = 'all';
-    renderVulnFilterPills(counts);
-    renderVulnTypeFilterPills(findings);
-    renderVulnFindingsList();
+    showVulnFindings(findings);
   } catch (e) {
     vulnStatus.textContent = 'Could not reach the local server. Is server.py running?';
   } finally {

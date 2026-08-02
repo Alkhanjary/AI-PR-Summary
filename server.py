@@ -2861,8 +2861,13 @@ def enrich_findings_with_detail(findings, log=None):
         return {}, ""
 
     order = {s: i for i, s in enumerate(SEVERITY_ORDER)}
+    # Detections the AI already judged false positives go to an appendix as a
+    # one-line row, so writing a six-paragraph analysis of each is pure waste -
+    # on the last dashboard scan that was 100+ of 178 findings, and it made the
+    # report both slower to produce and far harder to read.
+    candidates = [i for i in range(len(findings)) if not _is_dismissed(findings[i])]
     ranked = sorted(
-        range(len(findings)),
+        candidates,
         key=lambda i: order.get((findings[i].get("severity") or "").lower(), len(SEVERITY_ORDER)),
     )
     # DETAIL_MAX_FINDINGS = 0 means no cap - every finding gets expanded.
@@ -2936,7 +2941,9 @@ def enrich_findings_with_detail(findings, log=None):
                     log(f"  detailed analysis: {done}/{len(batches)} batch(es) done")
         pending = [i for i in selected if i not in details]
 
-    skipped = len(findings) - len(selected)
+    # Dismissed detections are intentionally not expanded, so they must not be
+    # reported as a coverage gap - only a real cap counts as "skipped".
+    skipped = len(candidates) - len(selected)
     note = ""
     if pending or skipped:
         bits = []
@@ -2993,6 +3000,18 @@ def _detail_section(detail):
     return out
 
 
+def _is_dismissed(f):
+    """True when the AI review judged this finding not to be a real issue, or
+    it was matched inside an obvious test fixture.
+
+    Deliberately conservative: only an explicit false-positive verdict counts.
+    An unreviewed finding, or one the AI confirmed, stays in the main report."""
+    verdict = str(f.get("ai_verdict") or "").strip().lower()
+    if verdict in ("false_positive", "false-positive", "falsepositive", "not_a_finding", "dismissed"):
+        return True
+    return bool(f.get("likely_test_fixture"))
+
+
 def build_findings_markdown(result, details=None, detail_note=""):
     """Deterministically builds the Findings Summary + Detailed Findings
     sections directly from the scanner's JSON, so every single finding is
@@ -3001,7 +3020,17 @@ def build_findings_markdown(result, details=None, detail_note=""):
     grouped by severity (critical first) with a clear subsection per
     severity, so the document reads as an organized triage list rather
     than a flat dump."""
-    findings = result.get("findings", [])
+    all_findings = result.get("findings", [])
+
+    # Split off what the AI review already judged not to be a real problem.
+    # Mixing these in with genuine findings is what made a scan of 27 files
+    # produce a 64-page report whose first three "critical" entries were all
+    # test fixtures. They still belong in the document - a dismissal is a
+    # judgement call, not proof - but as a separate, compact appendix rather
+    # than at the top competing with real work.
+    findings = [f for f in all_findings if not _is_dismissed(f)]
+    dismissed = [f for f in all_findings if _is_dismissed(f)]
+
     counts = count_findings_by_severity(findings)
 
     category_counts = {}
@@ -3066,11 +3095,15 @@ def build_findings_markdown(result, details=None, detail_note=""):
     lines.append("|---|---|")
     lines.append(f"| Files scanned | {result.get('files_scanned', 'n/a')} |")
     lines.append(f"| Files with findings | {len(affected_files)} |")
-    lines.append(f"| Total findings | {total} |")
+    lines.append(f"| Raw detections | {len(all_findings)} |")
+    lines.append(f"| **Findings needing review** | **{total}** |")
+    if dismissed:
+        lines.append(f"| Dismissed as likely false positives | {len(dismissed)} "
+                     "(see appendix) |")
     if scan_types:
         lines.append(f"| Scan types | {', '.join(scan_types)} |")
     if ai_found:
-        lines.append(f"| Found by AI review | {ai_found} of {total} |")
+        lines.append(f"| Found by AI review | {ai_found} of {len(all_findings)} |")
     if result.get("exit_code") is not None:
         lines.append(f"| Scanner exit code | {result.get('exit_code')} |")
     lines.append("")
@@ -3218,6 +3251,53 @@ def build_findings_markdown(result, details=None, detail_note=""):
                 lines.append(verdict_line)
             if f.get("likely_test_fixture"):
                 lines.append("- _Likely a test fixture, not production code._")
+            lines.append("")
+
+    # --- Appendix: dismissed detections ----------------------------------
+    # Listed compactly, one row each. These were judged not to be real issues,
+    # so a full write-up per entry would bury the report in exactly the noise
+    # this section exists to move out of the way - but they stay visible,
+    # because a dismissal is a judgement call and can be wrong.
+    if dismissed:
+        lines.append("## Appendix — Possible False Positives")
+        lines.append("")
+        lines.append(f"{len(dismissed)} detection(s) were dismissed by AI review or matched "
+                     "inside test fixtures, and are excluded from the counts above. They are "
+                     "listed here rather than dropped: this is a best guess, not proof, so "
+                     "scan the list before trusting it.")
+        lines.append("")
+
+        by_file = {}
+        for f in dismissed:
+            by_file.setdefault(f.get("file") or "unknown", []).append(f)
+
+        def worst_rank(group):
+            return min(
+                (SEVERITY_ORDER.index((g.get("severity") or "").lower())
+                 if (g.get("severity") or "").lower() in SEVERITY_ORDER else len(SEVERITY_ORDER))
+                for g in group
+            )
+
+        for fname, group in sorted(by_file.items(), key=lambda kv: (worst_rank(kv[1]), -len(kv[1]))):
+            group = sorted(
+                group,
+                key=lambda g: SEVERITY_ORDER.index((g.get("severity") or "").lower())
+                if (g.get("severity") or "").lower() in SEVERITY_ORDER else len(SEVERITY_ORDER),
+            )
+            lines.append(f"### {fname} ({len(group)} dismissed)")
+            lines.append("")
+            lines.append("| Line | Severity | Category | Why it was dismissed |")
+            lines.append("|---|---|---|---|")
+            for f in group:
+                line_no = f.get("line")
+                reason = (f.get("ai_reason") or
+                          ("Matched inside a test fixture" if f.get("likely_test_fixture")
+                           else "Dismissed by AI review"))
+                reason = str(reason).replace("|", "\\|")
+                cat = (f.get("category") or f.get("rule") or "uncategorized").replace("|", "\\|")
+                lines.append(f"| {line_no if line_no not in (None, '') else '—'} "
+                             f"| {(f.get('severity') or 'unknown').capitalize()} "
+                             f"| {cat} | {reason} |")
             lines.append("")
 
     return "\n".join(lines)
