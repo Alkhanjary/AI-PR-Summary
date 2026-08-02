@@ -711,12 +711,39 @@ def _prune_vuln_jobs():
         VULN_JOBS.pop(jid, None)
 
 
-SCAN_HISTORY_FILE = Path(__file__).resolve().parent / "scan_history.json"
+# Saved scan history lives OUTSIDE the repo, in the user's data directory.
+#
+# It used to sit next to server.py, which meant scanning this project scanned
+# the tool's own saved findings: every stored `evidence` string is a verbatim
+# line of risky-looking source from some earlier scan, so the scanner happily
+# reported eval(), innerHTML and SQL concatenation "in scan_history.json". On
+# the last run that produced six bogus findings and the AI narrative opened its
+# remediation plan with "replace eval() at scan_history.json:89".
+_LEGACY_SCAN_HISTORY_FILE = Path(__file__).resolve().parent / "scan_history.json"
+SCAN_HISTORY_DIR = Path(
+    os.environ.get("AI_PR_SUMMARY_DATA_DIR")
+    or (Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share") / "ai-pr-summary")
+)
+SCAN_HISTORY_FILE = SCAN_HISTORY_DIR / "scan_history.json"
 _scan_history_lock = threading.Lock()
+
+
+def _migrate_legacy_scan_history():
+    """Moves a pre-existing in-repo history file to the data directory once, so
+    upgrading doesn't silently lose saved scans."""
+    try:
+        if not _LEGACY_SCAN_HISTORY_FILE.exists() or SCAN_HISTORY_FILE.exists():
+            return
+        SCAN_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        SCAN_HISTORY_FILE.write_bytes(_LEGACY_SCAN_HISTORY_FILE.read_bytes())
+        _LEGACY_SCAN_HISTORY_FILE.unlink()
+    except Exception:
+        pass
 
 
 def _load_scan_history():
     try:
+        _migrate_legacy_scan_history()
         if SCAN_HISTORY_FILE.exists():
             return json.loads(SCAN_HISTORY_FILE.read_text(encoding="utf-8"))
     except Exception:
@@ -726,6 +753,7 @@ def _load_scan_history():
 
 def _save_scan_history(records):
     try:
+        SCAN_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         SCAN_HISTORY_FILE.write_text(json.dumps(records, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -1136,7 +1164,27 @@ def detect_project(target_dir, skip_docker=False):
 
 
 IGNORED_SCAN_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".repo-cache",
-                     "dist", "build", ".next", ".pytest_cache", "vendor", "target"}
+                     "dist", "build", ".next", ".pytest_cache", "vendor", "target",
+                     # Agent/editor config: not application code, and its
+                     # allowlists are full of literal commands and localhost
+                     # URLs that trip every pattern the scanner has.
+                     ".claude", ".vscode", ".idea"}
+
+# This tool's own output. A saved scan record stores each finding's `evidence`
+# verbatim, so scanning a folder that contains one means re-detecting every
+# risky-looking line the scanner ever saw, attributed to the JSON file.
+SELF_ARTIFACT_FILES = {"scan_history.json"}
+
+
+def _is_self_artifact(file_path):
+    """True for a finding located in this tool's own output or in editor/agent
+    config, neither of which is application code under review."""
+    if not file_path:
+        return False
+    parts = str(file_path).replace("\\", "/").split("/")
+    if parts[-1] in SELF_ARTIFACT_FILES:
+        return True
+    return any(p in IGNORED_SCAN_DIRS for p in parts[:-1])
 MANIFEST_FILES = (
     "package.json", "requirements.txt", "pyproject.toml", "Pipfile", "Gemfile",
     "composer.json", "go.mod", "Cargo.toml", "pom.xml", "build.gradle",
@@ -1366,10 +1414,68 @@ def ai_code_scan_run(target_dir, job):
     return all_findings, len(files)
 
 
-def probe_url(url, timeout=8):
+# Hosts that must never be fetched, however the request arrives. Scanning
+# private and loopback addresses is the tool's actual job, so blocking RFC1918
+# wholesale would break it - but the cloud metadata services hand out IAM
+# credentials to anything that can issue a plain GET, and no legitimate scan
+# target lives there.
+BLOCKED_PROBE_HOSTS = {
+    "169.254.169.254",          # AWS / Azure / DigitalOcean IMDS
+    "metadata.google.internal",  # GCP
+    "metadata.goog",
+    "100.100.100.100",          # Alibaba Cloud
+    "fd00:ec2::254",            # AWS IMDSv6
+}
+MAX_PROBE_REDIRECTS = 5
+
+
+def _probe_target_allowed(url):
+    """Returns (ok, reason). Rejects non-HTTP schemes and cloud metadata hosts.
+
+    Checked on every redirect hop as well as the initial URL: a server that
+    answers with 302 -> http://169.254.169.254/ would otherwise walk straight
+    past a check applied only to what the user typed."""
     try:
-        r = requests.get(url, timeout=timeout, allow_redirects=True)
-        return {"url": url, "status": r.status_code, "headers": dict(r.headers), "body_snippet": r.text[:1500]}
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "could not be parsed as a URL"
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"scheme '{parsed.scheme or 'none'}' is not allowed (http/https only)"
+    host = (parsed.hostname or "").strip("[]").lower()
+    if not host:
+        return False, "has no host"
+    if host in BLOCKED_PROBE_HOSTS:
+        return False, "is a cloud metadata endpoint, which can hand out credentials"
+    return True, ""
+
+
+def probe_url(url, timeout=8):
+    """Fetches a URL for the web scan.
+
+    Redirects are followed manually so each hop can be re-validated; requests'
+    own allow_redirects would follow a 302 into a blocked host without ever
+    consulting the check above."""
+    ok, why = _probe_target_allowed(url)
+    if not ok:
+        return {"url": url, "error": f"refused to fetch: URL {why}"}
+
+    current = url
+    try:
+        for _ in range(MAX_PROBE_REDIRECTS + 1):
+            r = requests.get(current, timeout=timeout, allow_redirects=False)
+            if r.is_redirect or r.is_permanent_redirect:
+                nxt = r.headers.get("Location")
+                if not nxt:
+                    break
+                current = urljoin(current, nxt)
+                ok, why = _probe_target_allowed(current)
+                if not ok:
+                    return {"url": url,
+                            "error": f"refused to follow redirect to {current}: URL {why}"}
+                continue
+            return {"url": url, "final_url": current, "status": r.status_code,
+                    "headers": dict(r.headers), "body_snippet": r.text[:1500]}
+        return {"url": url, "error": f"stopped after {MAX_PROBE_REDIRECTS} redirects"}
     except requests.RequestException as e:
         return {"url": url, "error": str(e)}
 
@@ -2397,7 +2503,20 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             with open(json_out, "r", encoding="utf-8") as f:
                 report = json.load(f)
 
-            for finding in report.get("findings") or []:
+            # Drop detections inside this tool's own artifacts and editor/agent
+            # config. The external scanner has no reason to know about those,
+            # but they are pure noise: scan_history.json stores past findings'
+            # evidence verbatim, so scanning it re-reports every risky-looking
+            # line the tool has ever seen.
+            raw_findings = report.get("findings") or []
+            kept = [f for f in raw_findings if not _is_self_artifact(f.get("file"))]
+            if len(kept) != len(raw_findings):
+                job["log"].append(
+                    f"Ignored {len(raw_findings) - len(kept)} detection(s) inside this tool's own "
+                    "output or editor config (not application code).")
+            report["findings"] = kept
+
+            for finding in report["findings"]:
                 finding.setdefault("scan_type", classify_scan_type(finding))
 
             if use_ai:
@@ -4131,12 +4250,22 @@ def vuln_scan_report():
     if not client:
         return jsonify({"error": "LLM_API_KEY is not configured on the server."}), 500
 
-    counts = count_findings_by_severity(findings)
+    # Everything below describes findings that still need review. Dismissed
+    # detections are summarised in an appendix, and must not drive the cover
+    # page, the subtitle, or the AI narrative - feeding the model 139 known
+    # false positives is what made it open a remediation plan with "replace
+    # eval() at scan_history.json:89", a line inside its own saved scan data.
+    review_findings = [f for f in findings if not _is_dismissed(f)]
+    dismissed_count = len(findings) - len(review_findings)
+    counts = count_findings_by_severity(review_findings)
+
     summary_payload = {
         "files_scanned": result.get("files_scanned"),
         "exit_code": result.get("exit_code"),
         "counts": counts,
-        "findings": findings,
+        "total_raw_detections": len(findings),
+        "dismissed_as_false_positive": dismissed_count,
+        "findings": review_findings,
     }
     findings_json = json.dumps(summary_payload, indent=2)[:REPORT_MAX_CHARS]
     try:
@@ -4159,8 +4288,10 @@ def vuln_scan_report():
     # Name the target in the subtitle too, so an open report identifies itself
     # without needing the filename.
     target_bit = f"{scan_label} &middot; " if scan_label else ""
+    dismissed_bit = f" ({dismissed_count} dismissed)" if dismissed_count else ""
     subtitle = (
-        f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
+        f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned "
+        f"&middot; {len(review_findings)} findings to review{dismissed_bit} "
         f"&middot; generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     subtitle_plain = subtitle.replace("&middot;", "-")
