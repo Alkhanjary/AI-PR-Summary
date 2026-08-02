@@ -614,7 +614,15 @@
       <button class="btn btn-sm" onclick="clearCompareSelection()" style="background:#475569;color:#fff;border:none;">Clear</button>
     </div>
     <div class="panel-card" id="vuln-history-card-full">
-      <div class="panel-card-title" style="margin-bottom:0.75rem;">Scan history</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div class="panel-card-title" style="margin:0;">Scan history</div>
+        <label style="margin-left:auto;font-size:12px;display:flex;align-items:center;gap:6px;"
+               title="Adds a per-finding write-up to generated reports: what it is, why it matters here, how it would be exploited, the specific fix, and how to verify it. Takes longer.">
+          <input type="checkbox" id="vuln-history-report-detail" checked>
+          <span>Explain every finding in detail</span>
+        </label>
+      </div>
+      <div id="vuln-history-report-status" class="hint-text" style="display:none;margin-bottom:0.6rem;"></div>
       <div id="vuln-history-list-full"><span class="hint-text">No scans saved yet.</span></div>
     </div>
     <!-- compare results -->
@@ -1864,20 +1872,43 @@ function useCurrentFolder() {
 
 async function downloadHistoryReport(ref, fmt, btn) {
   const original = btn.textContent;
-  btn.textContent = '...';
+  const detailed = (document.getElementById('vuln-history-report-detail') || {checked: true}).checked;
+  const statusEl = document.getElementById('vuln-history-report-status');
+  const started = Date.now();
+  let ticker = null;
+
+  btn.textContent = '…';
   btn.disabled = true;
+  // Detail mode makes one LLM call per 6 findings, so this can run for minutes.
+  // A dead button with no feedback reads as a hang.
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    const base = detailed
+      ? 'Generating ' + fmt.toUpperCase() + ' with a detailed write-up of every finding'
+      : 'Generating ' + fmt.toUpperCase();
+    statusEl.innerHTML = '<span class="spinner"></span>' + base + '…';
+    ticker = setInterval(() => {
+      statusEl.innerHTML = '<span class="spinner"></span>' + base + '… ('
+        + Math.round((Date.now() - started) / 1000) + 's)';
+    }, 1000);
+  }
   try {
     const res = await fetch(API_BASE + '/api/vuln-scan/report', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       // scan_ref works for both live jobs and scans restored from disk.
+      // Prefer the History tab's own toggle - the Scan tab's copy is hidden
+      // from here, so reading that one would silently ignore what you set.
       body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '', format: fmt,
-                            detail: (document.getElementById('vuln-report-detail') || {checked: true}).checked}),
+                            detail: (document.getElementById('vuln-history-report-detail')
+                                     || document.getElementById('vuln-report-detail')
+                                     || {checked: true}).checked}),
     });
     if (!res.ok) {
       let msg = 'Report failed.';
       try { msg = (await res.json()).error || msg; } catch (e) {}
-      alert(msg);
+      if (statusEl) statusEl.textContent = msg;
+      else alert(msg);
       return;
     }
     const blob = await res.blob();
@@ -1888,9 +1919,16 @@ async function downloadHistoryReport(ref, fmt, btn) {
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    if (statusEl) {
+      statusEl.textContent = 'Downloaded vuln-report.' + ext + ' ('
+        + Math.round((Date.now() - started) / 1000) + 's).';
+      setTimeout(() => { statusEl.style.display = 'none'; }, 6000);
+    }
   } catch (e) {
-    alert('Could not reach the server to generate the report.');
+    if (statusEl) statusEl.textContent = 'Could not reach the server to generate the report.';
+    else alert('Could not reach the server to generate the report.');
   } finally {
+    clearInterval(ticker);
     btn.textContent = original;
     btn.disabled = false;
   }
