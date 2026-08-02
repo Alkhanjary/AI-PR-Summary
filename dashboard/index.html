@@ -207,7 +207,15 @@
   .hero-search .username-field input:focus { box-shadow: 0 0 0 3px rgba(255,255,255,0.35); }
   .username-icon { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #9ca3af; pointer-events: none; display: flex; }
   .username-icon svg { width: 16px; height: 16px; }
-  .suggestions-heading { font-size: 10.5px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
+  .suggestions-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 10.5px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
+  .recent-clear-all { background: none; border: none; padding: 2px 4px; margin: 0; font: inherit; font-size: 10px; color: #9ca3af; cursor: pointer; text-transform: none; letter-spacing: normal; }
+  .recent-clear-all:hover { color: #dc2626; background: none; box-shadow: none; transform: none; text-decoration: underline; }
+  .username-suggestion-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Kept invisible until the row is hovered/focused so the list stays clean,
+     but always reachable by keyboard. */
+  .recent-remove { background: none; border: none; padding: 0 2px; margin: 0; font-size: 16px; line-height: 1; color: #9ca3af; cursor: pointer; opacity: 0; transition: opacity 0.12s ease, color 0.12s ease; }
+  .username-suggestion:hover .recent-remove, .recent-remove:focus-visible { opacity: 1; }
+  .recent-remove:hover { color: #dc2626; background: none; box-shadow: none; transform: none; }
   .username-suggestion-icon { color: #a1a1cc; font-size: 14px; width: 22px; display: inline-flex; justify-content: center; }
   .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
   input, select { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 8px; font-size: 14px; background: var(--input-bg); color: var(--text-primary); transition: all 0.15s ease; }
@@ -795,6 +803,19 @@ function saveRecentUsername(name) {
   const list = [name, ...getRecentUsernames().filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, 5);
   localStorage.setItem(RECENT_USERS_KEY, JSON.stringify(list));
 }
+function removeRecentUsername(name) {
+  const kept = getRecentUsernames().filter(n => n.toLowerCase() !== String(name).toLowerCase());
+  localStorage.setItem(RECENT_USERS_KEY, JSON.stringify(kept));
+  // Forgetting a name should also stop it being restored on the next page
+  // load, otherwise deleting it from the list looks like it did nothing.
+  if ((loadLastState().username || '').toLowerCase() === String(name).toLowerCase()) {
+    localStorage.removeItem(LAST_STATE_KEY);
+  }
+}
+function clearRecentUsernames() {
+  localStorage.removeItem(RECENT_USERS_KEY);
+  localStorage.removeItem(LAST_STATE_KEY);
+}
 
 const LAST_STATE_KEY = 'aiprsummary_last_state';
 function saveLastState() {
@@ -873,9 +894,19 @@ function highlightSuggestion(idx) {
 function renderRecentSuggestions() {
   const recents = getRecentUsernames();
   if (recents.length === 0) { closeSuggestions(); return; }
-  usernameSuggestions.innerHTML = '<div class="suggestions-heading">Recently viewed</div>' + recents.map(name =>
-    '<div class="username-suggestion" data-login="' + esc(name) + '"><span class="username-suggestion-icon">&#8635;</span><span>' + esc(name) + '</span></div>'
-  ).join('');
+  usernameSuggestions.innerHTML =
+    '<div class="suggestions-heading">' +
+      '<span>Recently viewed</span>' +
+      '<button type="button" class="recent-clear-all" title="Clear all recent searches">Clear all</button>' +
+    '</div>' +
+    recents.map(name =>
+      '<div class="username-suggestion" data-login="' + esc(name) + '">' +
+        '<span class="username-suggestion-icon">&#8635;</span>' +
+        '<span class="username-suggestion-name">' + esc(name) + '</span>' +
+        '<button type="button" class="recent-remove" data-remove="' + esc(name) + '" ' +
+          'title="Remove ' + esc(name) + ' from recent searches" aria-label="Remove ' + esc(name) + '">&times;</button>' +
+      '</div>'
+    ).join('');
   usernameSuggestions.classList.add('open');
   suggestionIndex = -1;
 }
@@ -911,6 +942,22 @@ async function fetchUsernameSuggestions(q) {
 }
 
 usernameSuggestions.addEventListener('click', e => {
+  // "Clear all" and the per-row X must not fall through to the row's own
+  // click handler, which would load the very name being removed.
+  const clearAll = e.target.closest('.recent-clear-all');
+  if (clearAll) {
+    e.stopPropagation();
+    clearRecentUsernames();
+    closeSuggestions();
+    return;
+  }
+  const removeBtn = e.target.closest('.recent-remove');
+  if (removeBtn) {
+    e.stopPropagation();
+    removeRecentUsername(removeBtn.dataset.remove);
+    renderRecentSuggestions();
+    return;
+  }
   const item = e.target.closest('.username-suggestion');
   if (!item) return;
   usernameInput.value = item.dataset.login;
