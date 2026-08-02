@@ -614,14 +614,8 @@
       <button class="btn btn-sm" onclick="clearCompareSelection()" style="background:#475569;color:#fff;border:none;">Clear</button>
     </div>
     <div class="panel-card" id="vuln-history-card-full">
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0.75rem;">
-        <div class="panel-card-title" style="margin:0;">Scan history</div>
-        <label style="margin-left:auto;font-size:12px;display:flex;align-items:center;gap:6px;"
-               title="Adds a per-finding write-up to generated reports: what it is, why it matters here, how it would be exploited, the specific fix, and how to verify it. Takes longer.">
-          <input type="checkbox" id="vuln-history-report-detail" checked>
-          <span>Explain every finding in detail</span>
-        </label>
-      </div>
+      <div class="panel-card-title" style="margin-bottom:0.75rem;">Scan history</div>
+
       <div id="vuln-history-report-status" class="hint-text" style="display:none;margin-bottom:0.6rem;"></div>
       <div id="vuln-history-list-full"><span class="hint-text">No scans saved yet.</span></div>
     </div>
@@ -1719,15 +1713,28 @@ async function loadVulnScanHistoryFull() {
                 Open scan →</button>` : ''}
               <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#0f172a;color:#94a3b8;"
                 onclick="openHistoryDetail(${idx})">View findings</button>
-              <span style="font-size:11px;color:#94a3b8;align-self:center;">Report:</span>
-              ${['pdf','docx','html','markdown'].map(f =>
-                `<button class="btn btn-sm" style="font-size:11px;padding:3px 8px;"
-                   onclick="downloadHistoryReport('${ref}','${f}',this)"
-                   >${f === 'markdown' ? 'md' : f}</button>`).join('')}
               <button class="btn btn-sm" title="Delete this scan"
                 style="font-size:11px;padding:3px 10px;background:transparent;color:#dc2626;
                        border:1px solid #fecaca;margin-left:auto;"
                 onclick="deleteScan('${ref}', this)">Delete</button>
+            </div>
+
+            <!-- Report controls: the detail toggle sits directly above the
+                 format buttons it applies to, and is per-scan. -->
+            <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border,#e2e8f0);">
+              <label style="font-size:11.5px;display:flex;align-items:center;gap:6px;cursor:pointer;"
+                     title="Adds a per-finding write-up: what it is, why it matters here, how it would be exploited, the specific fix, and how to verify it.">
+                <input type="checkbox" class="vuln-detail-toggle" checked>
+                <span>Explain every finding in detail</span>
+                <span class="hint-text" style="font-size:10.5px;">(slower)</span>
+              </label>
+              <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span style="font-size:11px;color:#94a3b8;">Report:</span>
+                ${['pdf','docx','html','markdown'].map(f =>
+                  `<button class="btn btn-sm" style="font-size:11px;padding:3px 8px;"
+                     onclick="downloadHistoryReport('${ref}','${f}',this)"
+                     >${f === 'markdown' ? 'md' : f}</button>`).join('')}
+              </div>
             </div>
           </div>
         </div>
@@ -1870,9 +1877,21 @@ function useCurrentFolder() {
   closeFolderPicker();
 }
 
+// The server names the file after what was scanned; honour that rather than
+// overriding it with a generic name.
+function filenameFromResponse(res, fallback) {
+  const cd = res.headers.get('Content-Disposition') || '';
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+  return m ? decodeURIComponent(m[1].trim()) : fallback;
+}
+
 async function downloadHistoryReport(ref, fmt, btn) {
   const original = btn.textContent;
-  const detailed = (document.getElementById('vuln-history-report-detail') || {checked: true}).checked;
+  // Each history row carries its own toggle, sitting right above the format
+  // buttons, so the setting you can see is the one that applies.
+  const card = btn.closest('.card');
+  const toggle = card && card.querySelector('.vuln-detail-toggle');
+  const detailed = toggle ? toggle.checked : true;
   const statusEl = document.getElementById('vuln-history-report-status');
   const started = Date.now();
   let ticker = null;
@@ -1899,10 +1918,8 @@ async function downloadHistoryReport(ref, fmt, btn) {
       // scan_ref works for both live jobs and scans restored from disk.
       // Prefer the History tab's own toggle - the Scan tab's copy is hidden
       // from here, so reading that one would silently ignore what you set.
-      body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '', format: fmt,
-                            detail: (document.getElementById('vuln-history-report-detail')
-                                     || document.getElementById('vuln-report-detail')
-                                     || {checked: true}).checked}),
+      body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '',
+                            format: fmt, detail: detailed}),
     });
     if (!res.ok) {
       let msg = 'Report failed.';
@@ -1913,14 +1930,15 @@ async function downloadHistoryReport(ref, fmt, btn) {
     }
     const blob = await res.blob();
     const ext = {pdf:'pdf', docx:'docx', html:'html', markdown:'md'}[fmt] || fmt;
+    const fname = filenameFromResponse(res, 'vuln-report.' + ext);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'vuln-report.' + ext;
+    a.download = fname;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     if (statusEl) {
-      statusEl.textContent = 'Downloaded vuln-report.' + ext + ' ('
+      statusEl.textContent = 'Downloaded ' + fname + ' ('
         + Math.round((Date.now() - started) / 1000) + 's).';
       setTimeout(() => { statusEl.style.display = 'none'; }, 6000);
     }
@@ -2362,15 +2380,16 @@ vulnReportBtn.addEventListener('click', async () => {
     }
     const blob = await res.blob();
     const ext = { pdf: 'pdf', docx: 'docx', markdown: 'md', html: 'html' }[format] || 'txt';
+    const fname = filenameFromResponse(res, 'vuln-report.' + ext);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'vuln-report.' + ext;
+    a.download = fname;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    vulnReportStatus.textContent = 'Report downloaded.';
+    vulnReportStatus.textContent = 'Downloaded ' + fname;
   } catch (e) {
     vulnReportStatus.textContent = 'Could not reach the local server. Is server.py running?';
   } finally {

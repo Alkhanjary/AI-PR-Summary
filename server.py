@@ -3480,6 +3480,32 @@ def build_report_html(md_text, title, subtitle=None):
     )
 
 
+def _report_filename(label, timestamp, ext):
+    """Builds a download name from what was scanned, so a folder of saved
+    reports is identifiable - 'vuln-report.pdf' five times over tells you
+    nothing about which scan produced which file.
+
+    Result looks like: AI-PR-Summary_2026-08-02_1412_vuln-report.pdf
+    """
+    raw = (label or "").strip()
+    # A local scan's label is a full path; the folder name is the useful part.
+    raw = raw.replace("\\", "/").rstrip("/")
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    # Keep owner/repo readable for GitHub scans that came through as owner/name.
+    raw = raw.replace("(uploaded folder)", "uploaded").replace("(uploaded)", "uploaded")
+
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip("-.") or "scan"
+    slug = slug[:60]
+
+    try:
+        stamp = datetime.fromtimestamp(float(timestamp)).strftime("%Y-%m-%d_%H%M")
+    except (TypeError, ValueError, OSError):
+        stamp = datetime.utcnow().strftime("%Y-%m-%d_%H%M")
+
+    return f"{slug}_{stamp}_vuln-report.{ext}"
+
+
 @app.route("/api/vuln-scan/report", methods=["POST"])
 def vuln_scan_report():
     """Generates a detailed vulnerability report from a completed scan: an
@@ -3496,9 +3522,14 @@ def vuln_scan_report():
     # the persisted history so reports still work for scans from an earlier
     # session - in-memory jobs are lost on restart and pruned once over the cap.
     result = None
+    # What to name the download after: the scan's custom name if it was renamed,
+    # otherwise the repo or folder that was scanned.
+    scan_label, scan_time = "", None
     job = VULN_JOBS.get(job_id)
     if job and job.get("status") == "done" and job.get("result"):
         result = job["result"]
+        scan_label = job.get("name") or job.get("repo") or ""
+        scan_time = job.get("started")
     else:
         saved = _resolve_scan(scan_ref or (f"job:{job_id}" if job_id else ""))
         if saved:
@@ -3508,6 +3539,8 @@ def vuln_scan_report():
                 "exit_code": None,
                 "from_history": True,
             }
+            scan_label = saved.get("name") or saved.get("repo") or ""
+            scan_time = saved.get("timestamp")
 
     if not result:
         saved_count = len(_load_scan_history())
@@ -3554,27 +3587,33 @@ def vuln_scan_report():
     report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result, details)
 
     title = "Vulnerability Assessment Report"
+    # Name the target in the subtitle too, so an open report identifies itself
+    # without needing the filename.
+    target_bit = f"{scan_label} &middot; " if scan_label else ""
     subtitle = (
-        f"{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
+        f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
         f"&middot; generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
     )
     subtitle_plain = subtitle.replace("&middot;", "-")
 
+    def _disp(ext):
+        return {"Content-Disposition":
+                f'attachment; filename="{_report_filename(scan_label, scan_time, ext)}"'}
+
     if fmt == "markdown":
-        return Response(report_md, mimetype="text/markdown",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.md"})
+        return Response(report_md, mimetype="text/markdown", headers=_disp("md"))
     if fmt == "html":
         return Response(build_report_html(report_md, title, subtitle), mimetype="text/html",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.html"})
+                         headers=_disp("html"))
     if fmt == "docx":
         return Response(build_report_docx(report_md, title, subtitle_plain),
                          mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.docx"})
+                         headers=_disp("docx"))
     if fmt == "pdf":
-        pdf_meta = {"counts": counts, "files_scanned": result.get("files_scanned")}
+        pdf_meta = {"counts": counts, "files_scanned": result.get("files_scanned"),
+                    "target": scan_label}
         return Response(build_report_pdf(report_md, title, subtitle_plain, meta=pdf_meta),
-                         mimetype="application/pdf",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.pdf"})
+                         mimetype="application/pdf", headers=_disp("pdf"))
 
     return jsonify({"error": f"Unknown format: {fmt}"}), 400
 
