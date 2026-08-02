@@ -594,7 +594,10 @@
           <option value="html">HTML</option>
         </select>
       </div>
-      <button id="vuln-report-btn">Generate & download</button>
+      <label title="Adds a per-finding write-up: what it is, why it matters here, how it would be exploited, the specific fix, and how to verify it. Takes longer.">
+        <input type="checkbox" id="vuln-report-detail" checked><span>Explain every finding in detail</span>
+      </label>
+      <button id="vuln-report-btn">Generate &amp; download</button>
       <span id="vuln-report-status" class="hint-text"></span>
     </div>
   </div>
@@ -1868,7 +1871,8 @@ async function downloadHistoryReport(ref, fmt, btn) {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       // scan_ref works for both live jobs and scans restored from disk.
-      body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '', format: fmt}),
+      body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '', format: fmt,
+                            detail: (document.getElementById('vuln-report-detail') || {checked: true}).checked}),
     });
     if (!res.ok) {
       let msg = 'Report failed.';
@@ -2302,13 +2306,16 @@ updateVulnReportControls();
 vulnReportBtn.addEventListener('click', async () => {
   if (!lastVulnJobId) { vulnReportStatus.textContent = 'Run a scan first.'; return; }
   const format = vulnReportFormat.value;
-  vulnReportStatus.innerHTML = '<span class="spinner"></span>Generating report with AI... this can take a moment.';
+  vulnReportStatus.innerHTML = '<span class="spinner"></span>Generating report with AI... '
+    + (document.getElementById('vuln-report-detail').checked
+       ? 'writing a detailed analysis of every finding, so this can take a few minutes.'
+       : 'this can take a moment.');
   vulnReportBtn.disabled = true;
   try {
     const res = await fetch(API_BASE + '/api/vuln-scan/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: lastVulnJobId, format })
+      body: JSON.stringify({ job_id: lastVulnJobId, format, detail: document.getElementById('vuln-report-detail').checked })
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));

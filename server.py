@@ -28,6 +28,7 @@ from summarize_pr import (
     VULN_REPORT_SYSTEM_PROMPT,
     PROJECT_DETECT_SYSTEM_PROMPT,
     PROJECT_RETRY_SYSTEM_PROMPT,
+    VULN_DETAIL_SYSTEM_PROMPT,
     AI_CODE_SCAN_SYSTEM_PROMPT,
     AI_WEB_SCAN_SYSTEM_PROMPT,
     AI_NETWORK_SCAN_SYSTEM_PROMPT,
@@ -2793,7 +2794,86 @@ def count_findings_by_severity(findings):
     return counts
 
 
-def build_findings_markdown(result):
+DETAIL_BATCH_SIZE = 6      # findings per LLM call - small enough to stay specific
+DETAIL_MAX_FINDINGS = 80   # ceiling, so a huge scan can't run for an hour
+
+
+def enrich_findings_with_detail(findings, log=None):
+    """Asks the LLM to write a proper explanation for each finding: what it is,
+    why it matters here, how it would be exploited, the specific fix, and how to
+    verify it. Returns {index: detail_dict}.
+
+    Batched rather than one call per finding - a batch keeps each explanation
+    grounded while cutting the number of round trips by ~6x. Failures are
+    per-batch and non-fatal: the report still builds from the scanner's own
+    fields for anything that didn't come back."""
+    client, model = get_client()
+    if not client or not findings:
+        return {}
+
+    subset = findings[:DETAIL_MAX_FINDINGS]
+    details = {}
+    total_batches = (len(subset) + DETAIL_BATCH_SIZE - 1) // DETAIL_BATCH_SIZE
+
+    for b in range(total_batches):
+        chunk = subset[b * DETAIL_BATCH_SIZE:(b + 1) * DETAIL_BATCH_SIZE]
+        payload = []
+        for i, f in enumerate(chunk):
+            payload.append({
+                "id": str(b * DETAIL_BATCH_SIZE + i),
+                "file": f.get("file"),
+                "line": f.get("line"),
+                "severity": f.get("severity"),
+                "category": f.get("category") or f.get("rule"),
+                "description": f.get("description"),
+                "evidence": (f.get("evidence") or "")[:600],
+                "impact": f.get("impact"),
+                "suggested_fix": f.get("improvement"),
+                "scan_type": f.get("scan_type"),
+            })
+        if log is not None:
+            log(f"Writing detailed analysis: batch {b + 1}/{total_batches} "
+                f"({len(chunk)} finding(s))...")
+        try:
+            raw = call_llm(client, model, json.dumps(payload, indent=2)[:REPORT_MAX_CHARS],
+                           system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
+            parsed = parse_json_response(raw)
+            if isinstance(parsed, dict):
+                parsed = [parsed]
+            for item in parsed or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    idx = int(str(item.get("id")))
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= idx < len(subset):
+                    details[idx] = item
+        except Exception as e:
+            if log is not None:
+                log(f"  detailed analysis failed for batch {b + 1}: {e}")
+
+    if log is not None:
+        log(f"Detailed analysis written for {len(details)}/{len(subset)} finding(s).")
+    return details
+
+
+def _detail_section(detail):
+    """Renders one finding's AI-written detail as markdown bullets."""
+    if not detail:
+        return []
+    out = []
+    for key, label in (("what", "What this is"), ("why", "Why it matters here"),
+                       ("attack", "How it could be exploited"), ("fix", "How to fix it"),
+                       ("verify", "How to verify the fix"),
+                       ("severity_note", "On the severity rating")):
+        val = (detail.get(key) or "").strip()
+        if val:
+            out.append(f"- **{label}:** {val}")
+    return out
+
+
+def build_findings_markdown(result, details=None):
     """Deterministically builds the Findings Summary + Detailed Findings
     sections directly from the scanner's JSON, so every single finding is
     guaranteed to appear in the report - not left to the LLM to enumerate,
@@ -2839,6 +2919,9 @@ def build_findings_markdown(result):
 
     grouped = {sev: [] for sev in SEVERITY_ORDER}
     other = []
+    # Detail keys are positions in the original findings list, so remember each
+    # finding's index before regrouping by severity.
+    index_of = {id(f): i for i, f in enumerate(findings)}
     for f in findings:
         sev = (f.get("severity") or "").lower()
         (grouped[sev] if sev in grouped else other).append(f)
@@ -2868,10 +2951,18 @@ def build_findings_markdown(result):
                 lines.append(f"- **Issue:** {f['description']}")
             if f.get("evidence"):
                 lines.append(f"- **Evidence:** `{f['evidence']}`")
-            if f.get("impact"):
-                lines.append(f"- **Impact:** {f['impact']}")
-            if f.get("improvement"):
-                lines.append(f"- **Fix:** {f['improvement']}")
+
+            detail = (details or {}).get(index_of.get(id(f)))
+            if detail:
+                # The AI write-up supersedes the scanner's one-line impact/fix,
+                # so those aren't repeated underneath it.
+                lines.extend(_detail_section(detail))
+            else:
+                if f.get("impact"):
+                    lines.append(f"- **Impact:** {f['impact']}")
+                if f.get("improvement"):
+                    lines.append(f"- **Fix:** {f['improvement']}")
+
             if f.get("ai_verdict"):
                 verdict_line = f"- **AI verdict:** {f['ai_verdict']}"
                 if f.get("ai_reason"):
@@ -2961,6 +3052,89 @@ def build_report_docx(md_text, title, subtitle=None):
     return buf.getvalue()
 
 
+_REPORT_FONTS = None
+
+
+def _register_report_fonts():
+    """Registers a real Unicode TrueType font for the PDF, falling back through
+    a few candidates.
+
+    The standard-14 PDF fonts (Helvetica et al.) are Type1 with WinAnsi
+    encoding, which simply has no glyph for characters like the em-dash in a
+    finding heading, an arrow, or a check mark - they come out blank or as a
+    box. A TrueType font embedded with UTF-8 encoding renders all of them.
+
+    Returns (regular, bold, mono) font names; falls back to the built-ins if
+    nothing can be registered, in which case _ascii_fallback strips what
+    wouldn't render."""
+    global _REPORT_FONTS
+    if _REPORT_FONTS is not None:
+        return _REPORT_FONTS
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import reportlab as _rl
+
+    rl_fonts = Path(_rl.__file__).parent / "fonts"
+    win_fonts = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts"
+    candidates = [
+        # (family, regular, bold) - best Unicode coverage first.
+        ("DejaVu", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("Arial", win_fonts / "arial.ttf", win_fonts / "arialbd.ttf"),
+        ("Vera", rl_fonts / "Vera.ttf", rl_fonts / "VeraBd.ttf"),
+    ]
+    mono_candidates = [
+        ("DejaVuMono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+        ("Consolas", win_fonts / "consola.ttf"),
+        ("CourierNew", win_fonts / "cour.ttf"),
+    ]
+
+    regular, bold, mono = "Helvetica", "Helvetica-Bold", "Courier"
+    for name, reg_path, bold_path in candidates:
+        try:
+            if not (Path(reg_path).exists() and Path(bold_path).exists()):
+                continue
+            pdfmetrics.registerFont(TTFont(name, str(reg_path)))
+            pdfmetrics.registerFont(TTFont(name + "-Bold", str(bold_path)))
+            regular, bold = name, name + "-Bold"
+            break
+        except Exception:
+            continue
+    for name, path in mono_candidates:
+        try:
+            if not Path(path).exists():
+                continue
+            pdfmetrics.registerFont(TTFont(name, str(path)))
+            mono = name
+            break
+        except Exception:
+            continue
+
+    _REPORT_FONTS = (regular, bold, mono)
+    return _REPORT_FONTS
+
+
+# Only used when no TrueType font could be registered: map characters the
+# built-in WinAnsi fonts can't draw onto plain ASCII, so they degrade to
+# something readable instead of vanishing.
+_ASCII_FALLBACKS = {
+    "\u2014": "-", "\u2013": "-", "\u2212": "-",
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+    "\u2026": "...", "\u00b7": "-", "\u2022": "*",
+    "\u2192": "->", "\u2190": "<-", "\u2191": "^", "\u2193": "v",
+    "\u2713": "OK", "\u2717": "x", "\u00a0": " ",
+}
+
+
+def _ascii_fallback(text, active):
+    if not active or not text:
+        return text
+    for bad, good in _ASCII_FALLBACKS.items():
+        text = text.replace(bad, good)
+    return text
+
+
 def build_report_pdf(md_text, title, subtitle=None, meta=None):
     import html as _html
     from xml.sax.saxutils import escape as xml_escape
@@ -2976,6 +3150,10 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
 
     W, H = letter
     buf = io.BytesIO()
+    F_REG, F_BOLD, F_MONO = _register_report_fonts()
+    # True only if no TrueType font could be registered, in which case
+    # characters outside WinAnsi have to be transliterated to survive.
+    ASCII_ONLY = F_REG == "Helvetica"
 
     # Palette
     C_NAVY   = HexColor("#1e293b")
@@ -3015,18 +3193,18 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         c.rect(0.75 * inch, H * 0.415, W - 1.5 * inch, 3, fill=1, stroke=0)
         # Eyebrow
         c.setFillColor(HexColor("#64748b"))
-        c.setFont("Helvetica", 10)
+        c.setFont(F_REG, 10)
         c.drawCentredString(W / 2, H * 0.72, "SECURITY  ·  CONFIDENTIAL")
         # Big title
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 38)
+        c.setFont(F_BOLD, 38)
         c.drawCentredString(W / 2, H * 0.615, "VULNERABILITY")
-        c.setFont("Helvetica-Bold", 30)
+        c.setFont(F_BOLD, 30)
         c.drawCentredString(W / 2, H * 0.545, "ASSESSMENT REPORT")
         # Subtitle (date / files / count line)
         c.setFillColor(HexColor("#94a3b8"))
-        c.setFont("Helvetica", 11)
-        sub = (subtitle or "").replace("&middot;", "·")
+        c.setFont(F_REG, 11)
+        sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
         c.drawCentredString(W / 2, H * 0.43, sub)
         # Bottom stats panel
         counts = (meta or {}).get("counts", {})
@@ -3048,10 +3226,10 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         for i, (val, lbl, clr) in enumerate(stats):
             cx = i * col_w + col_w / 2
             c.setFillColor(HexColor(clr))
-            c.setFont("Helvetica-Bold", 26)
+            c.setFont(F_BOLD, 26)
             c.drawCentredString(cx, H * 0.165, val)
             c.setFillColor(HexColor("#64748b"))
-            c.setFont("Helvetica", 8)
+            c.setFont(F_REG, 8)
             c.drawCentredString(cx, H * 0.105, lbl)
 
     def _page(c, doc):
@@ -3060,42 +3238,42 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         c.setFillColor(C_NAVY)
         c.rect(0, H - 0.44 * inch, W, 0.44 * inch, fill=1, stroke=0)
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(F_BOLD, 8)
         c.drawString(0.75 * inch, H - 0.27 * inch, title)
-        c.setFont("Helvetica", 8)
+        c.setFont(F_REG, 8)
         c.drawRightString(W - 0.75 * inch, H - 0.27 * inch, "CONFIDENTIAL")
         # Footer
         c.setStrokeColor(C_BORDER)
         c.line(0.75 * inch, 0.54 * inch, W - 0.75 * inch, 0.54 * inch)
         c.setFillColor(C_MUTED)
-        c.setFont("Helvetica", 7.5)
-        sub = (subtitle or "").replace("&middot;", "·")
+        c.setFont(F_REG, 7.5)
+        sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
         c.drawString(0.75 * inch, 0.36 * inch, sub)
         c.drawRightString(W - 0.75 * inch, 0.36 * inch, f"Page {doc.page}")
         c.restoreState()
 
     # ── Styles ──────────────────────────────────────────────────────────────
     PS = ParagraphStyle
-    S_H1    = PS("RH1",    fontName="Helvetica-Bold", fontSize=20, textColor=C_NAVY,
+    S_H1    = PS("RH1",    fontName=F_BOLD, fontSize=20, textColor=C_NAVY,
                  spaceBefore=20, spaceAfter=8, leading=24)
-    S_H2    = PS("RH2",    fontName="Helvetica-Bold", fontSize=15, textColor=C_NAVY,
+    S_H2    = PS("RH2",    fontName=F_BOLD, fontSize=15, textColor=C_NAVY,
                  spaceBefore=18, spaceAfter=4, leading=18)
-    S_H3    = PS("RH3",    fontName="Helvetica-Bold", fontSize=12, textColor=C_SLATE,
+    S_H3    = PS("RH3",    fontName=F_BOLD, fontSize=12, textColor=C_SLATE,
                  spaceBefore=10, spaceAfter=4, leading=15)
-    S_H3W   = PS("RH3W",   fontName="Helvetica-Bold", fontSize=11, textColor=white,
+    S_H3W   = PS("RH3W",   fontName=F_BOLD, fontSize=11, textColor=white,
                  spaceBefore=0,  spaceAfter=0, leading=14, leftIndent=8)
-    S_BODY  = PS("RBody",  fontName="Helvetica",      fontSize=10,
+    S_BODY  = PS("RBody",  fontName=F_REG,      fontSize=10,
                  textColor=HexColor("#374151"), spaceBefore=3, spaceAfter=3, leading=15)
-    S_BULL  = PS("RBull",  fontName="Helvetica",      fontSize=10,
+    S_BULL  = PS("RBull",  fontName=F_REG,      fontSize=10,
                  textColor=HexColor("#374151"), spaceBefore=2, spaceAfter=2,
                  leftIndent=12, leading=14)
-    S_BADGE = PS("RBadge", fontName="Helvetica-Bold", fontSize=8.5, textColor=white,
+    S_BADGE = PS("RBadge", fontName=F_BOLD, fontSize=8.5, textColor=white,
                  alignment=TA_CENTER, spaceBefore=0, spaceAfter=0, leading=11)
-    S_FTIT  = PS("RFTit",  fontName="Helvetica-Bold", fontSize=9.5, textColor=white,
+    S_FTIT  = PS("RFTit",  fontName=F_BOLD, fontSize=9.5, textColor=white,
                  spaceBefore=0, spaceAfter=0, leading=13)
-    S_FBOD  = PS("RFBod",  fontName="Helvetica",      fontSize=9,
+    S_FBOD  = PS("RFBod",  fontName=F_REG,      fontSize=9,
                  textColor=HexColor("#374151"), spaceBefore=2, spaceAfter=2, leading=13)
-    S_FCOD  = PS("RFCod",  fontName="Courier",        fontSize=8,
+    S_FCOD  = PS("RFCod",  fontName=F_MONO,        fontSize=8,
                  textColor=HexColor("#1e293b"), spaceBefore=2, spaceAfter=2,
                  backColor=HexColor("#f1f5f9"), leftIndent=4, leading=11)
 
@@ -3103,7 +3281,7 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
 
     def _safe(text):
         """Unescape HTML entities then re-escape for reportlab XML."""
-        return xml_escape(_html.unescape(strip_md_inline(text)))
+        return xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(text)), ASCII_ONLY))
 
     def _h2_with_rule(text_esc):
         t = Table(
@@ -3153,7 +3331,7 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", btext)
             if lbl_m and bkind == "bullet":
                 lbl = xml_escape(lbl_m.group(1))
-                val = xml_escape(_html.unescape(strip_md_inline(lbl_m.group(2))))
+                val = xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY))
                 # Evidence / code lines get monospace treatment
                 if lbl_m.group(1).lower() in ("evidence", "code"):
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>', S_FBOD))
@@ -3161,7 +3339,7 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
                 else:
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>  {val}', S_FBOD))
             else:
-                esc = xml_escape(_html.unescape(strip_md_inline(btext)))
+                esc = xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(btext)), ASCII_ONLY))
                 prefix = "• " if bkind == "bullet" else ""
                 body_paras.append(Paragraph(prefix + esc, S_FBOD))
 
@@ -3247,7 +3425,7 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", text)
             if lbl_m:
                 lbl = xml_escape(lbl_m.group(1))
-                val = xml_escape(_html.unescape(strip_md_inline(lbl_m.group(2))))
+                val = xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY))
                 story.append(Paragraph(f'• <b>{lbl}:</b>  {val}', S_BULL))
             else:
                 story.append(Paragraph(f'• {text_esc}', S_BULL))
@@ -3366,7 +3544,14 @@ def vuln_scan_report():
     except Exception as e:
         return jsonify({"error": f"Report generation failed: {e}"}), 500
 
-    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result)
+    # Per-finding deep-dive: what it is, why it matters here, how it would be
+    # exploited, the specific fix, how to verify. On by default; pass
+    # detail=false for the quicker summary-only report.
+    details = {}
+    if data.get("detail", True):
+        details = enrich_findings_with_detail(findings)
+
+    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result, details)
 
     title = "Vulnerability Assessment Report"
     subtitle = (
