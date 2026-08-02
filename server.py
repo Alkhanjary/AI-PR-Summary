@@ -2794,33 +2794,41 @@ def count_findings_by_severity(findings):
     return counts
 
 
-DETAIL_BATCH_SIZE = 6      # findings per LLM call - small enough to stay specific
-DETAIL_MAX_FINDINGS = 80   # ceiling, so a huge scan can't run for an hour
+DETAIL_BATCH_SIZE = 5      # findings per LLM call - small enough to stay specific
+DETAIL_MAX_FINDINGS = 250  # ceiling, so a pathological scan can't run forever
+DETAIL_RETRIES = 2         # a dropped batch means findings silently lose their write-up
 
 
 def enrich_findings_with_detail(findings, log=None):
     """Asks the LLM to write a proper explanation for each finding: what it is,
     why it matters here, how it would be exploited, the specific fix, and how to
-    verify it. Returns {index: detail_dict}.
+    verify it. Returns (details_by_index, coverage_note).
 
     Batched rather than one call per finding - a batch keeps each explanation
-    grounded while cutting the number of round trips by ~6x. Failures are
-    per-batch and non-fatal: the report still builds from the scanner's own
-    fields for anything that didn't come back."""
+    grounded while cutting round trips by ~5x.
+
+    Two details matter for coverage. Findings are selected in SEVERITY order,
+    not scanner order, so if the cap is ever hit it drops the least important
+    ones rather than whichever happened to be scanned last. And any finding
+    missing from a batch's reply is retried, since a single malformed response
+    would otherwise leave several findings silently unexplained."""
     client, model = get_client()
     if not client or not findings:
-        return {}
+        return {}, ""
 
-    subset = findings[:DETAIL_MAX_FINDINGS]
-    details = {}
-    total_batches = (len(subset) + DETAIL_BATCH_SIZE - 1) // DETAIL_BATCH_SIZE
+    order = {s: i for i, s in enumerate(SEVERITY_ORDER)}
+    ranked = sorted(
+        range(len(findings)),
+        key=lambda i: order.get((findings[i].get("severity") or "").lower(), len(SEVERITY_ORDER)),
+    )
+    selected = ranked[:DETAIL_MAX_FINDINGS]
 
-    for b in range(total_batches):
-        chunk = subset[b * DETAIL_BATCH_SIZE:(b + 1) * DETAIL_BATCH_SIZE]
-        payload = []
-        for i, f in enumerate(chunk):
-            payload.append({
-                "id": str(b * DETAIL_BATCH_SIZE + i),
+    def payload_for(idx_list):
+        out = []
+        for idx in idx_list:
+            f = findings[idx]
+            out.append({
+                "id": str(idx),
                 "file": f.get("file"),
                 "line": f.get("line"),
                 "severity": f.get("severity"),
@@ -2831,31 +2839,57 @@ def enrich_findings_with_detail(findings, log=None):
                 "suggested_fix": f.get("improvement"),
                 "scan_type": f.get("scan_type"),
             })
-        if log is not None:
-            log(f"Writing detailed analysis: batch {b + 1}/{total_batches} "
-                f"({len(chunk)} finding(s))...")
-        try:
-            raw = call_llm(client, model, json.dumps(payload, indent=2)[:REPORT_MAX_CHARS],
-                           system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
-            parsed = parse_json_response(raw)
-            if isinstance(parsed, dict):
-                parsed = [parsed]
-            for item in parsed or []:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    idx = int(str(item.get("id")))
-                except (TypeError, ValueError):
-                    continue
-                if 0 <= idx < len(subset):
-                    details[idx] = item
-        except Exception as e:
-            if log is not None:
-                log(f"  detailed analysis failed for batch {b + 1}: {e}")
+        return out
 
+    details = {}
+    pending = list(selected)
+    for attempt in range(1, DETAIL_RETRIES + 2):
+        if not pending:
+            break
+        if attempt > 1 and log is not None:
+            log(f"Retrying detailed analysis for {len(pending)} finding(s) that came back empty...")
+        batches = [pending[i:i + DETAIL_BATCH_SIZE] for i in range(0, len(pending), DETAIL_BATCH_SIZE)]
+        for b, chunk in enumerate(batches, 1):
+            if log is not None and attempt == 1:
+                log(f"Writing detailed analysis: batch {b}/{len(batches)} ({len(chunk)} finding(s))...")
+            try:
+                raw = call_llm(client, model,
+                               json.dumps(payload_for(chunk), indent=2)[:REPORT_MAX_CHARS],
+                               system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
+                parsed = parse_json_response(raw)
+                if isinstance(parsed, dict):
+                    parsed = [parsed]
+                for item in parsed or []:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        idx = int(str(item.get("id")))
+                    except (TypeError, ValueError):
+                        continue
+                    # Only accept ids we actually asked about in this batch.
+                    if idx in chunk and any((item.get(k) or "").strip()
+                                            for k in ("what", "why", "attack", "fix")):
+                        details[idx] = item
+            except Exception as e:
+                if log is not None:
+                    log(f"  detailed analysis failed for batch {b}: {e}")
+        pending = [i for i in selected if i not in details]
+
+    skipped = len(findings) - len(selected)
+    note = ""
+    if pending or skipped:
+        bits = []
+        if pending:
+            bits.append(f"{len(pending)} finding(s) could not be expanded (the AI call failed "
+                        "or returned nothing usable); their scanner-provided impact and fix are "
+                        "shown instead")
+        if skipped:
+            bits.append(f"{skipped} lowest-severity finding(s) were not expanded, as this report "
+                        f"caps detailed write-ups at {DETAIL_MAX_FINDINGS}")
+        note = "; ".join(bits) + "."
     if log is not None:
-        log(f"Detailed analysis written for {len(details)}/{len(subset)} finding(s).")
-    return details
+        log(f"Detailed analysis written for {len(details)}/{len(selected)} selected finding(s).")
+    return details, note
 
 
 def _detail_section(detail):
@@ -2873,7 +2907,7 @@ def _detail_section(detail):
     return out
 
 
-def build_findings_markdown(result, details=None):
+def build_findings_markdown(result, details=None, detail_note=""):
     """Deterministically builds the Findings Summary + Detailed Findings
     sections directly from the scanner's JSON, so every single finding is
     guaranteed to appear in the report - not left to the LLM to enumerate,
@@ -2892,25 +2926,45 @@ def build_findings_markdown(result, details=None):
     lines = ["## Findings Summary", ""]
     lines.append(f"- **Files scanned:** {result.get('files_scanned', 'n/a')}")
     lines.append(f"- **Total findings:** {len(findings)}")
+    lines.append("")
+    lines.append("### By severity")
+    lines.append("")
     for sev in SEVERITY_ORDER:
-        lines.append(f"- **{sev.capitalize()}:** {counts[sev]}")
+        n = counts[sev]
+        share = f" ({round(100 * n / len(findings))}%)" if findings and n else ""
+        lines.append(f"- **{sev.capitalize()}:** {n}{share}")
+
     if category_counts:
         lines.append("")
-        lines.append("**By category:**")
-        for cat, n in sorted(category_counts.items(), key=lambda kv: -kv[1]):
-            lines.append(f"- {cat}: {n}")
+        lines.append("### By category")
+        lines.append("")
+        # Worst severity per category makes the list triageable rather than
+        # just a frequency count - 1 critical matters more than 9 lows.
+        worst = {}
+        for f in findings:
+            cat = f.get("category") or f.get("rule") or "uncategorized"
+            sev = (f.get("severity") or "").lower()
+            rank = SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
+            if cat not in worst or rank < worst[cat][0]:
+                worst[cat] = (rank, sev or "unknown")
+        for cat, n in sorted(category_counts.items(),
+                             key=lambda kv: (worst.get(kv[0], (9, ""))[0], -kv[1])):
+            lines.append(f"- **{cat}** — {n} finding(s), worst: {worst.get(cat, (9, 'unknown'))[1]}")
 
     skipped = result.get("skipped_files") or []
     ai_errors = result.get("ai_scan_errors") or []
-    if result.get("truncated") or skipped or ai_errors:
+    if result.get("truncated") or skipped or ai_errors or detail_note:
         lines.append("")
-        lines.append("**Scan notes:**")
+        lines.append("### Scan notes")
+        lines.append("")
         if result.get("truncated"):
             lines.append("- Scan output was truncated; some files may not have been fully analyzed.")
         if skipped:
             lines.append(f"- {len(skipped)} file(s) were skipped during the scan (unsupported type, too large, or unreadable).")
         if ai_errors:
             lines.append(f"- AI verification failed for {len(ai_errors)} file(s); their findings are unverified.")
+        if detail_note:
+            lines.append(f"- {detail_note}")
     lines.append("")
 
     def sort_key(f):
@@ -2926,9 +2980,30 @@ def build_findings_markdown(result, details=None):
         sev = (f.get("severity") or "").lower()
         (grouped[sev] if sev in grouped else other).append(f)
 
+    # Contents: an index of every finding by number, so a 20-page report can be
+    # navigated without scrolling through it. Built from the same ordering the
+    # detail sections use, so the numbers line up exactly.
+    lines.append("## Contents")
+    lines.append("")
+    toc_n = 0
+    for sev in SEVERITY_ORDER + (["other"] if other else []):
+        group = other if sev == "other" else grouped[sev]
+        if not group:
+            continue
+        label = "Other" if sev == "other" else sev.capitalize()
+        lines.append(f"**{label} severity** ({len(group)})")
+        lines.append("")
+        for f in group:
+            toc_n += 1
+            cat = f.get("category") or f.get("rule") or "finding"
+            loc = f"{f.get('file', 'unknown file')}:{f.get('line', '?')}"
+            lines.append(f"- **#{toc_n}** {cat} — {loc}")
+        lines.append("")
+
     lines.append("## Detailed Findings")
     lines.append("")
 
+    counter = 0
     for sev in SEVERITY_ORDER + (["other"] if other else []):
         group = other if sev == "other" else grouped[sev]
         if not group:
@@ -2937,11 +3012,14 @@ def build_findings_markdown(result, details=None):
         lines.append(f"### {label} severity ({len(group)})")
         lines.append("")
         for f in group:
+            counter += 1
             sev_tag = (f.get("severity") or "unknown").upper()
             file_ = f.get("file", "unknown file")
             line_no = f.get("line", "?")
             category = f.get("category") or f.get("rule")
-            heading = f"#### [{sev_tag}] {file_}:{line_no}"
+            # Numbered so findings can be referenced in review ("see #14")
+            # rather than only by file path.
+            heading = f"#### [{sev_tag}] #{counter} · {file_}:{line_no}"
             if category:
                 heading += f" — {category}"
             lines.append(heading)
@@ -3145,7 +3223,7 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, PageBreak,
-        Table, TableStyle, HRFlowable, KeepTogether,
+        Table, TableStyle, HRFlowable, KeepTogether, CondPageBreak,
     )
 
     W, H = letter
@@ -3283,6 +3361,15 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         """Unescape HTML entities then re-escape for reportlab XML."""
         return xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(text)), ASCII_ONLY))
 
+    def _rich(text):
+        """Like _safe, but keeps **bold** and `code` as real formatting instead
+        of stripping the markers. Escaping happens first, so nothing in the
+        source text can inject reportlab markup."""
+        out = xml_escape(_ascii_fallback(_html.unescape(text or ""), ASCII_ONLY))
+        out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
+        out = re.sub(r"`(.+?)`", rf'<font face="{F_MONO}" size="8.5">\1</font>', out)
+        return out
+
     def _h2_with_rule(text_esc):
         t = Table(
             [[Paragraph(text_esc, S_H2)], [HRFlowable(width=CNTW, color=C_BORDER, thickness=1)]],
@@ -3302,7 +3389,10 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             ("LEFTPADDING",    (0, 0), (-1, -1), 10),
             ("RIGHTPADDING",   (0, 0), (-1, -1), 10),
         ]))
-        return [Spacer(1, 10), t, Spacer(1, 4)]
+        # Demand room for the header plus the start of its first finding, so a
+        # bar reading "Critical severity (10)" can never be stranded alone at
+        # the foot of a page with its findings overleaf.
+        return [CondPageBreak(2.6 * inch), Spacer(1, 10), t, Spacer(1, 4)]
 
     def _finding_card(h4_text, card_blocks):
         m = FINDING_HEADING_RE.match(h4_text)
@@ -3331,17 +3421,18 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", btext)
             if lbl_m and bkind == "bullet":
                 lbl = xml_escape(lbl_m.group(1))
-                val = xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY))
+                val = _rich(lbl_m.group(2))
                 # Evidence / code lines get monospace treatment
                 if lbl_m.group(1).lower() in ("evidence", "code"):
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>', S_FBOD))
-                    body_paras.append(Paragraph(val, S_FCOD))
+                    body_paras.append(Paragraph(
+                        xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY)),
+                        S_FCOD))
                 else:
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>  {val}', S_FBOD))
             else:
-                esc = xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(btext)), ASCII_ONLY))
                 prefix = "• " if bkind == "bullet" else ""
-                body_paras.append(Paragraph(prefix + esc, S_FBOD))
+                body_paras.append(Paragraph(prefix + _rich(btext), S_FBOD))
 
         # The card's border is drawn per-section rather than by wrapping the
         # whole thing in an outer Table. A KeepTogether nested inside a table
@@ -3410,9 +3501,16 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         text_esc = _safe(text)
 
         if kind == "h1":
-            story.extend([Spacer(1, 10), Paragraph(text_esc, S_H1)])
+            story.extend([CondPageBreak(1.8 * inch), Spacer(1, 10), Paragraph(text_esc, S_H1)])
         elif kind == "h2":
-            story.extend([Spacer(1, 14), _h2_with_rule(text_esc)])
+            # The contents index and the finding list each get their own page,
+            # which keeps the summary sections intact and makes the document
+            # easier to navigate.
+            if text.strip().lower().startswith(("detailed findings", "contents")):
+                story.append(PageBreak())
+                story.append(_h2_with_rule(text_esc))
+            else:
+                story.extend([CondPageBreak(1.8 * inch), Spacer(1, 14), _h2_with_rule(text_esc)])
         elif kind == "h3":
             sev_m = re.match(
                 r"^(Critical|High|Medium|Low|Other)\s+severity", text, re.IGNORECASE
@@ -3420,17 +3518,11 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             if sev_m:
                 story.extend(_sev_group_header(text_esc, sev_m.group(1).lower()))
             else:
-                story.extend([Spacer(1, 8), Paragraph(text_esc, S_H3)])
+                story.extend([CondPageBreak(1.4 * inch), Spacer(1, 8), Paragraph(text_esc, S_H3)])
         elif kind == "bullet":
-            lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", text)
-            if lbl_m:
-                lbl = xml_escape(lbl_m.group(1))
-                val = xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY))
-                story.append(Paragraph(f'• <b>{lbl}:</b>  {val}', S_BULL))
-            else:
-                story.append(Paragraph(f'• {text_esc}', S_BULL))
+            story.append(Paragraph(f"• {_rich(text)}", S_BULL))
         else:
-            story.append(Paragraph(text_esc, S_BODY))
+            story.append(Paragraph(_rich(text), S_BODY))
 
         story.append(Spacer(1, 3))
 
@@ -3580,11 +3672,11 @@ def vuln_scan_report():
     # Per-finding deep-dive: what it is, why it matters here, how it would be
     # exploited, the specific fix, how to verify. On by default; pass
     # detail=false for the quicker summary-only report.
-    details = {}
+    details, detail_note = {}, ""
     if data.get("detail", True):
-        details = enrich_findings_with_detail(findings)
+        details, detail_note = enrich_findings_with_detail(findings)
 
-    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result, details)
+    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result, details, detail_note)
 
     title = "Vulnerability Assessment Report"
     # Name the target in the subtitle too, so an open report identifies itself
