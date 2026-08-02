@@ -7,7 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -2831,7 +2831,13 @@ def count_findings_by_severity(findings):
 
 
 DETAIL_BATCH_SIZE = 5      # findings per LLM call - small enough to stay specific
-DETAIL_MAX_FINDINGS = 250  # ceiling, so a pathological scan can't run forever
+DETAIL_MAX_FINDINGS = 60   # ceiling; beyond this the long tail adds minutes for
+                           # little value, and the report says what was skipped
+DETAIL_PARALLEL = 6        # batches in flight at once. The batches are fully
+                           # independent, so running them sequentially made a
+                           # large report take the SUM of every call instead of
+                           # roughly the slowest one. Capped to stay polite to
+                           # the LLM endpoint's rate limits.
 DETAIL_RETRIES = 2         # a dropped batch means findings silently lose their write-up
 
 
@@ -2877,6 +2883,29 @@ def enrich_findings_with_detail(findings, log=None):
             })
         return out
 
+    def run_batch(chunk):
+        """Returns {finding_index: detail} for one batch. Kept free of shared
+        state so batches can run concurrently without locking."""
+        out = {}
+        raw = call_llm(client, model,
+                       json.dumps(payload_for(chunk), indent=2)[:REPORT_MAX_CHARS],
+                       system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
+        parsed = parse_json_response(raw)
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        for item in parsed or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                idx = int(str(item.get("id")))
+            except (TypeError, ValueError):
+                continue
+            # Only accept ids we actually asked about in this batch.
+            if idx in chunk and any((item.get(k) or "").strip()
+                                    for k in ("what", "why", "attack", "fix")):
+                out[idx] = item
+        return out
+
     details = {}
     pending = list(selected)
     for attempt in range(1, DETAIL_RETRIES + 2):
@@ -2885,30 +2914,21 @@ def enrich_findings_with_detail(findings, log=None):
         if attempt > 1 and log is not None:
             log(f"Retrying detailed analysis for {len(pending)} finding(s) that came back empty...")
         batches = [pending[i:i + DETAIL_BATCH_SIZE] for i in range(0, len(pending), DETAIL_BATCH_SIZE)]
-        for b, chunk in enumerate(batches, 1):
-            if log is not None and attempt == 1:
-                log(f"Writing detailed analysis: batch {b}/{len(batches)} ({len(chunk)} finding(s))...")
-            try:
-                raw = call_llm(client, model,
-                               json.dumps(payload_for(chunk), indent=2)[:REPORT_MAX_CHARS],
-                               system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
-                parsed = parse_json_response(raw)
-                if isinstance(parsed, dict):
-                    parsed = [parsed]
-                for item in parsed or []:
-                    if not isinstance(item, dict):
-                        continue
-                    try:
-                        idx = int(str(item.get("id")))
-                    except (TypeError, ValueError):
-                        continue
-                    # Only accept ids we actually asked about in this batch.
-                    if idx in chunk and any((item.get(k) or "").strip()
-                                            for k in ("what", "why", "attack", "fix")):
-                        details[idx] = item
-            except Exception as e:
-                if log is not None:
-                    log(f"  detailed analysis failed for batch {b}: {e}")
+        if log is not None and attempt == 1:
+            log(f"Writing detailed analysis: {len(batches)} batch(es), "
+                f"up to {DETAIL_PARALLEL} at a time...")
+        done = 0
+        with ThreadPoolExecutor(max_workers=DETAIL_PARALLEL) as ex:
+            futures = {ex.submit(run_batch, chunk): chunk for chunk in batches}
+            for fut in as_completed(futures):
+                done += 1
+                try:
+                    details.update(fut.result())
+                except Exception as e:
+                    if log is not None:
+                        log(f"  detailed analysis failed for a batch: {e}")
+                if log is not None and attempt == 1:
+                    log(f"  detailed analysis: {done}/{len(batches)} batch(es) done")
         pending = [i for i in selected if i not in details]
 
     skipped = len(findings) - len(selected)
