@@ -28,6 +28,7 @@ from summarize_pr import (
     VULN_REPORT_SYSTEM_PROMPT,
     PROJECT_DETECT_SYSTEM_PROMPT,
     PROJECT_RETRY_SYSTEM_PROMPT,
+    VULN_DETAIL_SYSTEM_PROMPT,
     AI_CODE_SCAN_SYSTEM_PROMPT,
     AI_WEB_SCAN_SYSTEM_PROMPT,
     AI_NETWORK_SCAN_SYSTEM_PROMPT,
@@ -40,7 +41,59 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
-CORS(app)
+
+# This API can read arbitrary local folders and run build commands, so a
+# wildcard CORS policy is genuinely dangerous: any website you happened to have
+# open could call http://127.0.0.1:5000 and read the response. Restrict it to
+# origins the dashboard is actually served from.
+#
+# "null" covers opening dashboard/index.html straight off disk (file:// sends
+# Origin: null). That is how the README tells you to run it, so it has to work -
+# but it is the weakest entry here, since a sandboxed iframe can also present a
+# null origin. Serve the dashboard over http://127.0.0.1 and set
+# DASHBOARD_ALLOW_FILE_ORIGIN=0 to drop it.
+_allowed_origins = [
+    re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"),
+]
+if os.environ.get("DASHBOARD_ALLOW_FILE_ORIGIN", "1") != "0":
+    _allowed_origins.append("null")
+_extra_origins = [o.strip() for o in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS(app, origins=_allowed_origins + _extra_origins, supports_credentials=False)
+
+
+@app.after_request
+def _security_headers(resp):
+    """Baseline hardening for the dashboard's own responses.
+
+    The CSP matters most here: the dashboard is a single HTML file that renders
+    data pulled from GitHub (PR titles, commit messages, branch names), so it
+    limits the blast radius if any escaping is ever missed.
+
+    Deliberately NOT set:
+      - Strict-Transport-Security: this serves plain HTTP on loopback, and HSTS
+        is ignored over HTTP anyway. Setting it would only risk poisoning the
+        browser's HSTS state for localhost across every other project.
+      - X-XSS-Protection: deprecated, removed from modern browsers, and its
+        legacy auditor introduced vulnerabilities of its own. CSP replaces it.
+    """
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Permissions-Policy",
+                            "camera=(), microphone=(), geolocation=(), interest-cohort=()")
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        # The dashboard is one self-contained file with inline <script>/<style>.
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https://avatars.githubusercontent.com; "
+        "connect-src 'self' http://127.0.0.1:5000 http://localhost:5000; "
+        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    )
+    # Don't advertise the exact Werkzeug/Python versions.
+    resp.headers["Server"] = "dashboard"
+    return resp
 
 # The exact interpreter running this server - used instead of a hardcoded
 # "py" (Windows-launcher-only, not guaranteed even there) or "python3"
@@ -414,7 +467,7 @@ def team_report():
         lines.append(f"- **Active days:** {c.get('active_days_count', 0)}")
         lines.append(f"- **Bugs found:** {c.get('total_bugs', 0)} (worst severity: {c.get('worst', 'low')})")
         lines.append("")
-    report_md = "\n".join(lines)
+    report_md = normalize_report_text("\n".join(lines))
 
     title = "Team Performance Report"
     subtitle = (range_label + " &middot; " if range_label else "") + \
@@ -688,7 +741,8 @@ def _finding_key(f):
     )
 
 
-def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None):
+def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_scanned=None,
+                          job_id=None):
     """Persists this scan to disk and compares it against the previous scan
     for the same repo_key. Returns a delta dict with new/fixed/recurring counts."""
     ts = timestamp or time.time()
@@ -696,9 +750,20 @@ def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None):
         "repo": repo_key,
         "timestamp": ts,
         "name": "",
+        # Recorded so a report can still be built from this scan after its
+        # in-memory job is gone (server restart, or pruned past the job cap) -
+        # the dashboard only knows the job_id it was handed at scan time.
+        "job_id": job_id,
         "scan_types": list(scan_types or []),
+        "files_scanned": files_scanned,
+        # Keep the fields the report builder needs (evidence/impact/improvement),
+        # not just the ones the trend comparison uses - otherwise a report
+        # generated from history is missing the parts that make it useful.
         "findings": [
-            {k: f.get(k) for k in ("file", "line", "severity", "category", "description", "scan_type")}
+            {k: f.get(k) for k in (
+                "file", "line", "severity", "category", "description", "scan_type",
+                "evidence", "impact", "improvement", "source", "ai_verdict", "ai_reason",
+            )}
             for f in (findings or [])
         ],
     }
@@ -2331,8 +2396,10 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
                             job["log"].append(f"AI-found finding(s) alone triggered the gate (threshold: {fail_on}).")
 
             all_findings = report.get("findings") or []
-            repo_key = repo or "(uploaded)"
-            delta = save_and_compare_scan(repo_key, all_findings, scan_types)
+            repo_key = repo or (local_path if local_path else "(uploaded)")
+            delta = save_and_compare_scan(repo_key, all_findings, scan_types,
+                                          files_scanned=report.get("files_scanned"),
+                                          timestamp=job.get("started"), job_id=job_id)
             report["history_delta"] = delta
             job["status"] = "done"
             job["result"] = report
@@ -2489,6 +2556,77 @@ def vuln_scan_history():
     return jsonify({"items": items[:25]})
 
 
+@app.route("/api/browse")
+def browse_folders():
+    """Lists sub-folders of a directory so the dashboard can offer a real
+    folder picker for the 'scan a local folder' option.
+
+    A browser deliberately never reveals the absolute path of a folder the user
+    picks (webkitdirectory only yields relative paths), so the path has to be
+    resolved server-side. Only directory NAMES are returned - never file
+    contents - and the server already binds to loopback with a localhost-only
+    CORS policy, so this doesn't widen what a local user can reach.
+    """
+    raw = (request.args.get("path") or "").strip()
+
+    # No path yet: offer sensible starting points rather than a bare filesystem
+    # root the user then has to click through.
+    if not raw:
+        home = Path.home()
+        shortcuts = []
+        for label, p in (("Home", home), ("Desktop", home / "Desktop"),
+                         ("Documents", home / "Documents"), ("Downloads", home / "Downloads")):
+            if p.is_dir():
+                shortcuts.append({"name": label, "path": str(p)})
+        if os.name == "nt":
+            for letter in "CDEFGH":
+                drive = Path(f"{letter}:\\")
+                if drive.exists():
+                    shortcuts.append({"name": f"{letter}: drive", "path": str(drive)})
+        else:
+            shortcuts.append({"name": "/", "path": "/"})
+        return jsonify({"path": None, "parent": None, "shortcuts": shortcuts, "entries": []})
+
+    try:
+        current = Path(raw).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError):
+        return jsonify({"error": f"No such folder: {raw}"}), 400
+    if not current.is_dir():
+        return jsonify({"error": f"Not a folder: {current}"}), 400
+
+    entries, unreadable = [], False
+    try:
+        for child in sorted(current.iterdir(), key=lambda p: p.name.lower()):
+            try:
+                if not child.is_dir():
+                    continue
+            except OSError:
+                continue  # broken junction / permission denied on stat
+            if child.name.startswith(("$", ".")) and child.name not in (".github",):
+                continue
+            entries.append({"name": child.name, "path": str(child)})
+    except PermissionError:
+        unreadable = True
+
+    parent = str(current.parent) if current.parent != current else None
+    # Flag folders that look like a project, so the right one is easy to spot.
+    markers = ("package.json", "pyproject.toml", "requirements.txt", "docker-compose.yml",
+               "setup.py", "go.mod", "Cargo.toml", ".git")
+    for e in entries:
+        try:
+            e["is_project"] = any((Path(e["path"]) / m).exists() for m in markers)
+        except OSError:
+            e["is_project"] = False
+
+    return jsonify({
+        "path": str(current),
+        "parent": parent,
+        "entries": entries,
+        "unreadable": unreadable,
+        "is_project": any((current / m).exists() for m in markers),
+    })
+
+
 @app.route("/api/vuln-scan/rename", methods=["PATCH"])
 def vuln_scan_rename():
     """Rename a scan. Body: {scan_ref: 'job:<id>' or 'ts:<ts>', name: '...'}"""
@@ -2574,14 +2712,30 @@ def vuln_scan_delete():
 def _resolve_scan(ref):
     """Return {findings, name, repo, timestamp, counts} for a scan_ref."""
     if (ref or "").startswith("job:"):
-        job = VULN_JOBS.get(ref[4:])
-        if not job or not job.get("result"):
+        job_id = ref[4:]
+        job = VULN_JOBS.get(job_id)
+        if job and job.get("result"):
+            findings = job["result"].get("findings", [])
+            return {
+                "findings": findings, "name": job.get("name", ""),
+                "repo": job.get("repo", ""), "timestamp": job["started"],
+                "counts": count_findings_by_severity(findings),
+                "files_scanned": job["result"].get("files_scanned"),
+            }
+        # The job is gone (server restarted, or pruned past the cap) but the
+        # scan itself was persisted - look it up by the job_id recorded there,
+        # since the dashboard only ever knows the job_id it was given.
+        with _scan_history_lock:
+            records = _load_scan_history()
+        rec = next((r for r in reversed(records) if r.get("job_id") == job_id), None)
+        if not rec:
             return None
-        findings = job["result"].get("findings", [])
+        findings = rec.get("findings", [])
         return {
-            "findings": findings, "name": job.get("name", ""),
-            "repo": job.get("repo", ""), "timestamp": job["started"],
+            "findings": findings, "name": rec.get("name", ""),
+            "repo": rec.get("repo", ""), "timestamp": rec.get("timestamp", 0),
             "counts": count_findings_by_severity(findings),
+            "files_scanned": rec.get("files_scanned"),
         }
     if (ref or "").startswith("ts:"):
         ts = float(ref[3:])
@@ -2595,6 +2749,7 @@ def _resolve_scan(ref):
             "findings": findings, "name": rec.get("name", ""),
             "repo": rec.get("repo", ""), "timestamp": rec.get("timestamp", 0),
             "counts": count_findings_by_severity(findings),
+            "files_scanned": rec.get("files_scanned"),
         }
     return None
 
@@ -2639,7 +2794,120 @@ def count_findings_by_severity(findings):
     return counts
 
 
-def build_findings_markdown(result):
+DETAIL_BATCH_SIZE = 5      # findings per LLM call - small enough to stay specific
+DETAIL_MAX_FINDINGS = 250  # ceiling, so a pathological scan can't run forever
+DETAIL_RETRIES = 2         # a dropped batch means findings silently lose their write-up
+
+
+def enrich_findings_with_detail(findings, log=None):
+    """Asks the LLM to write a proper explanation for each finding: what it is,
+    why it matters here, how it would be exploited, the specific fix, and how to
+    verify it. Returns (details_by_index, coverage_note).
+
+    Batched rather than one call per finding - a batch keeps each explanation
+    grounded while cutting round trips by ~5x.
+
+    Two details matter for coverage. Findings are selected in SEVERITY order,
+    not scanner order, so if the cap is ever hit it drops the least important
+    ones rather than whichever happened to be scanned last. And any finding
+    missing from a batch's reply is retried, since a single malformed response
+    would otherwise leave several findings silently unexplained."""
+    client, model = get_client()
+    if not client or not findings:
+        return {}, ""
+
+    order = {s: i for i, s in enumerate(SEVERITY_ORDER)}
+    ranked = sorted(
+        range(len(findings)),
+        key=lambda i: order.get((findings[i].get("severity") or "").lower(), len(SEVERITY_ORDER)),
+    )
+    selected = ranked[:DETAIL_MAX_FINDINGS]
+
+    def payload_for(idx_list):
+        out = []
+        for idx in idx_list:
+            f = findings[idx]
+            out.append({
+                "id": str(idx),
+                "file": f.get("file"),
+                "line": f.get("line"),
+                "severity": f.get("severity"),
+                "category": f.get("category") or f.get("rule"),
+                "description": f.get("description"),
+                "evidence": (f.get("evidence") or "")[:600],
+                "impact": f.get("impact"),
+                "suggested_fix": f.get("improvement"),
+                "scan_type": f.get("scan_type"),
+            })
+        return out
+
+    details = {}
+    pending = list(selected)
+    for attempt in range(1, DETAIL_RETRIES + 2):
+        if not pending:
+            break
+        if attempt > 1 and log is not None:
+            log(f"Retrying detailed analysis for {len(pending)} finding(s) that came back empty...")
+        batches = [pending[i:i + DETAIL_BATCH_SIZE] for i in range(0, len(pending), DETAIL_BATCH_SIZE)]
+        for b, chunk in enumerate(batches, 1):
+            if log is not None and attempt == 1:
+                log(f"Writing detailed analysis: batch {b}/{len(batches)} ({len(chunk)} finding(s))...")
+            try:
+                raw = call_llm(client, model,
+                               json.dumps(payload_for(chunk), indent=2)[:REPORT_MAX_CHARS],
+                               system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
+                parsed = parse_json_response(raw)
+                if isinstance(parsed, dict):
+                    parsed = [parsed]
+                for item in parsed or []:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        idx = int(str(item.get("id")))
+                    except (TypeError, ValueError):
+                        continue
+                    # Only accept ids we actually asked about in this batch.
+                    if idx in chunk and any((item.get(k) or "").strip()
+                                            for k in ("what", "why", "attack", "fix")):
+                        details[idx] = item
+            except Exception as e:
+                if log is not None:
+                    log(f"  detailed analysis failed for batch {b}: {e}")
+        pending = [i for i in selected if i not in details]
+
+    skipped = len(findings) - len(selected)
+    note = ""
+    if pending or skipped:
+        bits = []
+        if pending:
+            bits.append(f"{len(pending)} finding(s) could not be expanded (the AI call failed "
+                        "or returned nothing usable); their scanner-provided impact and fix are "
+                        "shown instead")
+        if skipped:
+            bits.append(f"{skipped} lowest-severity finding(s) were not expanded, as this report "
+                        f"caps detailed write-ups at {DETAIL_MAX_FINDINGS}")
+        note = "; ".join(bits) + "."
+    if log is not None:
+        log(f"Detailed analysis written for {len(details)}/{len(selected)} selected finding(s).")
+    return details, note
+
+
+def _detail_section(detail):
+    """Renders one finding's AI-written detail as markdown bullets."""
+    if not detail:
+        return []
+    out = []
+    for key, label in (("what", "What this is"), ("why", "Why it matters here"),
+                       ("attack", "How it could be exploited"), ("fix", "How to fix it"),
+                       ("verify", "How to verify the fix"),
+                       ("severity_note", "On the severity rating")):
+        val = (detail.get(key) or "").strip()
+        if val:
+            out.append(f"- **{label}:** {val}")
+    return out
+
+
+def build_findings_markdown(result, details=None, detail_note=""):
     """Deterministically builds the Findings Summary + Detailed Findings
     sections directly from the scanner's JSON, so every single finding is
     guaranteed to appear in the report - not left to the LLM to enumerate,
@@ -2655,29 +2923,146 @@ def build_findings_markdown(result):
         cat = f.get("category") or f.get("rule") or "uncategorized"
         category_counts[cat] = category_counts.get(cat, 0) + 1
 
-    lines = ["## Findings Summary", ""]
-    lines.append(f"- **Files scanned:** {result.get('files_scanned', 'n/a')}")
-    lines.append(f"- **Total findings:** {len(findings)}")
-    for sev in SEVERITY_ORDER:
-        lines.append(f"- **{sev.capitalize()}:** {counts[sev]}")
-    if category_counts:
-        lines.append("")
-        lines.append("**By category:**")
-        for cat, n in sorted(category_counts.items(), key=lambda kv: -kv[1]):
-            lines.append(f"- {cat}: {n}")
+    total = len(findings)
 
+    def pct(n):
+        return f"{round(100 * n / total)}%" if total else "0%"
+
+    def loc_of(f):
+        """file:line, but web/network findings have no line number - showing
+        a bare ':None' there just looks like a bug in the report."""
+        line = f.get("line")
+        base = f.get("file", "unknown file")
+        return f"{base}:{line}" if line not in (None, "") else base
+
+    lines = ["## Findings Summary", ""]
+
+    # --- Scope -----------------------------------------------------------
+    scan_types = result.get("scan_types") or []
+    affected_files = {f.get("file") for f in findings if f.get("file")}
+    ai_found = sum(1 for f in findings if str(f.get("source") or "").startswith("ai-"))
+
+    # --- Verdict ---------------------------------------------------------
+    # A one-line risk posture up front, so the reader knows how bad it is
+    # before working through the tables underneath.
+    worst_sev = next((s for s in SEVERITY_ORDER if counts[s]), None)
+    if not total:
+        verdict, posture = "No issues found", "No findings were reported by this scan."
+    elif worst_sev == "critical":
+        verdict, posture = "Critical risk", "Critical issues are present and should be fixed before release."
+    elif worst_sev == "high":
+        verdict, posture = "High risk", "High-severity issues are present and should be prioritized."
+    elif worst_sev == "medium":
+        verdict, posture = "Moderate risk", "No critical or high issues; medium findings are worth scheduling."
+    else:
+        verdict, posture = "Low risk", "Only low-severity findings were reported."
+
+    lines.append(f"> **Verdict: {verdict}.** {posture}")
+    lines.append("")
+
+    if total:
+        # Lead with the single most urgent item so remediation has an obvious
+        # starting point without reading the whole detail section.
+        top = sorted(
+            findings,
+            key=lambda f: SEVERITY_ORDER.index((f.get("severity") or "").lower())
+            if (f.get("severity") or "").lower() in SEVERITY_ORDER else len(SEVERITY_ORDER),
+        )[0]
+        top_loc = loc_of(top)
+        lines.append(f"**Start here —** `{top_loc}` — "
+                      f"{(top.get('severity') or 'unknown').capitalize()}: "
+                      f"{top.get('description') or top.get('category') or 'see details below'}")
+        lines.append("")
+
+    lines.append("### Scope")
+    lines.append("")
+    lines.append("| | |")
+    lines.append("|---|---|")
+    lines.append(f"| Files scanned | {result.get('files_scanned', 'n/a')} |")
+    lines.append(f"| Files with findings | {len(affected_files)} |")
+    lines.append(f"| Total findings | {total} |")
+    if scan_types:
+        lines.append(f"| Scan types | {', '.join(scan_types)} |")
+    if ai_found:
+        lines.append(f"| Found by AI review | {ai_found} of {total} |")
+    if result.get("exit_code") is not None:
+        lines.append(f"| Scanner exit code | {result.get('exit_code')} |")
+    lines.append("")
+
+    # --- Severity --------------------------------------------------------
+    lines.append("### By severity")
+    lines.append("")
+    lines.append("| Severity | Count | Share | Distribution |")
+    lines.append("|---|---|---|---|")
+    for sev in SEVERITY_ORDER:
+        n = counts[sev]
+        # A text bar keeps the shape visible in markdown and Word too, not
+        # only in the PDF where it can be drawn.
+        bar = "█" * round(20 * n / total) if total and n else ""
+        lines.append(f"| {sev.capitalize()} | {n} | {pct(n)} | {bar} |")
+    lines.append(f"| **Total** | **{total}** | | |")
+    lines.append("")
+
+    # --- Categories ------------------------------------------------------
+    if category_counts:
+        # Worst severity per category makes the list triageable rather than a
+        # bare frequency count - one critical outranks nine lows.
+        worst = {}
+        for f in findings:
+            cat = f.get("category") or f.get("rule") or "uncategorized"
+            sev = (f.get("severity") or "").lower()
+            rank = SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
+            if cat not in worst or rank < worst[cat][0]:
+                worst[cat] = (rank, sev or "unknown")
+
+        lines.append("### By category")
+        lines.append("")
+        lines.append("| Category | Findings | Worst severity |")
+        lines.append("|---|---|---|")
+        for cat, n in sorted(category_counts.items(),
+                             key=lambda kv: (worst.get(kv[0], (9, ""))[0], -kv[1])):
+            lines.append(f"| {cat} | {n} | {worst.get(cat, (9, 'unknown'))[1].capitalize()} |")
+        lines.append("")
+
+    # --- Hotspots --------------------------------------------------------
+    # Which files carry the most risk, so remediation can start where it pays
+    # off most rather than at the top of an alphabetical list.
+    file_stats = {}
+    for f in findings:
+        key = f.get("file") or "unknown"
+        st = file_stats.setdefault(key, {"n": 0, "rank": len(SEVERITY_ORDER), "worst": "unknown"})
+        st["n"] += 1
+        sev = (f.get("severity") or "").lower()
+        rank = SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
+        if rank < st["rank"]:
+            st["rank"], st["worst"] = rank, sev or "unknown"
+    if len(file_stats) > 1:
+        top = sorted(file_stats.items(), key=lambda kv: (kv[1]["rank"], -kv[1]["n"]))[:10]
+        lines.append("### Most affected files")
+        lines.append("")
+        lines.append("| File | Findings | Worst severity |")
+        lines.append("|---|---|---|")
+        for name, st in top:
+            lines.append(f"| {name} | {st['n']} | {st['worst'].capitalize()} |")
+        if len(file_stats) > len(top):
+            lines.append(f"| _+{len(file_stats) - len(top)} more file(s)_ | | |")
+        lines.append("")
+
+    # --- Notes -----------------------------------------------------------
     skipped = result.get("skipped_files") or []
     ai_errors = result.get("ai_scan_errors") or []
-    if result.get("truncated") or skipped or ai_errors:
+    if result.get("truncated") or skipped or ai_errors or detail_note:
+        lines.append("### Scan notes")
         lines.append("")
-        lines.append("**Scan notes:**")
         if result.get("truncated"):
             lines.append("- Scan output was truncated; some files may not have been fully analyzed.")
         if skipped:
             lines.append(f"- {len(skipped)} file(s) were skipped during the scan (unsupported type, too large, or unreadable).")
         if ai_errors:
             lines.append(f"- AI verification failed for {len(ai_errors)} file(s); their findings are unverified.")
-    lines.append("")
+        if detail_note:
+            lines.append(f"- {detail_note}")
+        lines.append("")
 
     def sort_key(f):
         sev = (f.get("severity") or "low").lower()
@@ -2685,13 +3070,37 @@ def build_findings_markdown(result):
 
     grouped = {sev: [] for sev in SEVERITY_ORDER}
     other = []
+    # Detail keys are positions in the original findings list, so remember each
+    # finding's index before regrouping by severity.
+    index_of = {id(f): i for i, f in enumerate(findings)}
     for f in findings:
         sev = (f.get("severity") or "").lower()
         (grouped[sev] if sev in grouped else other).append(f)
 
+    # Contents: an index of every finding by number, so a 20-page report can be
+    # navigated without scrolling through it. Built from the same ordering the
+    # detail sections use, so the numbers line up exactly.
+    lines.append("## Contents")
+    lines.append("")
+    toc_n = 0
+    for sev in SEVERITY_ORDER + (["other"] if other else []):
+        group = other if sev == "other" else grouped[sev]
+        if not group:
+            continue
+        label = "Other" if sev == "other" else sev.capitalize()
+        lines.append(f"**{label} severity** ({len(group)})")
+        lines.append("")
+        for f in group:
+            toc_n += 1
+            cat = f.get("category") or f.get("rule") or "finding"
+            loc = loc_of(f)
+            lines.append(f"- **#{toc_n}** {cat} — {loc}")
+        lines.append("")
+
     lines.append("## Detailed Findings")
     lines.append("")
 
+    counter = 0
     for sev in SEVERITY_ORDER + (["other"] if other else []):
         group = other if sev == "other" else grouped[sev]
         if not group:
@@ -2700,24 +3109,36 @@ def build_findings_markdown(result):
         lines.append(f"### {label} severity ({len(group)})")
         lines.append("")
         for f in group:
+            counter += 1
             sev_tag = (f.get("severity") or "unknown").upper()
             file_ = f.get("file", "unknown file")
             line_no = f.get("line", "?")
             category = f.get("category") or f.get("rule")
-            heading = f"#### [{sev_tag}] {file_}:{line_no}"
+            # Numbered so findings can be referenced in review ("see #14")
+            # rather than only by file path.
+            heading = f"#### [{sev_tag}] #{counter} · {loc_of(f)}"
             if category:
                 heading += f" — {category}"
             lines.append(heading)
             lines.append("")
-            lines.append(f"- **Location:** `{file_}`, line {line_no}")
+            location = f"`{file_}`" + (f", line {line_no}" if line_no not in (None, "") else "")
+            lines.append(f"- **Location:** {location}")
             if f.get("description"):
                 lines.append(f"- **Issue:** {f['description']}")
             if f.get("evidence"):
                 lines.append(f"- **Evidence:** `{f['evidence']}`")
-            if f.get("impact"):
-                lines.append(f"- **Impact:** {f['impact']}")
-            if f.get("improvement"):
-                lines.append(f"- **Fix:** {f['improvement']}")
+
+            detail = (details or {}).get(index_of.get(id(f)))
+            if detail:
+                # The AI write-up supersedes the scanner's one-line impact/fix,
+                # so those aren't repeated underneath it.
+                lines.extend(_detail_section(detail))
+            else:
+                if f.get("impact"):
+                    lines.append(f"- **Impact:** {f['impact']}")
+                if f.get("improvement"):
+                    lines.append(f"- **Fix:** {f['improvement']}")
+
             if f.get("ai_verdict"):
                 verdict_line = f"- **AI verdict:** {f['ai_verdict']}"
                 if f.get("ai_reason"):
@@ -2736,8 +3157,28 @@ def parse_markdown_blocks(md_text):
     paragraphs). Returns a list of (block_type, text) tuples for the
     docx/pdf builders."""
     blocks = []
+    table_rows = None   # collects consecutive "| a | b |" lines
+
+    def flush_table():
+        nonlocal table_rows
+        if table_rows:
+            blocks.append(("table", table_rows))
+            table_rows = None
+
     for raw_line in md_text.splitlines():
         line = raw_line.rstrip()
+
+        # Pipe tables: gather the run of rows, dropping the |---|---| separator
+        # and any fully empty header used only to make a two-column layout.
+        if line.strip().startswith("|") and line.strip().endswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not all(re.fullmatch(r":?-{2,}:?", c or "-") for c in cells):
+                if table_rows is None:
+                    table_rows = []
+                table_rows.append(cells)
+            continue
+        flush_table()
+
         if not line.strip():
             continue
         if line.startswith("#### "):
@@ -2777,6 +3218,27 @@ def build_report_docx(md_text, title, subtitle=None):
         sub.runs[0].italic = True
 
     for kind, text in parse_markdown_blocks(md_text):
+        # Tables arrive as a list of row-cell-lists, so they must be handled
+        # before any of the string-only formatting below.
+        if kind == "table":
+            rows = [r for r in text if any(c.strip() for c in r)]
+            if not rows:
+                continue
+            ncols = max(len(r) for r in rows)
+            tbl = doc.add_table(rows=0, cols=ncols)
+            tbl.style = "Light Grid Accent 1"
+            header_is_blank = not any(c.strip() for c in rows[0])
+            for i, row in enumerate(rows):
+                cells = tbl.add_row().cells
+                for j in range(ncols):
+                    val = strip_md_inline(row[j]) if j < len(row) else ""
+                    cells[j].text = val
+                    if i == 0 and not header_is_blank:
+                        for para in cells[j].paragraphs:
+                            for run in para.runs:
+                                run.bold = True
+            doc.add_paragraph()
+            continue
         if kind == "h4":
             m = FINDING_HEADING_RE.match(text)
             p = doc.add_paragraph(style="Heading 4")
@@ -2807,6 +3269,116 @@ def build_report_docx(md_text, title, subtitle=None):
     return buf.getvalue()
 
 
+_REPORT_FONTS = None
+
+
+def _register_report_fonts():
+    """Registers a real Unicode TrueType font for the PDF, falling back through
+    a few candidates.
+
+    The standard-14 PDF fonts (Helvetica et al.) are Type1 with WinAnsi
+    encoding, which simply has no glyph for characters like the em-dash in a
+    finding heading, an arrow, or a check mark - they come out blank or as a
+    box. A TrueType font embedded with UTF-8 encoding renders all of them.
+
+    Returns (regular, bold, mono) font names; falls back to the built-ins if
+    nothing can be registered, in which case _ascii_fallback strips what
+    wouldn't render."""
+    global _REPORT_FONTS
+    if _REPORT_FONTS is not None:
+        return _REPORT_FONTS
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import reportlab as _rl
+
+    rl_fonts = Path(_rl.__file__).parent / "fonts"
+    win_fonts = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts"
+    candidates = [
+        # (family, regular, bold) - best Unicode coverage first.
+        ("DejaVu", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("Arial", win_fonts / "arial.ttf", win_fonts / "arialbd.ttf"),
+        ("Vera", rl_fonts / "Vera.ttf", rl_fonts / "VeraBd.ttf"),
+    ]
+    mono_candidates = [
+        ("DejaVuMono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+        ("Consolas", win_fonts / "consola.ttf"),
+        ("CourierNew", win_fonts / "cour.ttf"),
+    ]
+
+    regular, bold, mono = "Helvetica", "Helvetica-Bold", "Courier"
+    for name, reg_path, bold_path in candidates:
+        try:
+            if not (Path(reg_path).exists() and Path(bold_path).exists()):
+                continue
+            pdfmetrics.registerFont(TTFont(name, str(reg_path)))
+            pdfmetrics.registerFont(TTFont(name + "-Bold", str(bold_path)))
+            regular, bold = name, name + "-Bold"
+            break
+        except Exception:
+            continue
+    for name, path in mono_candidates:
+        try:
+            if not Path(path).exists():
+                continue
+            pdfmetrics.registerFont(TTFont(name, str(path)))
+            mono = name
+            break
+        except Exception:
+            continue
+
+    _REPORT_FONTS = (regular, bold, mono)
+    return _REPORT_FONTS
+
+
+# Only used when no TrueType font could be registered: map characters the
+# built-in WinAnsi fonts can't draw onto plain ASCII, so they degrade to
+# something readable instead of vanishing.
+_ASCII_FALLBACKS = {
+    "\u2014": "-", "\u2013": "-", "\u2212": "-",
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+    "\u2026": "...", "\u00b7": "-", "\u2022": "*",
+    "\u2192": "->", "\u2190": "<-", "\u2191": "^", "\u2193": "v",
+    "\u2713": "OK", "\u2717": "x", "\u00a0": " ",
+    "\u2588": "#",
+}
+
+# Characters that are visually near-identical to a plain ASCII one but are
+# frequently MISSING from a given font, so they render as a tofu box instead.
+# LLM prose is full of these (U+2011 in "hard-coded", narrow/thin spaces),
+# and they carry no meaning worth the rendering risk - so they're normalized
+# away for every output format, not only the ASCII-only PDF fallback path.
+_RISKY_CHAR_NORMALIZATIONS = {
+    "\u2010": "-",   # hyphen
+    "\u2011": "-",   # non-breaking hyphen  <- the usual "box" culprit
+    "\u2012": "-",   # figure dash
+    "\u2015": "-",   # horizontal bar
+    "\u00ad": "",    # soft hyphen (invisible, but can render as a box)
+    "\u2009": " ",   # thin space
+    "\u202f": " ",   # narrow no-break space
+    "\u200b": "",    # zero-width space
+    "\u200e": "", "\u200f": "",  # bidi marks
+    "\ufeff": "",    # BOM / zero-width no-break space
+}
+
+
+def normalize_report_text(text):
+    if not text:
+        return text
+    for bad, good in _RISKY_CHAR_NORMALIZATIONS.items():
+        text = text.replace(bad, good)
+    return text
+
+
+def _ascii_fallback(text, active):
+    if not active or not text:
+        return text
+    for bad, good in _ASCII_FALLBACKS.items():
+        text = text.replace(bad, good)
+    return text
+
+
 def build_report_pdf(md_text, title, subtitle=None, meta=None):
     import html as _html
     from xml.sax.saxutils import escape as xml_escape
@@ -2817,11 +3389,15 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, PageBreak,
-        Table, TableStyle, HRFlowable, KeepTogether,
+        Table, TableStyle, HRFlowable, KeepTogether, CondPageBreak,
     )
 
     W, H = letter
     buf = io.BytesIO()
+    F_REG, F_BOLD, F_MONO = _register_report_fonts()
+    # True only if no TrueType font could be registered, in which case
+    # characters outside WinAnsi have to be transliterated to survive.
+    ASCII_ONLY = F_REG == "Helvetica"
 
     # Palette
     C_NAVY   = HexColor("#1e293b")
@@ -2861,18 +3437,18 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         c.rect(0.75 * inch, H * 0.415, W - 1.5 * inch, 3, fill=1, stroke=0)
         # Eyebrow
         c.setFillColor(HexColor("#64748b"))
-        c.setFont("Helvetica", 10)
+        c.setFont(F_REG, 10)
         c.drawCentredString(W / 2, H * 0.72, "SECURITY  ·  CONFIDENTIAL")
         # Big title
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 38)
+        c.setFont(F_BOLD, 38)
         c.drawCentredString(W / 2, H * 0.615, "VULNERABILITY")
-        c.setFont("Helvetica-Bold", 30)
+        c.setFont(F_BOLD, 30)
         c.drawCentredString(W / 2, H * 0.545, "ASSESSMENT REPORT")
         # Subtitle (date / files / count line)
         c.setFillColor(HexColor("#94a3b8"))
-        c.setFont("Helvetica", 11)
-        sub = (subtitle or "").replace("&middot;", "·")
+        c.setFont(F_REG, 11)
+        sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
         c.drawCentredString(W / 2, H * 0.43, sub)
         # Bottom stats panel
         counts = (meta or {}).get("counts", {})
@@ -2894,10 +3470,10 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         for i, (val, lbl, clr) in enumerate(stats):
             cx = i * col_w + col_w / 2
             c.setFillColor(HexColor(clr))
-            c.setFont("Helvetica-Bold", 26)
+            c.setFont(F_BOLD, 26)
             c.drawCentredString(cx, H * 0.165, val)
             c.setFillColor(HexColor("#64748b"))
-            c.setFont("Helvetica", 8)
+            c.setFont(F_REG, 8)
             c.drawCentredString(cx, H * 0.105, lbl)
 
     def _page(c, doc):
@@ -2906,50 +3482,130 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         c.setFillColor(C_NAVY)
         c.rect(0, H - 0.44 * inch, W, 0.44 * inch, fill=1, stroke=0)
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(F_BOLD, 8)
         c.drawString(0.75 * inch, H - 0.27 * inch, title)
-        c.setFont("Helvetica", 8)
+        c.setFont(F_REG, 8)
         c.drawRightString(W - 0.75 * inch, H - 0.27 * inch, "CONFIDENTIAL")
         # Footer
         c.setStrokeColor(C_BORDER)
         c.line(0.75 * inch, 0.54 * inch, W - 0.75 * inch, 0.54 * inch)
         c.setFillColor(C_MUTED)
-        c.setFont("Helvetica", 7.5)
-        sub = (subtitle or "").replace("&middot;", "·")
+        c.setFont(F_REG, 7.5)
+        sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
         c.drawString(0.75 * inch, 0.36 * inch, sub)
         c.drawRightString(W - 0.75 * inch, 0.36 * inch, f"Page {doc.page}")
         c.restoreState()
 
     # ── Styles ──────────────────────────────────────────────────────────────
     PS = ParagraphStyle
-    S_H1    = PS("RH1",    fontName="Helvetica-Bold", fontSize=20, textColor=C_NAVY,
+    S_H1    = PS("RH1",    fontName=F_BOLD, fontSize=20, textColor=C_NAVY,
                  spaceBefore=20, spaceAfter=8, leading=24)
-    S_H2    = PS("RH2",    fontName="Helvetica-Bold", fontSize=15, textColor=C_NAVY,
+    S_H2    = PS("RH2",    fontName=F_BOLD, fontSize=15, textColor=C_NAVY,
                  spaceBefore=18, spaceAfter=4, leading=18)
-    S_H3    = PS("RH3",    fontName="Helvetica-Bold", fontSize=12, textColor=C_SLATE,
+    S_H3    = PS("RH3",    fontName=F_BOLD, fontSize=12, textColor=C_SLATE,
                  spaceBefore=10, spaceAfter=4, leading=15)
-    S_H3W   = PS("RH3W",   fontName="Helvetica-Bold", fontSize=11, textColor=white,
+    S_H3W   = PS("RH3W",   fontName=F_BOLD, fontSize=11, textColor=white,
                  spaceBefore=0,  spaceAfter=0, leading=14, leftIndent=8)
-    S_BODY  = PS("RBody",  fontName="Helvetica",      fontSize=10,
+    S_BODY  = PS("RBody",  fontName=F_REG,      fontSize=10,
                  textColor=HexColor("#374151"), spaceBefore=3, spaceAfter=3, leading=15)
-    S_BULL  = PS("RBull",  fontName="Helvetica",      fontSize=10,
+    S_BULL  = PS("RBull",  fontName=F_REG,      fontSize=10,
                  textColor=HexColor("#374151"), spaceBefore=2, spaceAfter=2,
                  leftIndent=12, leading=14)
-    S_BADGE = PS("RBadge", fontName="Helvetica-Bold", fontSize=8.5, textColor=white,
+    S_BADGE = PS("RBadge", fontName=F_BOLD, fontSize=8.5, textColor=white,
                  alignment=TA_CENTER, spaceBefore=0, spaceAfter=0, leading=11)
-    S_FTIT  = PS("RFTit",  fontName="Helvetica-Bold", fontSize=9.5, textColor=white,
+    S_FTIT  = PS("RFTit",  fontName=F_BOLD, fontSize=9.5, textColor=white,
                  spaceBefore=0, spaceAfter=0, leading=13)
-    S_FBOD  = PS("RFBod",  fontName="Helvetica",      fontSize=9,
+    S_FBOD  = PS("RFBod",  fontName=F_REG,      fontSize=9,
                  textColor=HexColor("#374151"), spaceBefore=2, spaceAfter=2, leading=13)
-    S_FCOD  = PS("RFCod",  fontName="Courier",        fontSize=8,
+    S_FCOD  = PS("RFCod",  fontName=F_MONO,        fontSize=8,
                  textColor=HexColor("#1e293b"), spaceBefore=2, spaceAfter=2,
                  backColor=HexColor("#f1f5f9"), leftIndent=4, leading=11)
 
+    S_TH    = PS("RTH",    fontName=F_BOLD, fontSize=8.5,
+                 textColor=HexColor("#334155"), spaceBefore=0, spaceAfter=0, leading=11)
+    S_TD    = PS("RTD",    fontName=F_REG,  fontSize=8.5,
+                 textColor=HexColor("#374151"), spaceBefore=0, spaceAfter=0, leading=11)
+
+    C_ACCENT = HexColor("#4f46e5")
     CNTW = W - 1.5 * inch  # usable content width
 
     def _safe(text):
         """Unescape HTML entities then re-escape for reportlab XML."""
-        return xml_escape(_html.unescape(strip_md_inline(text)))
+        return xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(text)), ASCII_ONLY))
+
+    def _rich(text):
+        """Like _safe, but keeps **bold** and `code` as real formatting instead
+        of stripping the markers. Escaping happens first, so nothing in the
+        source text can inject reportlab markup."""
+        out = xml_escape(_ascii_fallback(_html.unescape(text or ""), ASCII_ONLY))
+        out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
+        out = re.sub(r"`(.+?)`", rf'<font face="{F_MONO}" size="8.5">\1</font>', out)
+        return out
+
+    def _md_table(rows):
+        """Renders a markdown pipe-table as a real styled PDF table. A leading
+        all-blank header row means the source used a headerless two-column
+        layout for key/value pairs, so it's dropped and the first column is
+        styled as labels instead of drawing an empty header band."""
+        rows = [r for r in rows if any(c.strip() for c in r)]
+        if not rows:
+            return []
+        ncols = max(len(r) for r in rows)
+        rows = [list(r) + [""] * (ncols - len(r)) for r in rows]
+        has_header = any(c.strip() for c in rows[0]) and len(rows) > 1
+
+        first_w = min(2.9 * inch, CNTW * 0.42)
+        rest_w = (CNTW - first_w) / max(1, ncols - 1) if ncols > 1 else 0
+        col_widths = [first_w] + [rest_w] * (ncols - 1)
+
+        def _bar(units):
+            """A run of block characters is a text bar chart in the source; in
+            the PDF it's drawn as a real colored bar, so it doesn't depend on
+            the chosen font actually having that glyph."""
+            frac = max(0.03, min(1.0, units / 20))
+            bar = Table([[""]], colWidths=[max(2, (rest_w - 16) * frac)], rowHeights=[7], hAlign="LEFT")
+            bar.setStyle(TableStyle([
+                ("BACKGROUND",   (0, 0), (-1, -1), C_ACCENT),
+                ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING",   (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            return bar
+
+        data = []
+        for i, row in enumerate(rows):
+            cells = []
+            for cell in row:
+                stripped = cell.strip()
+                if stripped and set(stripped) == {"█"}:
+                    cells.append(_bar(len(stripped)))
+                else:
+                    style = S_TH if (i == 0 and has_header) else S_TD
+                    cells.append(Paragraph(_rich(cell), style))
+            data.append(cells)
+
+        t = Table(data, colWidths=col_widths, hAlign="LEFT")
+        style = [
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW",     (0, 0), (-1, -2), 0.5, C_BORDER),
+            ("BOX",           (0, 0), (-1, -1), 0.7, C_BORDER),
+        ]
+        if has_header:
+            style += [
+                ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f1f5f9")),
+                ("LINEBELOW",  (0, 0), (-1, 0), 0.9, C_BORDER),
+            ]
+        for r in range(1 if has_header else 0, len(data)):
+            if r % 2 == (1 if has_header else 0):
+                style.append(("BACKGROUND", (0, r), (-1, r), HexColor("#fbfcfe")))
+        t.setStyle(TableStyle(style))
+
+        return [Spacer(1, 4), t, Spacer(1, 8)]
 
     def _h2_with_rule(text_esc):
         t = Table(
@@ -2970,7 +3626,10 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             ("LEFTPADDING",    (0, 0), (-1, -1), 10),
             ("RIGHTPADDING",   (0, 0), (-1, -1), 10),
         ]))
-        return [Spacer(1, 10), t, Spacer(1, 4)]
+        # Demand room for the header plus the start of its first finding, so a
+        # bar reading "Critical severity (10)" can never be stranded alone at
+        # the foot of a page with its findings overleaf.
+        return [CondPageBreak(2.6 * inch), Spacer(1, 10), t, Spacer(1, 4)]
 
     def _finding_card(h4_text, card_blocks):
         m = FINDING_HEADING_RE.match(h4_text)
@@ -2999,17 +3658,28 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", btext)
             if lbl_m and bkind == "bullet":
                 lbl = xml_escape(lbl_m.group(1))
-                val = xml_escape(_html.unescape(strip_md_inline(lbl_m.group(2))))
+                val = _rich(lbl_m.group(2))
                 # Evidence / code lines get monospace treatment
                 if lbl_m.group(1).lower() in ("evidence", "code"):
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>', S_FBOD))
-                    body_paras.append(Paragraph(val, S_FCOD))
+                    body_paras.append(Paragraph(
+                        xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY)),
+                        S_FCOD))
                 else:
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>  {val}', S_FBOD))
             else:
-                esc = xml_escape(_html.unescape(strip_md_inline(btext)))
                 prefix = "• " if bkind == "bullet" else ""
-                body_paras.append(Paragraph(prefix + esc, S_FBOD))
+                body_paras.append(Paragraph(prefix + _rich(btext), S_FBOD))
+
+        # The card's border is drawn per-section rather than by wrapping the
+        # whole thing in an outer Table. A KeepTogether nested inside a table
+        # cell has no computable height, which makes reportlab raise
+        # LayoutError the moment a card lands near a page break.
+        hdr.setStyle(TableStyle([
+            ("LINEABOVE",  (0, 0), (-1, 0), 1, fg),
+            ("LINEBEFORE", (0, 0), (0, -1), 1, fg),
+            ("LINEAFTER",  (-1, 0), (-1, -1), 1, fg),
+        ]))
 
         elements = [hdr]
         if body_paras:
@@ -3021,18 +3691,16 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
                 ("TOPPADDING",    (0, 0), (-1, -1), 8),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                 ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                ("LINEBEFORE",    (0, 0), (0, -1), 1, fg),
+                ("LINEAFTER",     (-1, 0), (-1, -1), 1, fg),
+                ("LINEBELOW",     (0, -1), (-1, -1), 1, fg),
             ]))
             elements.append(body_tbl)
+        else:
+            hdr.setStyle(TableStyle([("LINEBELOW", (0, -1), (-1, -1), 1, fg)]))
 
-        card = Table([[KeepTogether(elements)]], colWidths=[CNTW])
-        card.setStyle(TableStyle([
-            ("BOX",            (0, 0), (-1, -1), 1, fg),
-            ("TOPPADDING",     (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING",  (0, 0), (-1, -1), 0),
-            ("LEFTPADDING",    (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING",   (0, 0), (-1, -1), 0),
-        ]))
-        return [Spacer(1, 6), card]
+        # KeepTogether at the top level is fine - it only breaks inside a cell.
+        return [Spacer(1, 6), KeepTogether(elements)]
 
     # ── Pre-group blocks: flatten h4 + following bullets into finding cards ─
     raw_blocks = parse_markdown_blocks(md_text)
@@ -3067,12 +3735,25 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             story.extend(_finding_card(item[1], item[2]))
             continue
 
+        # Tables carry a list of rows rather than a string, so they must be
+        # handled before anything that assumes text is a string.
+        if kind == "table":
+            story.extend(_md_table(text))
+            continue
+
         text_esc = _safe(text)
 
         if kind == "h1":
-            story.extend([Spacer(1, 10), Paragraph(text_esc, S_H1)])
+            story.extend([CondPageBreak(1.8 * inch), Spacer(1, 10), Paragraph(text_esc, S_H1)])
         elif kind == "h2":
-            story.extend([Spacer(1, 14), _h2_with_rule(text_esc)])
+            # The contents index and the finding list each get their own page,
+            # which keeps the summary sections intact and makes the document
+            # easier to navigate.
+            if text.strip().lower().startswith(("detailed findings", "contents")):
+                story.append(PageBreak())
+                story.append(_h2_with_rule(text_esc))
+            else:
+                story.extend([CondPageBreak(1.8 * inch), Spacer(1, 14), _h2_with_rule(text_esc)])
         elif kind == "h3":
             sev_m = re.match(
                 r"^(Critical|High|Medium|Low|Other)\s+severity", text, re.IGNORECASE
@@ -3080,17 +3761,11 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             if sev_m:
                 story.extend(_sev_group_header(text_esc, sev_m.group(1).lower()))
             else:
-                story.extend([Spacer(1, 8), Paragraph(text_esc, S_H3)])
+                story.extend([CondPageBreak(1.4 * inch), Spacer(1, 8), Paragraph(text_esc, S_H3)])
         elif kind == "bullet":
-            lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", text)
-            if lbl_m:
-                lbl = xml_escape(lbl_m.group(1))
-                val = xml_escape(_html.unescape(strip_md_inline(lbl_m.group(2))))
-                story.append(Paragraph(f'• <b>{lbl}:</b>  {val}', S_BULL))
-            else:
-                story.append(Paragraph(f'• {text_esc}', S_BULL))
+            story.append(Paragraph(f"• {_rich(text)}", S_BULL))
         else:
-            story.append(Paragraph(text_esc, S_BODY))
+            story.append(Paragraph(_rich(text), S_BODY))
 
         story.append(Spacer(1, 3))
 
@@ -3135,9 +3810,45 @@ def build_report_html(md_text, title, subtitle=None):
         "h4{display:flex;align-items:center;gap:10px;margin-top:1.4rem;font-size:15px;}"
         "code{background:#f3f4f6;padding:1px 4px;border-radius:4px;}"
         "ul{padding-left:1.3rem;}"
+        "table{border-collapse:collapse;width:100%;margin:0.75rem 0 1.25rem;font-size:13.5px;}"
+        "th{background:#f1f5f9;color:#334155;text-align:left;font-weight:600;}"
+        "th,td{border:1px solid #e2e8f0;padding:7px 10px;vertical-align:middle;}"
+        "tbody tr:nth-child(even){background:#fbfcfe;}"
+        # The distribution column is a run of block characters; coloring it
+        # makes it read as a bar chart rather than a wall of dark glyphs.
+        "td:last-child{color:#4f46e5;letter-spacing:-1px;}"
+        "blockquote{margin:0 0 1rem;padding:10px 14px;background:#eef2ff;"
+        "border-left:4px solid #4f46e5;border-radius:0 6px 6px 0;color:#312e81;}"
+        "blockquote p{margin:0;}"
         f"</style></head><body><h1>{safe_title}</h1>"
         f"<div class=\"report-subtitle\">{safe_subtitle}</div>{body}</body></html>"
     )
+
+
+def _report_filename(label, timestamp, ext):
+    """Builds a download name from what was scanned, so a folder of saved
+    reports is identifiable - 'vuln-report.pdf' five times over tells you
+    nothing about which scan produced which file.
+
+    Result looks like: AI-PR-Summary_2026-08-02_1412_vuln-report.pdf
+    """
+    raw = (label or "").strip()
+    # A local scan's label is a full path; the folder name is the useful part.
+    raw = raw.replace("\\", "/").rstrip("/")
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    # Keep owner/repo readable for GitHub scans that came through as owner/name.
+    raw = raw.replace("(uploaded folder)", "uploaded").replace("(uploaded)", "uploaded")
+
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip("-.") or "scan"
+    slug = slug[:60]
+
+    try:
+        stamp = datetime.fromtimestamp(float(timestamp)).strftime("%Y-%m-%d_%H%M")
+    except (TypeError, ValueError, OSError):
+        stamp = datetime.utcnow().strftime("%Y-%m-%d_%H%M")
+
+    return f"{slug}_{stamp}_vuln-report.{ext}"
 
 
 @app.route("/api/vuln-scan/report", methods=["POST"])
@@ -3149,13 +3860,47 @@ def vuln_scan_report():
     file in the requested format."""
     data = request.get_json(force=True)
     job_id = data.get("job_id", "")
+    scan_ref = (data.get("scan_ref") or "").strip()
     fmt = (data.get("format") or "markdown").lower()
 
+    # Prefer the live job (it carries the full scanner output), but fall back to
+    # the persisted history so reports still work for scans from an earlier
+    # session - in-memory jobs are lost on restart and pruned once over the cap.
+    result = None
+    # What to name the download after: the scan's custom name if it was renamed,
+    # otherwise the repo or folder that was scanned.
+    scan_label, scan_time = "", None
     job = VULN_JOBS.get(job_id)
-    if not job or job.get("status") != "done" or not job.get("result"):
-        return jsonify({"error": "No completed scan found for that job_id."}), 400
+    if job and job.get("status") == "done" and job.get("result"):
+        result = job["result"]
+        scan_label = job.get("name") or job.get("repo") or ""
+        scan_time = job.get("started")
+    else:
+        saved = _resolve_scan(scan_ref or (f"job:{job_id}" if job_id else ""))
+        if saved:
+            result = {
+                "findings": saved["findings"],
+                "files_scanned": saved.get("files_scanned"),
+                "exit_code": None,
+                "from_history": True,
+            }
+            scan_label = saved.get("name") or saved.get("repo") or ""
+            scan_time = saved.get("timestamp")
 
-    result = job["result"]
+    if not result:
+        saved_count = len(_load_scan_history())
+        return jsonify({
+            "error": (
+                "No completed scan found for that reference. This scan is no longer in "
+                "memory and no saved copy of it exists - scans saved before this fix "
+                "didn't record their job id. "
+                + (f"There are {saved_count} scan(s) in History; generate the report from "
+                   "there instead (each row has pdf/docx/html/md buttons). "
+                   if saved_count else "")
+                + "New scans will work from this button directly."
+            )
+        }), 400
+
     findings = result.get("findings", [])
     if not findings:
         return jsonify({"error": "No findings to report on."}), 400
@@ -3177,37 +3922,66 @@ def vuln_scan_report():
     except Exception as e:
         return jsonify({"error": f"Report generation failed: {e}"}), 500
 
-    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result)
+    # Per-finding deep-dive: what it is, why it matters here, how it would be
+    # exploited, the specific fix, how to verify. On by default; pass
+    # detail=false for the quicker summary-only report.
+    details, detail_note = {}, ""
+    if data.get("detail", True):
+        details, detail_note = enrich_findings_with_detail(findings)
+
+    report_md = normalize_report_text(
+        narrative_md.strip() + "\n\n" + build_findings_markdown(result, details, detail_note)
+    )
 
     title = "Vulnerability Assessment Report"
+    # Name the target in the subtitle too, so an open report identifies itself
+    # without needing the filename.
+    target_bit = f"{scan_label} &middot; " if scan_label else ""
     subtitle = (
-        f"{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
+        f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
         f"&middot; generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
     )
     subtitle_plain = subtitle.replace("&middot;", "-")
 
+    def _disp(ext):
+        return {"Content-Disposition":
+                f'attachment; filename="{_report_filename(scan_label, scan_time, ext)}"'}
+
     if fmt == "markdown":
-        return Response(report_md, mimetype="text/markdown",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.md"})
+        return Response(report_md, mimetype="text/markdown", headers=_disp("md"))
     if fmt == "html":
         return Response(build_report_html(report_md, title, subtitle), mimetype="text/html",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.html"})
+                         headers=_disp("html"))
     if fmt == "docx":
         return Response(build_report_docx(report_md, title, subtitle_plain),
                          mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.docx"})
+                         headers=_disp("docx"))
     if fmt == "pdf":
-        pdf_meta = {"counts": counts, "files_scanned": result.get("files_scanned")}
+        pdf_meta = {"counts": counts, "files_scanned": result.get("files_scanned"),
+                    "target": scan_label}
         return Response(build_report_pdf(report_md, title, subtitle_plain, meta=pdf_meta),
-                         mimetype="application/pdf",
-                         headers={"Content-Disposition": "attachment; filename=vuln-report.pdf"})
+                         mimetype="application/pdf", headers=_disp("pdf"))
 
     return jsonify({"error": f"Unknown format: {fmt}"}), 400
 
 
 if __name__ == "__main__":
-    # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
-    # without it, checking out a branch in a cached clone (which touches
-    # file mtimes, including any server.py inside a cloned repo) can
-    # trigger an unwanted restart mid-request.
-    app.run(port=5000, debug=True, exclude_patterns=["*/.repo-cache/*", "*\\.repo-cache\\*"])
+    # debug=True enables the Werkzeug interactive debugger, which hands out a
+    # Python console on any unhandled exception - that is arbitrary code
+    # execution for anyone who can reach the port. It also made the reloader
+    # restart mid-scan whenever a file changed, losing running jobs. Off by
+    # default now; set DASHBOARD_DEBUG=1 when you actually want it.
+    debug = os.environ.get("DASHBOARD_DEBUG", "0") == "1"
+    if debug:
+        print("WARNING: debug mode is on - the Werkzeug debugger allows code "
+              "execution. Never use this on a shared or reachable machine.")
+    # host stays on loopback so the API (which reads local folders and runs
+    # build commands) is never exposed to the local network.
+    app.run(
+        host="127.0.0.1", port=5000, debug=debug,
+        # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
+        # without it, checking out a branch in a cached clone (which touches
+        # file mtimes, including any server.py inside a cloned repo) can
+        # trigger an unwanted restart mid-request.
+        exclude_patterns=["*/.repo-cache/*", "*\\.repo-cache\\*"],
+    )
