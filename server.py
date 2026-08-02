@@ -740,7 +740,8 @@ def _finding_key(f):
     )
 
 
-def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_scanned=None):
+def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_scanned=None,
+                          job_id=None):
     """Persists this scan to disk and compares it against the previous scan
     for the same repo_key. Returns a delta dict with new/fixed/recurring counts."""
     ts = timestamp or time.time()
@@ -748,6 +749,10 @@ def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_
         "repo": repo_key,
         "timestamp": ts,
         "name": "",
+        # Recorded so a report can still be built from this scan after its
+        # in-memory job is gone (server restart, or pruned past the job cap) -
+        # the dashboard only knows the job_id it was handed at scan time.
+        "job_id": job_id,
         "scan_types": list(scan_types or []),
         "files_scanned": files_scanned,
         # Keep the fields the report builder needs (evidence/impact/improvement),
@@ -2392,7 +2397,8 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             all_findings = report.get("findings") or []
             repo_key = repo or (local_path if local_path else "(uploaded)")
             delta = save_and_compare_scan(repo_key, all_findings, scan_types,
-                                          files_scanned=report.get("files_scanned"))
+                                          files_scanned=report.get("files_scanned"),
+                                          timestamp=job.get("started"), job_id=job_id)
             report["history_delta"] = delta
             job["status"] = "done"
             job["result"] = report
@@ -2705,15 +2711,30 @@ def vuln_scan_delete():
 def _resolve_scan(ref):
     """Return {findings, name, repo, timestamp, counts} for a scan_ref."""
     if (ref or "").startswith("job:"):
-        job = VULN_JOBS.get(ref[4:])
-        if not job or not job.get("result"):
+        job_id = ref[4:]
+        job = VULN_JOBS.get(job_id)
+        if job and job.get("result"):
+            findings = job["result"].get("findings", [])
+            return {
+                "findings": findings, "name": job.get("name", ""),
+                "repo": job.get("repo", ""), "timestamp": job["started"],
+                "counts": count_findings_by_severity(findings),
+                "files_scanned": job["result"].get("files_scanned"),
+            }
+        # The job is gone (server restarted, or pruned past the cap) but the
+        # scan itself was persisted - look it up by the job_id recorded there,
+        # since the dashboard only ever knows the job_id it was given.
+        with _scan_history_lock:
+            records = _load_scan_history()
+        rec = next((r for r in reversed(records) if r.get("job_id") == job_id), None)
+        if not rec:
             return None
-        findings = job["result"].get("findings", [])
+        findings = rec.get("findings", [])
         return {
-            "findings": findings, "name": job.get("name", ""),
-            "repo": job.get("repo", ""), "timestamp": job["started"],
+            "findings": findings, "name": rec.get("name", ""),
+            "repo": rec.get("repo", ""), "timestamp": rec.get("timestamp", 0),
             "counts": count_findings_by_severity(findings),
-            "files_scanned": job["result"].get("files_scanned"),
+            "files_scanned": rec.get("files_scanned"),
         }
     if (ref or "").startswith("ts:"):
         ts = float(ref[3:])
@@ -3311,9 +3332,17 @@ def vuln_scan_report():
             }
 
     if not result:
+        saved_count = len(_load_scan_history())
         return jsonify({
-            "error": "No completed scan found. If this scan is from an earlier session, "
-                     "open it from the History tab so its saved copy can be used."
+            "error": (
+                "No completed scan found for that reference. This scan is no longer in "
+                "memory and no saved copy of it exists - scans saved before this fix "
+                "didn't record their job id. "
+                + (f"There are {saved_count} scan(s) in History; generate the report from "
+                   "there instead (each row has pdf/docx/html/md buttons). "
+                   if saved_count else "")
+                + "New scans will work from this button directly."
+            )
         }), 400
 
     findings = result.get("findings", [])
