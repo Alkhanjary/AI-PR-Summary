@@ -467,7 +467,7 @@ def team_report():
         lines.append(f"- **Active days:** {c.get('active_days_count', 0)}")
         lines.append(f"- **Bugs found:** {c.get('total_bugs', 0)} (worst severity: {c.get('worst', 'low')})")
         lines.append("")
-    report_md = "\n".join(lines)
+    report_md = normalize_report_text("\n".join(lines))
 
     title = "Team Performance Report"
     subtitle = (range_label + " &middot; " if range_label else "") + \
@@ -2923,23 +2923,90 @@ def build_findings_markdown(result, details=None, detail_note=""):
         cat = f.get("category") or f.get("rule") or "uncategorized"
         category_counts[cat] = category_counts.get(cat, 0) + 1
 
+    total = len(findings)
+
+    def pct(n):
+        return f"{round(100 * n / total)}%" if total else "0%"
+
+    def loc_of(f):
+        """file:line, but web/network findings have no line number - showing
+        a bare ':None' there just looks like a bug in the report."""
+        line = f.get("line")
+        base = f.get("file", "unknown file")
+        return f"{base}:{line}" if line not in (None, "") else base
+
     lines = ["## Findings Summary", ""]
-    lines.append(f"- **Files scanned:** {result.get('files_scanned', 'n/a')}")
-    lines.append(f"- **Total findings:** {len(findings)}")
+
+    # --- Scope -----------------------------------------------------------
+    scan_types = result.get("scan_types") or []
+    affected_files = {f.get("file") for f in findings if f.get("file")}
+    ai_found = sum(1 for f in findings if str(f.get("source") or "").startswith("ai-"))
+
+    # --- Verdict ---------------------------------------------------------
+    # A one-line risk posture up front, so the reader knows how bad it is
+    # before working through the tables underneath.
+    worst_sev = next((s for s in SEVERITY_ORDER if counts[s]), None)
+    if not total:
+        verdict, posture = "No issues found", "No findings were reported by this scan."
+    elif worst_sev == "critical":
+        verdict, posture = "Critical risk", "Critical issues are present and should be fixed before release."
+    elif worst_sev == "high":
+        verdict, posture = "High risk", "High-severity issues are present and should be prioritized."
+    elif worst_sev == "medium":
+        verdict, posture = "Moderate risk", "No critical or high issues; medium findings are worth scheduling."
+    else:
+        verdict, posture = "Low risk", "Only low-severity findings were reported."
+
+    lines.append(f"> **Verdict: {verdict}.** {posture}")
     lines.append("")
+
+    if total:
+        # Lead with the single most urgent item so remediation has an obvious
+        # starting point without reading the whole detail section.
+        top = sorted(
+            findings,
+            key=lambda f: SEVERITY_ORDER.index((f.get("severity") or "").lower())
+            if (f.get("severity") or "").lower() in SEVERITY_ORDER else len(SEVERITY_ORDER),
+        )[0]
+        top_loc = loc_of(top)
+        lines.append(f"**Start here —** `{top_loc}` — "
+                      f"{(top.get('severity') or 'unknown').capitalize()}: "
+                      f"{top.get('description') or top.get('category') or 'see details below'}")
+        lines.append("")
+
+    lines.append("### Scope")
+    lines.append("")
+    lines.append("| | |")
+    lines.append("|---|---|")
+    lines.append(f"| Files scanned | {result.get('files_scanned', 'n/a')} |")
+    lines.append(f"| Files with findings | {len(affected_files)} |")
+    lines.append(f"| Total findings | {total} |")
+    if scan_types:
+        lines.append(f"| Scan types | {', '.join(scan_types)} |")
+    if ai_found:
+        lines.append(f"| Found by AI review | {ai_found} of {total} |")
+    if result.get("exit_code") is not None:
+        lines.append(f"| Scanner exit code | {result.get('exit_code')} |")
+    lines.append("")
+
+    # --- Severity --------------------------------------------------------
     lines.append("### By severity")
     lines.append("")
+    lines.append("| Severity | Count | Share | Distribution |")
+    lines.append("|---|---|---|---|")
     for sev in SEVERITY_ORDER:
         n = counts[sev]
-        share = f" ({round(100 * n / len(findings))}%)" if findings and n else ""
-        lines.append(f"- **{sev.capitalize()}:** {n}{share}")
+        # A text bar keeps the shape visible in markdown and Word too, not
+        # only in the PDF where it can be drawn.
+        bar = "█" * round(20 * n / total) if total and n else ""
+        lines.append(f"| {sev.capitalize()} | {n} | {pct(n)} | {bar} |")
+    lines.append(f"| **Total** | **{total}** | | |")
+    lines.append("")
 
+    # --- Categories ------------------------------------------------------
     if category_counts:
-        lines.append("")
-        lines.append("### By category")
-        lines.append("")
-        # Worst severity per category makes the list triageable rather than
-        # just a frequency count - 1 critical matters more than 9 lows.
+        # Worst severity per category makes the list triageable rather than a
+        # bare frequency count - one critical outranks nine lows.
         worst = {}
         for f in findings:
             cat = f.get("category") or f.get("rule") or "uncategorized"
@@ -2947,14 +3014,44 @@ def build_findings_markdown(result, details=None, detail_note=""):
             rank = SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
             if cat not in worst or rank < worst[cat][0]:
                 worst[cat] = (rank, sev or "unknown")
+
+        lines.append("### By category")
+        lines.append("")
+        lines.append("| Category | Findings | Worst severity |")
+        lines.append("|---|---|---|")
         for cat, n in sorted(category_counts.items(),
                              key=lambda kv: (worst.get(kv[0], (9, ""))[0], -kv[1])):
-            lines.append(f"- **{cat}** — {n} finding(s), worst: {worst.get(cat, (9, 'unknown'))[1]}")
+            lines.append(f"| {cat} | {n} | {worst.get(cat, (9, 'unknown'))[1].capitalize()} |")
+        lines.append("")
 
+    # --- Hotspots --------------------------------------------------------
+    # Which files carry the most risk, so remediation can start where it pays
+    # off most rather than at the top of an alphabetical list.
+    file_stats = {}
+    for f in findings:
+        key = f.get("file") or "unknown"
+        st = file_stats.setdefault(key, {"n": 0, "rank": len(SEVERITY_ORDER), "worst": "unknown"})
+        st["n"] += 1
+        sev = (f.get("severity") or "").lower()
+        rank = SEVERITY_ORDER.index(sev) if sev in SEVERITY_ORDER else len(SEVERITY_ORDER)
+        if rank < st["rank"]:
+            st["rank"], st["worst"] = rank, sev or "unknown"
+    if len(file_stats) > 1:
+        top = sorted(file_stats.items(), key=lambda kv: (kv[1]["rank"], -kv[1]["n"]))[:10]
+        lines.append("### Most affected files")
+        lines.append("")
+        lines.append("| File | Findings | Worst severity |")
+        lines.append("|---|---|---|")
+        for name, st in top:
+            lines.append(f"| {name} | {st['n']} | {st['worst'].capitalize()} |")
+        if len(file_stats) > len(top):
+            lines.append(f"| _+{len(file_stats) - len(top)} more file(s)_ | | |")
+        lines.append("")
+
+    # --- Notes -----------------------------------------------------------
     skipped = result.get("skipped_files") or []
     ai_errors = result.get("ai_scan_errors") or []
     if result.get("truncated") or skipped or ai_errors or detail_note:
-        lines.append("")
         lines.append("### Scan notes")
         lines.append("")
         if result.get("truncated"):
@@ -2965,7 +3062,7 @@ def build_findings_markdown(result, details=None, detail_note=""):
             lines.append(f"- AI verification failed for {len(ai_errors)} file(s); their findings are unverified.")
         if detail_note:
             lines.append(f"- {detail_note}")
-    lines.append("")
+        lines.append("")
 
     def sort_key(f):
         sev = (f.get("severity") or "low").lower()
@@ -2996,7 +3093,7 @@ def build_findings_markdown(result, details=None, detail_note=""):
         for f in group:
             toc_n += 1
             cat = f.get("category") or f.get("rule") or "finding"
-            loc = f"{f.get('file', 'unknown file')}:{f.get('line', '?')}"
+            loc = loc_of(f)
             lines.append(f"- **#{toc_n}** {cat} — {loc}")
         lines.append("")
 
@@ -3019,12 +3116,13 @@ def build_findings_markdown(result, details=None, detail_note=""):
             category = f.get("category") or f.get("rule")
             # Numbered so findings can be referenced in review ("see #14")
             # rather than only by file path.
-            heading = f"#### [{sev_tag}] #{counter} · {file_}:{line_no}"
+            heading = f"#### [{sev_tag}] #{counter} · {loc_of(f)}"
             if category:
                 heading += f" — {category}"
             lines.append(heading)
             lines.append("")
-            lines.append(f"- **Location:** `{file_}`, line {line_no}")
+            location = f"`{file_}`" + (f", line {line_no}" if line_no not in (None, "") else "")
+            lines.append(f"- **Location:** {location}")
             if f.get("description"):
                 lines.append(f"- **Issue:** {f['description']}")
             if f.get("evidence"):
@@ -3059,8 +3157,28 @@ def parse_markdown_blocks(md_text):
     paragraphs). Returns a list of (block_type, text) tuples for the
     docx/pdf builders."""
     blocks = []
+    table_rows = None   # collects consecutive "| a | b |" lines
+
+    def flush_table():
+        nonlocal table_rows
+        if table_rows:
+            blocks.append(("table", table_rows))
+            table_rows = None
+
     for raw_line in md_text.splitlines():
         line = raw_line.rstrip()
+
+        # Pipe tables: gather the run of rows, dropping the |---|---| separator
+        # and any fully empty header used only to make a two-column layout.
+        if line.strip().startswith("|") and line.strip().endswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not all(re.fullmatch(r":?-{2,}:?", c or "-") for c in cells):
+                if table_rows is None:
+                    table_rows = []
+                table_rows.append(cells)
+            continue
+        flush_table()
+
         if not line.strip():
             continue
         if line.startswith("#### "):
@@ -3100,6 +3218,27 @@ def build_report_docx(md_text, title, subtitle=None):
         sub.runs[0].italic = True
 
     for kind, text in parse_markdown_blocks(md_text):
+        # Tables arrive as a list of row-cell-lists, so they must be handled
+        # before any of the string-only formatting below.
+        if kind == "table":
+            rows = [r for r in text if any(c.strip() for c in r)]
+            if not rows:
+                continue
+            ncols = max(len(r) for r in rows)
+            tbl = doc.add_table(rows=0, cols=ncols)
+            tbl.style = "Light Grid Accent 1"
+            header_is_blank = not any(c.strip() for c in rows[0])
+            for i, row in enumerate(rows):
+                cells = tbl.add_row().cells
+                for j in range(ncols):
+                    val = strip_md_inline(row[j]) if j < len(row) else ""
+                    cells[j].text = val
+                    if i == 0 and not header_is_blank:
+                        for para in cells[j].paragraphs:
+                            for run in para.runs:
+                                run.bold = True
+            doc.add_paragraph()
+            continue
         if kind == "h4":
             m = FINDING_HEADING_RE.match(text)
             p = doc.add_paragraph(style="Heading 4")
@@ -3202,7 +3341,34 @@ _ASCII_FALLBACKS = {
     "\u2026": "...", "\u00b7": "-", "\u2022": "*",
     "\u2192": "->", "\u2190": "<-", "\u2191": "^", "\u2193": "v",
     "\u2713": "OK", "\u2717": "x", "\u00a0": " ",
+    "\u2588": "#",
 }
+
+# Characters that are visually near-identical to a plain ASCII one but are
+# frequently MISSING from a given font, so they render as a tofu box instead.
+# LLM prose is full of these (U+2011 in "hard-coded", narrow/thin spaces),
+# and they carry no meaning worth the rendering risk - so they're normalized
+# away for every output format, not only the ASCII-only PDF fallback path.
+_RISKY_CHAR_NORMALIZATIONS = {
+    "\u2010": "-",   # hyphen
+    "\u2011": "-",   # non-breaking hyphen  <- the usual "box" culprit
+    "\u2012": "-",   # figure dash
+    "\u2015": "-",   # horizontal bar
+    "\u00ad": "",    # soft hyphen (invisible, but can render as a box)
+    "\u2009": " ",   # thin space
+    "\u202f": " ",   # narrow no-break space
+    "\u200b": "",    # zero-width space
+    "\u200e": "", "\u200f": "",  # bidi marks
+    "\ufeff": "",    # BOM / zero-width no-break space
+}
+
+
+def normalize_report_text(text):
+    if not text:
+        return text
+    for bad, good in _RISKY_CHAR_NORMALIZATIONS.items():
+        text = text.replace(bad, good)
+    return text
 
 
 def _ascii_fallback(text, active):
@@ -3355,6 +3521,12 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
                  textColor=HexColor("#1e293b"), spaceBefore=2, spaceAfter=2,
                  backColor=HexColor("#f1f5f9"), leftIndent=4, leading=11)
 
+    S_TH    = PS("RTH",    fontName=F_BOLD, fontSize=8.5,
+                 textColor=HexColor("#334155"), spaceBefore=0, spaceAfter=0, leading=11)
+    S_TD    = PS("RTD",    fontName=F_REG,  fontSize=8.5,
+                 textColor=HexColor("#374151"), spaceBefore=0, spaceAfter=0, leading=11)
+
+    C_ACCENT = HexColor("#4f46e5")
     CNTW = W - 1.5 * inch  # usable content width
 
     def _safe(text):
@@ -3369,6 +3541,71 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
         out = re.sub(r"`(.+?)`", rf'<font face="{F_MONO}" size="8.5">\1</font>', out)
         return out
+
+    def _md_table(rows):
+        """Renders a markdown pipe-table as a real styled PDF table. A leading
+        all-blank header row means the source used a headerless two-column
+        layout for key/value pairs, so it's dropped and the first column is
+        styled as labels instead of drawing an empty header band."""
+        rows = [r for r in rows if any(c.strip() for c in r)]
+        if not rows:
+            return []
+        ncols = max(len(r) for r in rows)
+        rows = [list(r) + [""] * (ncols - len(r)) for r in rows]
+        has_header = any(c.strip() for c in rows[0]) and len(rows) > 1
+
+        first_w = min(2.9 * inch, CNTW * 0.42)
+        rest_w = (CNTW - first_w) / max(1, ncols - 1) if ncols > 1 else 0
+        col_widths = [first_w] + [rest_w] * (ncols - 1)
+
+        def _bar(units):
+            """A run of block characters is a text bar chart in the source; in
+            the PDF it's drawn as a real colored bar, so it doesn't depend on
+            the chosen font actually having that glyph."""
+            frac = max(0.03, min(1.0, units / 20))
+            bar = Table([[""]], colWidths=[max(2, (rest_w - 16) * frac)], rowHeights=[7], hAlign="LEFT")
+            bar.setStyle(TableStyle([
+                ("BACKGROUND",   (0, 0), (-1, -1), C_ACCENT),
+                ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING",   (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            return bar
+
+        data = []
+        for i, row in enumerate(rows):
+            cells = []
+            for cell in row:
+                stripped = cell.strip()
+                if stripped and set(stripped) == {"█"}:
+                    cells.append(_bar(len(stripped)))
+                else:
+                    style = S_TH if (i == 0 and has_header) else S_TD
+                    cells.append(Paragraph(_rich(cell), style))
+            data.append(cells)
+
+        t = Table(data, colWidths=col_widths, hAlign="LEFT")
+        style = [
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW",     (0, 0), (-1, -2), 0.5, C_BORDER),
+            ("BOX",           (0, 0), (-1, -1), 0.7, C_BORDER),
+        ]
+        if has_header:
+            style += [
+                ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f1f5f9")),
+                ("LINEBELOW",  (0, 0), (-1, 0), 0.9, C_BORDER),
+            ]
+        for r in range(1 if has_header else 0, len(data)):
+            if r % 2 == (1 if has_header else 0):
+                style.append(("BACKGROUND", (0, r), (-1, r), HexColor("#fbfcfe")))
+        t.setStyle(TableStyle(style))
+
+        return [Spacer(1, 4), t, Spacer(1, 8)]
 
     def _h2_with_rule(text_esc):
         t = Table(
@@ -3498,6 +3735,12 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             story.extend(_finding_card(item[1], item[2]))
             continue
 
+        # Tables carry a list of rows rather than a string, so they must be
+        # handled before anything that assumes text is a string.
+        if kind == "table":
+            story.extend(_md_table(text))
+            continue
+
         text_esc = _safe(text)
 
         if kind == "h1":
@@ -3567,6 +3810,16 @@ def build_report_html(md_text, title, subtitle=None):
         "h4{display:flex;align-items:center;gap:10px;margin-top:1.4rem;font-size:15px;}"
         "code{background:#f3f4f6;padding:1px 4px;border-radius:4px;}"
         "ul{padding-left:1.3rem;}"
+        "table{border-collapse:collapse;width:100%;margin:0.75rem 0 1.25rem;font-size:13.5px;}"
+        "th{background:#f1f5f9;color:#334155;text-align:left;font-weight:600;}"
+        "th,td{border:1px solid #e2e8f0;padding:7px 10px;vertical-align:middle;}"
+        "tbody tr:nth-child(even){background:#fbfcfe;}"
+        # The distribution column is a run of block characters; coloring it
+        # makes it read as a bar chart rather than a wall of dark glyphs.
+        "td:last-child{color:#4f46e5;letter-spacing:-1px;}"
+        "blockquote{margin:0 0 1rem;padding:10px 14px;background:#eef2ff;"
+        "border-left:4px solid #4f46e5;border-radius:0 6px 6px 0;color:#312e81;}"
+        "blockquote p{margin:0;}"
         f"</style></head><body><h1>{safe_title}</h1>"
         f"<div class=\"report-subtitle\">{safe_subtitle}</div>{body}</body></html>"
     )
@@ -3676,7 +3929,9 @@ def vuln_scan_report():
     if data.get("detail", True):
         details, detail_note = enrich_findings_with_detail(findings)
 
-    report_md = narrative_md.strip() + "\n\n" + build_findings_markdown(result, details, detail_note)
+    report_md = normalize_report_text(
+        narrative_md.strip() + "\n\n" + build_findings_markdown(result, details, detail_note)
+    )
 
     title = "Vulnerability Assessment Report"
     # Name the target in the subtitle too, so an open report identifies itself
