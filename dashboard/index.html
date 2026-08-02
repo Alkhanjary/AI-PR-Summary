@@ -457,11 +457,20 @@
 </div>
 
 <div class="panel" id="panel-vuln">
+  <div class="row" style="margin-bottom:1rem;">
+    <div class="segmented" id="vuln-tab-segmented">
+      <div class="segmented-option active" data-vuln-tab="scan">Scan</div>
+      <div class="segmented-option" data-vuln-tab="history">History</div>
+    </div>
+  </div>
+
+  <div id="vuln-tab-scan">
   <div class="panel-card">
     <div class="panel-card-title">Source</div>
     <div class="panel-card-desc">Pick what the scanner should look at.</div>
     <div class="row">
       <label><input type="radio" name="vuln-source" id="vuln-source-repo" value="repo" checked><span>Scan selected repo</span></label>
+      <label><input type="radio" name="vuln-source" id="vuln-source-local" value="local"><span>Local folder path <span class="hint-text">(best for auto-build)</span></span></label>
       <label><input type="radio" name="vuln-source" id="vuln-source-upload" value="upload"><span>Upload folder from my computer</span></label>
     </div>
     <div class="row" id="vuln-repo-row">
@@ -469,9 +478,24 @@
         <span class="field-label">Repository</span>
       </div>
     </div>
-    <div class="row" id="vuln-upload-row" style="display:none;">
-      <input type="file" id="vuln-folder-input" webkitdirectory directory multiple>
-      <span id="vuln-upload-count" class="hint-text"></span>
+    <div class="row" id="vuln-local-row" style="display:none;flex-direction:column;align-items:stretch;gap:4px;">
+      <div class="field-group" style="flex:1;">
+        <span class="field-label">Folder path on this machine</span>
+        <input type="text" id="vuln-local-path" placeholder="C:\Users\you\Desktop\my-project"
+               style="width:100%;font-family:monospace;">
+      </div>
+      <span class="hint-text">Read directly by the server — nothing is uploaded, so
+        docker-compose.yml, pyproject.toml and package.json all stay intact.
+        Only works for folders on the machine running server.py.</span>
+    </div>
+    <div class="row" id="vuln-upload-row" style="display:none;flex-direction:column;align-items:stretch;gap:4px;">
+      <div>
+        <input type="file" id="vuln-folder-input" webkitdirectory directory multiple>
+        <span id="vuln-upload-count" class="hint-text"></span>
+      </div>
+      <span class="hint-text">Note: the browser only uploads files it can read as text, so
+        manifests and compose files can go missing — which makes auto-build fail. Prefer
+        "Local folder path" if you want the app built and run.</span>
     </div>
   </div>
 
@@ -550,6 +574,27 @@
   </div>
 
   <div id="vuln-results"></div>
+  </div><!-- /vuln-tab-scan -->
+
+  <div id="vuln-tab-history" style="display:none;">
+    <!-- compare action bar -->
+    <div id="vuln-compare-bar" style="display:none;align-items:center;gap:10px;padding:10px 14px;
+         background:#1e293b;border-radius:8px;margin-bottom:10px;color:#f1f5f9;font-size:13px;">
+      <span id="vuln-compare-label" style="flex:1;font-weight:600;"></span>
+      <button class="btn btn-sm" onclick="runScanComparison()" style="background:#3b82f6;color:#fff;border:none;">Compare →</button>
+      <button class="btn btn-sm" onclick="clearCompareSelection()" style="background:#475569;color:#fff;border:none;">Clear</button>
+    </div>
+    <div class="panel-card" id="vuln-history-card-full">
+      <div class="panel-card-title" style="margin-bottom:0.75rem;">Scan history</div>
+      <div id="vuln-history-list-full"><span class="hint-text">No scans saved yet.</span></div>
+    </div>
+    <!-- compare results -->
+    <div id="vuln-compare-panel" style="display:none;">
+      <div class="panel-card" style="margin-top:12px;">
+        <div id="vuln-compare-results"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="panel" id="panel-monitor">
@@ -1518,6 +1563,399 @@ function renderVulnTypeFilterPills(findings) {
   });
 }
 
+function renderTrendBadge(delta) {
+  if (!delta) return '';
+  const map = {
+    first_scan: ['#6366f1','#eef2ff','First scan'],
+    improving:  ['#15803d','#dcfce7','↑ Improving'],
+    worsening:  ['#dc2626','#fef2f2','↓ Worsening'],
+    unchanged:  ['#6b7280','#f3f4f6','→ Unchanged'],
+    mixed:      ['#d97706','#fffbeb','~ Mixed'],
+  };
+  const [color, bg, label] = map[delta.trend] || ['#6b7280','#f3f4f6', delta.trend];
+  const detail = delta.trend === 'first_scan' ? '' :
+    ` <span style="font-size:11px;opacity:0.8;">${delta.new} new · ${delta.fixed} fixed</span>`;
+  return `<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${bg};color:${color};">${label}</span>${detail}`;
+}
+
+document.querySelectorAll('#vuln-tab-segmented .segmented-option').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#vuln-tab-segmented .segmented-option').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    const tab = opt.dataset.vulnTab;
+    document.getElementById('vuln-tab-scan').style.display = tab === 'scan' ? '' : 'none';
+    document.getElementById('vuln-tab-history').style.display = tab === 'history' ? '' : 'none';
+    if (tab === 'history') loadVulnScanHistoryFull();
+  });
+});
+
+let _vulnCompareSelected = [];   // up to 2 scan_ref strings
+let _vulnHistoryItems = [];       // last-loaded items for compare lookup
+
+async function loadVulnScanHistoryFull() {
+  const list = document.getElementById('vuln-history-list-full');
+  list.innerHTML = '<span class="hint-text">Loading...</span>';
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/history');
+    const data = await res.json();
+    _vulnHistoryItems = (data.items || []).filter(i => i.status === 'done');
+    if (_vulnHistoryItems.length === 0) { list.innerHTML = '<span class="hint-text">No scans saved yet.</span>'; return; }
+    list.innerHTML = _vulnHistoryItems.map((i, idx) => {
+      const when = new Date(i.started * 1000).toLocaleString();
+      const counts = i.counts || {};
+      const d = i.history_delta;
+      const trendHtml = renderTrendBadge(d);
+      const deltaDetail = d && d.trend !== 'first_scan' ? `
+        <div style="display:flex;gap:16px;margin-top:6px;font-size:12px;">
+          <span style="color:#dc2626;font-weight:600;">+${d.new} new</span>
+          <span style="color:#15803d;font-weight:600;">-${d.fixed} fixed</span>
+          <span style="color:#6b7280;">${d.recurring} recurring</span>
+          ${d.previous_total != null ? '<span style="color:#6b7280;">vs ' + d.previous_total + ' prev</span>' : ''}
+        </div>` : '';
+      const ref = i.scan_ref || (i.job_id ? 'job:' + i.job_id : '');
+      const displayName = i.name || i.repo || 'scan';
+      const sevBadges =
+        (counts.critical ? `<span style="color:#7f1d1d;font-weight:700;">${counts.critical} crit</span>` : '') +
+        (counts.critical && counts.high ? ' · ' : '') +
+        (counts.high ? `<span style="color:#dc2626;">${counts.high} high</span>` : '') +
+        ((counts.critical || counts.high) && counts.medium ? ' · ' : '') +
+        (counts.medium ? `<span style="color:#b45309;">${counts.medium} med</span>` : '') +
+        ((counts.critical || counts.high || counts.medium) && counts.low ? ' · ' : '') +
+        `<span style="color:#15803d;">${counts.low || 0} low</span>`;
+
+      return `<div class="card" data-scan-ref="${ref}" data-scan-idx="${idx}"
+          style="margin-bottom:10px;position:relative;">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <input type="checkbox" class="vuln-compare-check" data-ref="${ref}"
+            style="margin-top:3px;cursor:pointer;width:16px;height:16px;flex-shrink:0;"
+            onchange="toggleScanCompare(this)">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="vuln-scan-name" data-ref="${ref}"
+                style="font-weight:700;font-size:14px;cursor:text;" title="Click to rename"
+                onclick="startRename(this, '${ref}')">${_esc(displayName)}</span>
+              <span style="font-size:10px;color:#94a3b8;cursor:pointer;" onclick="startRename(this.previousElementSibling,'${ref}')" title="Rename">✏️</span>
+              <span class="hint-text" style="font-size:11px;margin-left:auto;">
+                ${when}${i.source === 'history' ? ' · saved' : ' · this session'}
+              </span>
+            </div>
+            <div style="color:#64748b;font-size:11px;margin-top:1px;">${_esc(i.repo || '')}</div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
+              ${trendHtml}
+              <span style="font-size:12px;"><strong>${i.total_findings || 0}</strong> finding(s) · ${sevBadges}</span>
+            </div>
+            ${deltaDetail}
+            ${i.scan_types ? `<div class="hint-text" style="margin-top:4px;font-size:11px;">Scans: ${i.scan_types.join(', ')}</div>` : ''}
+            <div style="margin-top:8px;display:flex;gap:8px;">
+              ${i.job_id ? `<button class="btn btn-sm" style="font-size:11px;padding:3px 10px;"
+                onclick="document.querySelector('[data-vuln-tab=\\'scan\\']').click();loadVulnScanFromHistory('${i.job_id}')">
+                Open scan →</button>` : ''}
+              <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#0f172a;color:#94a3b8;"
+                onclick="openHistoryDetail(${idx})">View findings</button>
+              <button class="btn btn-sm" title="Delete this scan"
+                style="font-size:11px;padding:3px 10px;background:transparent;color:#dc2626;
+                       border:1px solid #fecaca;margin-left:auto;"
+                onclick="deleteScan('${ref}', this)">Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // restore any existing selection state
+    _vulnCompareSelected.forEach(ref => {
+      const cb = list.querySelector(`input[data-ref="${ref}"]`);
+      if (cb) cb.checked = true;
+    });
+    updateCompareBar();
+  } catch (e) {
+    list.innerHTML = '<span class="hint-text">Could not load history.</span>';
+  }
+}
+
+function _esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function startRename(nameEl, ref) {
+  if (nameEl.tagName === 'INPUT') return;
+  const current = nameEl.textContent.trim();
+  const inp = document.createElement('input');
+  inp.value = current;
+  inp.style.cssText = 'font-weight:700;font-size:14px;border:1px solid #3b82f6;border-radius:4px;padding:1px 6px;width:220px;';
+  nameEl.replaceWith(inp);
+  inp.focus();
+  inp.select();
+
+  const save = async () => {
+    const newName = inp.value.trim() || current;
+    try {
+      await fetch(API_BASE + '/api/vuln-scan/rename', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({scan_ref: ref, name: newName}),
+      });
+    } catch (e) { /* silent */ }
+    const span = document.createElement('span');
+    span.className = 'vuln-scan-name';
+    span.dataset.ref = ref;
+    span.style.cssText = 'font-weight:700;font-size:14px;cursor:text;';
+    span.title = 'Click to rename';
+    span.textContent = newName;
+    span.onclick = () => startRename(span, ref);
+    inp.replaceWith(span);
+    // update in-memory list
+    const item = _vulnHistoryItems.find(i => (i.scan_ref || ('job:' + i.job_id)) === ref);
+    if (item) item.name = newName;
+  };
+  inp.addEventListener('blur', save);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = current; inp.blur(); } });
+}
+
+async function deleteScan(ref, btn) {
+  // Two-step inline confirm: first click arms the button, second click deletes.
+  // Avoids a blocking dialog while still preventing an accidental one-click loss.
+  if (btn.dataset.armed !== '1') {
+    const original = btn.textContent;
+    btn.dataset.armed = '1';
+    btn.textContent = 'Click again to confirm';
+    btn.style.background = '#dc2626';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#dc2626';
+    btn._disarm = setTimeout(() => {
+      btn.dataset.armed = '';
+      btn.textContent = original;
+      btn.style.background = 'transparent';
+      btn.style.color = '#dc2626';
+      btn.style.borderColor = '#fecaca';
+    }, 4000);
+    return;
+  }
+  clearTimeout(btn._disarm);
+  btn.textContent = 'Deleting...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/delete', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scan_ref: ref}),
+    });
+    const data = await res.json();
+    if (data.error) {
+      btn.textContent = 'Delete';
+      btn.disabled = false;
+      btn.dataset.armed = '';
+      btn.style.background = 'transparent';
+      btn.style.color = '#dc2626';
+      btn.style.borderColor = '#fecaca';
+      alert(data.error);
+      return;
+    }
+    // Drop it from the compare selection if it was picked
+    _vulnCompareSelected = _vulnCompareSelected.filter(r => r !== ref);
+    document.getElementById('vuln-compare-panel').style.display = 'none';
+    await loadVulnScanHistoryFull();
+    loadVulnScanHistory();   // keep the sidebar "Recent scans" card in sync
+  } catch (e) {
+    btn.textContent = 'Delete';
+    btn.disabled = false;
+    btn.dataset.armed = '';
+  }
+}
+
+function toggleScanCompare(cb) {
+  const ref = cb.dataset.ref;
+  if (cb.checked) {
+    if (!_vulnCompareSelected.includes(ref)) _vulnCompareSelected.push(ref);
+    if (_vulnCompareSelected.length > 2) {
+      // deselect oldest
+      const old = _vulnCompareSelected.shift();
+      const oldCb = document.querySelector(`input[data-ref="${old}"]`);
+      if (oldCb) oldCb.checked = false;
+    }
+  } else {
+    _vulnCompareSelected = _vulnCompareSelected.filter(r => r !== ref);
+  }
+  updateCompareBar();
+}
+
+function updateCompareBar() {
+  const bar = document.getElementById('vuln-compare-bar');
+  const lbl = document.getElementById('vuln-compare-label');
+  if (_vulnCompareSelected.length === 0) {
+    bar.style.display = 'none';
+  } else {
+    bar.style.display = 'flex';
+    if (_vulnCompareSelected.length === 1) {
+      const item = _vulnHistoryItems.find(i => (i.scan_ref || ('job:' + i.job_id)) === _vulnCompareSelected[0]);
+      lbl.textContent = '1 scan selected — pick one more to compare';
+    } else {
+      const names = _vulnCompareSelected.map(ref => {
+        const item = _vulnHistoryItems.find(i => (i.scan_ref || ('job:' + i.job_id)) === ref);
+        return item ? (item.name || item.repo || 'scan') : ref;
+      });
+      lbl.textContent = `Comparing: "${names[0]}" vs "${names[1]}"`;
+    }
+  }
+}
+
+function clearCompareSelection() {
+  _vulnCompareSelected = [];
+  document.querySelectorAll('.vuln-compare-check').forEach(cb => cb.checked = false);
+  updateCompareBar();
+  document.getElementById('vuln-compare-panel').style.display = 'none';
+}
+
+async function runScanComparison() {
+  if (_vulnCompareSelected.length < 2) return;
+  const panel = document.getElementById('vuln-compare-panel');
+  const results = document.getElementById('vuln-compare-results');
+  results.innerHTML = '<span class="hint-text">Comparing scans...</span>';
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior:'smooth', block:'start'});
+
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/compare', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scan_a: _vulnCompareSelected[0], scan_b: _vulnCompareSelected[1]}),
+    });
+    const data = await res.json();
+    if (data.error) { results.innerHTML = `<span class="hint-text">Error: ${_esc(data.error)}</span>`; return; }
+    renderCompareResults(data);
+  } catch (e) {
+    results.innerHTML = '<span class="hint-text">Compare failed.</span>';
+  }
+}
+
+function renderCompareResults(data) {
+  const results = document.getElementById('vuln-compare-results');
+  const a = data.scan_a, b = data.scan_b;
+  const nameA = a.name || a.repo || 'Scan A';
+  const nameB = b.name || b.repo || 'Scan B';
+  const dateA = new Date(a.timestamp * 1000).toLocaleString();
+  const dateB = new Date(b.timestamp * 1000).toLocaleString();
+
+  const sevBar = (counts) =>
+    Object.entries(counts || {}).filter(([,n]) => n > 0).map(([s,n]) =>
+      `<span style="color:${({critical:'#dc2626',high:'#ea580c',medium:'#b45309',low:'#15803d'}[s]||'#6b7280')};font-weight:600;">${n} ${s}</span>`
+    ).join(' · ') || '0 findings';
+
+  const findingRows = (list, emptyMsg) => {
+    if (!list || list.length === 0) return `<div class="hint-text" style="padding:8px 0;">${emptyMsg}</div>`;
+    // render max 50 inline, paginated
+    return list.slice(0, 50).map(f => {
+      const sev = (f.severity || 'unknown').toLowerCase();
+      const color = {critical:'#dc2626',high:'#ea580c',medium:'#b45309',low:'#15803d'}[sev] || '#6b7280';
+      return `<div style="padding:8px 10px;border-left:3px solid ${color};background:#f8fafc;
+          margin-bottom:6px;border-radius:0 6px 6px 0;font-size:12px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="background:${color};color:#fff;font-weight:700;font-size:10px;
+            padding:1px 7px;border-radius:99px;">${sev.toUpperCase()}</span>
+          <span style="font-weight:600;">${_esc(f.file || '')}</span>
+          ${f.line ? `<span style="color:#94a3b8;">:${f.line}</span>` : ''}
+          ${f.category ? `<span style="color:#475569;">· ${_esc(f.category)}</span>` : ''}
+        </div>
+        ${f.description ? `<div style="color:#374151;margin-top:3px;">${_esc(f.description)}</div>` : ''}
+      </div>`;
+    }).join('') + (list.length > 50 ? `<div class="hint-text" style="padding-top:6px;">+ ${list.length - 50} more</div>` : '');
+  };
+
+  results.innerHTML = `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;color:#1e293b;margin-bottom:10px;">Scan Comparison</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+          <div style="font-weight:700;color:#1e293b;">${_esc(nameA)}</div>
+          <div style="font-size:11px;color:#94a3b8;">${dateA}</div>
+          <div style="font-size:12px;margin-top:6px;">${sevBar(a.counts)}</div>
+        </div>
+        <div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+          <div style="font-weight:700;color:#1e293b;">${_esc(nameB)}</div>
+          <div style="font-size:11px;color:#94a3b8;">${dateB}</div>
+          <div style="font-size:12px;margin-top:6px;">${sevBar(b.counts)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:12px;font-size:13px;">
+        <span style="color:#dc2626;font-weight:700;">+${data.new.length} new</span>
+        <span style="color:#15803d;font-weight:700;">-${data.fixed.length} fixed</span>
+        <span style="color:#6b7280;">${data.recurring.length} recurring</span>
+      </div>
+    </div>
+
+    ${data.new.length > 0 ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:700;color:#dc2626;margin-bottom:8px;font-size:13px;">
+        🔴 New findings in "${_esc(nameB)}" (${data.new.length})
+      </div>
+      ${findingRows(data.new, 'None')}
+    </div>` : ''}
+
+    ${data.fixed.length > 0 ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:700;color:#15803d;margin-bottom:8px;font-size:13px;">
+        ✅ Fixed since "${_esc(nameA)}" (${data.fixed.length})
+      </div>
+      ${findingRows(data.fixed, 'None')}
+    </div>` : ''}
+
+    <div>
+      <div style="font-weight:700;color:#6b7280;margin-bottom:8px;font-size:13px;">
+        🔁 Recurring in both (${data.recurring.length})
+      </div>
+      ${findingRows(data.recurring, 'None')}
+    </div>
+
+    <div style="margin-top:14px;text-align:right;">
+      <button class="btn btn-sm" onclick="document.getElementById('vuln-compare-panel').style.display='none'"
+        style="background:#475569;color:#fff;border:none;font-size:12px;">Close</button>
+    </div>`;
+}
+
+function openHistoryDetail(idx) {
+  const item = _vulnHistoryItems[idx];
+  if (!item) return;
+  const findings = item.findings || [];
+  if (!findings.length) { alert('No findings stored for this scan.'); return; }
+
+  const panel = document.getElementById('vuln-compare-panel');
+  const results = document.getElementById('vuln-compare-results');
+  const name = item.name || item.repo || 'scan';
+  const when = new Date(item.started * 1000).toLocaleString();
+
+  const sevColor = {critical:'#dc2626',high:'#ea580c',medium:'#b45309',low:'#15803d'};
+  const rows = findings.slice(0, 100).map(f => {
+    const sev = (f.severity||'unknown').toLowerCase();
+    const c = sevColor[sev] || '#6b7280';
+    return `<div style="padding:8px 10px;border-left:3px solid ${c};background:#f8fafc;
+        margin-bottom:6px;border-radius:0 6px 6px 0;font-size:12px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="background:${c};color:#fff;font-weight:700;font-size:10px;
+          padding:1px 7px;border-radius:99px;">${sev.toUpperCase()}</span>
+        <span style="font-weight:600;">${_esc(f.file||'')}</span>
+        ${f.line ? `<span style="color:#94a3b8;">:${f.line}</span>` : ''}
+        ${f.category ? `<span style="color:#475569;">· ${_esc(f.category)}</span>` : ''}
+      </div>
+      ${f.description ? `<div style="color:#374151;margin-top:3px;">${_esc(f.description)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  results.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:15px;font-weight:700;color:#1e293b;">${_esc(name)}</div>
+      <div style="font-size:11px;color:#94a3b8;">${when} · ${findings.length} finding(s)</div>
+    </div>
+    ${rows}
+    ${findings.length > 100 ? `<div class="hint-text">+ ${findings.length - 100} more (open the scan for full list)</div>` : ''}
+    <div style="margin-top:14px;text-align:right;">
+      <button class="btn btn-sm" onclick="document.getElementById('vuln-compare-panel').style.display='none'"
+        style="background:#475569;color:#fff;border:none;font-size:12px;">Close</button>
+    </div>`;
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
 async function loadVulnScanHistory() {
   const card = document.getElementById('vuln-history-card');
   const list = document.getElementById('vuln-history-list');
@@ -1530,11 +1968,15 @@ async function loadVulnScanHistory() {
     list.innerHTML = items.map(i => {
       const when = new Date(i.started * 1000).toLocaleString();
       const counts = i.counts || {};
-      return '<div class="card" data-job="' + i.job_id + '" style="cursor:pointer;">' +
+      const trendHtml = renderTrendBadge(i.history_delta);
+      const clickAttr = i.job_id ? ' data-job="' + i.job_id + '" style="cursor:pointer;"' : '';
+      return '<div class="card"' + clickAttr + '>' +
         '<div class="top"><span style="font-weight:600;">' + (i.repo || 'scan') + '</span>' +
-        '<span class="hint-text">' + when + '</span></div>' +
+        '<span class="hint-text">' + when + (i.source === 'history' ? ' · saved' : '') + '</span></div>' +
+        '<div class="meta-row">' + trendHtml + '</div>' +
         '<div class="section-body">' + (i.total_findings || 0) + ' finding(s) &mdash; ' +
-        (counts.critical || 0) + ' critical, ' + (counts.high || 0) + ' high, ' + (counts.medium || 0) + ' medium, ' + (counts.low || 0) + ' low</div>' +
+        (counts.critical || 0) + ' critical, ' + (counts.high || 0) + ' high, ' +
+        (counts.medium || 0) + ' medium, ' + (counts.low || 0) + ' low</div>' +
         '</div>';
     }).join('');
     list.querySelectorAll('[data-job]').forEach(el => {
@@ -1563,7 +2005,7 @@ async function loadVulnScanFromHistory(jobId) {
     if (aiCount > 0) aiNoteEl.textContent = 'AI scan contributed ' + aiCount + ' of these finding(s).';
     const logCard = document.getElementById('vuln-log-card');
     logCard.style.display = pollData.log && pollData.log.length ? 'block' : 'none';
-    document.getElementById('vuln-log-content').innerHTML = formatScanLogLines(pollData.log);
+    document.getElementById('vuln-log-content').innerHTML = formatScanLogTail(pollData.log);
     vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
@@ -1598,6 +2040,25 @@ function renderVulnFilterPills(counts) {
   });
 }
 
+const VULN_PAGE_SIZE = 25;
+let vulnRenderedCount = 0;
+let vulnSortedFindings = [];
+
+function buildFindingCard(f) {
+  const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
+  const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
+  return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
+    '<div class="top">' +
+    '<span style="font-size:14px;font-weight:700;">' + (f.file || '') + ':' + (f.line || '') + fixtureTag + '</span>' +
+    vulnSeverityBadge(f.severity) +
+    '</div>' +
+    '<div class="section-body" style="margin-top:6px;">' + (f.description || '') + verdictNote + '</div>' +
+    (f.evidence ? '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + f.evidence + '</div>' : '') +
+    (f.impact ? '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + f.impact + '</div>' : '') +
+    (f.improvement ? '<div class="section-body"><b>Fix:</b> ' + f.improvement + '</div>' : '') +
+    '</div>';
+}
+
 function renderVulnFindingsList() {
   const findings = lastVulnFindings.filter(f =>
     (currentVulnFilter === 'all' || (f.severity || '').toLowerCase() === currentVulnFilter) &&
@@ -1613,21 +2074,38 @@ function renderVulnFindingsList() {
     return;
   }
   const order = { critical: 0, high: 1, medium: 2, low: 3 };
-  const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
-  vulnResults.innerHTML = '<div class="section-label">Findings</div>' + sorted.map(f => {
-    const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
-    const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
-    return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
-      '<div class="top">' +
-      '<span style="font-size:14px;font-weight:700;">' + f.file + ':' + f.line + fixtureTag + '</span>' +
-      vulnSeverityBadge(f.severity) +
-      '</div>' +
-      '<div class="section-body" style="margin-top:6px;">' + f.description + verdictNote + '</div>' +
-      '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + f.evidence + '</div>' +
-      '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + f.impact + '</div>' +
-      '<div class="section-body"><b>Fix:</b> ' + f.improvement + '</div>' +
-      '</div>';
-  }).join('');
+  vulnSortedFindings = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
+  vulnRenderedCount = 0;
+
+  vulnResults.innerHTML = '<div class="section-label">Findings (' + vulnSortedFindings.length + ')</div><div id="vuln-cards"></div>';
+  appendVulnCards();
+}
+
+function appendVulnCards() {
+  const container = document.getElementById('vuln-cards');
+  if (!container) return;
+  const batch = vulnSortedFindings.slice(vulnRenderedCount, vulnRenderedCount + VULN_PAGE_SIZE);
+  const frag = document.createDocumentFragment();
+  batch.forEach(f => {
+    const div = document.createElement('div');
+    div.innerHTML = buildFindingCard(f);
+    frag.appendChild(div.firstElementChild);
+  });
+  // Remove old "load more" button if present
+  const old = document.getElementById('vuln-load-more');
+  if (old) old.remove();
+  container.appendChild(frag);
+  vulnRenderedCount += batch.length;
+
+  if (vulnRenderedCount < vulnSortedFindings.length) {
+    const remaining = vulnSortedFindings.length - vulnRenderedCount;
+    const btn = document.createElement('button');
+    btn.id = 'vuln-load-more';
+    btn.style.cssText = 'margin:12px 0;background:var(--surface-alt);color:var(--accent-text);width:100%;';
+    btn.textContent = 'Show ' + Math.min(remaining, VULN_PAGE_SIZE) + ' more of ' + remaining + ' remaining';
+    btn.addEventListener('click', appendVulnCards);
+    vulnResults.appendChild(btn);
+  }
 }
 
 function updateVulnReportControls() {
@@ -1734,6 +2212,19 @@ function formatScanLogLines(lines) {
   }).join('');
 }
 
+// A completed AI scan of a large repo can carry tens of thousands of log
+// lines. Injecting all of them at once locks up the page, so the final render
+// keeps the tail (where errors and the summary live) and says what it dropped.
+const LOG_RENDER_TAIL = 1500;
+function formatScanLogTail(lines) {
+  const all = lines || [];
+  if (all.length <= LOG_RENDER_TAIL) return formatScanLogLines(all);
+  const hidden = all.length - LOG_RENDER_TAIL;
+  return '<div style="opacity:0.6;font-style:italic;padding-bottom:6px;">'
+       + '… ' + hidden + ' earlier line(s) hidden for performance …</div>'
+       + formatScanLogLines(all.slice(-LOG_RENDER_TAIL));
+}
+
 function vulnSeverityClass(level) {
   const lvl = (level || '').toLowerCase();
   return lvl === 'critical' ? 'critical' : lvl === 'high' ? 'high' : lvl === 'medium' ? 'medium' : 'low';
@@ -1746,6 +2237,7 @@ function vulnSeverityBadge(level) {
 const vulnSourceRepo = document.getElementById('vuln-source-repo');
 const vulnSourceUpload = document.getElementById('vuln-source-upload');
 const vulnUploadRow = document.getElementById('vuln-upload-row');
+const vulnSourceLocal = document.getElementById('vuln-source-local');
 const vulnFolderInput = document.getElementById('vuln-folder-input');
 const vulnUploadCount = document.getElementById('vuln-upload-count');
 
@@ -1755,16 +2247,20 @@ function placeRepoSelect(slotId) {
 
 function toggleVulnSource() {
   const useUpload = vulnSourceUpload.checked;
+  const useLocal = vulnSourceLocal.checked;
+  const useRepo = !useUpload && !useLocal;
   const vulnRepoRow = document.getElementById('vuln-repo-row');
   vulnUploadRow.style.display = useUpload ? 'flex' : 'none';
-  vulnRepoRow.style.display = (useUpload || !hasRepos) ? 'none' : 'flex';
+  document.getElementById('vuln-local-row').style.display = useLocal ? 'flex' : 'none';
+  vulnRepoRow.style.display = (useRepo && hasRepos) ? 'flex' : 'none';
   if (document.getElementById('panel-vuln').classList.contains('active')) {
     repoToolbar.style.display = 'none';
-    if (!useUpload && hasRepos) placeRepoSelect('repo-select-slot-vuln');
+    if (useRepo && hasRepos) placeRepoSelect('repo-select-slot-vuln');
   }
 }
 vulnSourceRepo.addEventListener('change', toggleVulnSource);
 vulnSourceUpload.addEventListener('change', toggleVulnSource);
+vulnSourceLocal.addEventListener('change', toggleVulnSource);
 
 vulnFolderInput.addEventListener('change', () => {
   vulnUploadCount.textContent = vulnFolderInput.files.length + ' file(s) selected';
@@ -1828,9 +2324,13 @@ runVulnBtn.addEventListener('click', async () => {
   const autoBuild = document.getElementById('vuln-web-autobuild').checked && scanTypes.includes('web');
   const needsSourceTarget = scanTypes.includes('code') || autoBuild;
 
+  const useLocal = vulnSourceLocal.checked;
+  const localPath = document.getElementById('vuln-local-path').value.trim();
+
   if (scanTypes.length === 0) { vulnStatus.textContent = 'Pick at least one scan type.'; return; }
   if (needsSourceTarget) {
-    if (!useUpload && !repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
+    if (useLocal && !localPath) { vulnStatus.textContent = 'Enter the folder path to scan.'; return; }
+    if (!useUpload && !useLocal && !repo) { vulnStatus.textContent = 'Pick a repo above first.'; return; }
     if (useUpload && vulnFolderInput.files.length === 0) { vulnStatus.textContent = 'Choose a folder to upload first.'; return; }
   }
   const webUrl = document.getElementById('vuln-web-url').value.trim();
@@ -1839,7 +2339,7 @@ runVulnBtn.addEventListener('click', async () => {
   if (scanTypes.includes('network') && !netTarget && !webUrl && !autoBuild) { vulnStatus.textContent = 'Enter an IP/network (or a target URL above) for the network scan.'; return; }
 
   const body = {
-    repo: (useUpload || !needsSourceTarget) ? '' : repo,
+    repo: (useUpload || useLocal || !needsSourceTarget) ? '' : repo,
     ai: document.getElementById('vuln-ai').checked,
     scan_types: scanTypes,
     fail_on: 'high',
@@ -1848,6 +2348,8 @@ runVulnBtn.addEventListener('click', async () => {
     net_target: netTarget,
     auto_build: autoBuild,
   };
+
+  if (useLocal) body.local_path = localPath;
 
   if (useUpload) {
     vulnStatus.textContent = 'Reading uploaded files...';
@@ -1903,21 +2405,82 @@ runVulnBtn.addEventListener('click', async () => {
     const progressSimple = document.getElementById('vuln-progress-simple');
 
     let data;
+    let fullLog = [];        // our own accumulated copy; server sends only deltas
+    let logCursor = 0;       // absolute line index, tracked by the server
+    let netFailures = 0;
+    let lastSimpleRender = 0;
+    if (progressLog) progressLog.innerHTML = '';
+
     while (true) {
       await new Promise(r => setTimeout(r, 1000));
-      const pollRes = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
-      const pollData = await pollRes.json();
-      vulnStatus.innerHTML = '<span class="spinner"></span>Running... (' + pollData.elapsed + 's elapsed)';
-      if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(pollData.log);
-      if (progressLog) progressLog.innerHTML = formatScanLogLines(pollData.log);
-      if (progressLog) progressLog.scrollTop = progressLog.scrollHeight;
+
+      let pollData;
+      try {
+        const pollRes = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId
+                                    + '?since=' + logCursor);
+        if (pollRes.status === 404) {
+          vulnStatus.textContent =
+            'Lost track of this scan — the server restarted while it was running. Please run it again.';
+          return;
+        }
+        if (!pollRes.ok) throw new Error('HTTP ' + pollRes.status);
+        pollData = await pollRes.json();
+        netFailures = 0;
+      } catch (err) {
+        // Transient network hiccup: retry a few times before giving up, so a
+        // momentary blip doesn't kill a scan that's still running fine.
+        if (++netFailures >= 8) {
+          vulnStatus.textContent = 'Lost connection to the server. The scan may still be running.';
+          return;
+        }
+        vulnStatus.innerHTML = '<span class="spinner"></span>Reconnecting... ('
+                               + netFailures + '/8)';
+        continue;
+      }
+
+      // Append only the new lines. Re-rendering the entire log every second is
+      // what made the whole dashboard lag once a scan produced thousands of
+      // lines - the main thread was rebuilding all of them on every poll.
+      const newLines = pollData.log || [];
+      logCursor = (typeof pollData.log_total === 'number')
+        ? pollData.log_total          // server-tracked absolute count
+        : logCursor + newLines.length;
+      if (newLines.length) {
+        fullLog = fullLog.concat(newLines);
+        // Bound our own copy too, mirroring the server's trim.
+        if (fullLog.length > 25000) fullLog = fullLog.slice(-20000);
+        if (progressLog) {
+          const atBottom = progressLog.scrollHeight - progressLog.scrollTop
+                           - progressLog.clientHeight < 40;
+          progressLog.insertAdjacentHTML('beforeend', formatScanLogLines(newLines));
+          // Keep the DOM bounded - an AI scan can emit tens of thousands of
+          // lines, and an unbounded node count degrades the entire page.
+          const MAX_LOG_NODES = 800;
+          while (progressLog.childElementCount > MAX_LOG_NODES) {
+            progressLog.removeChild(progressLog.firstElementChild);
+          }
+          if (atBottom) progressLog.scrollTop = progressLog.scrollHeight;
+        }
+      }
+
+      const secs = (typeof pollData.elapsed === 'number') ? pollData.elapsed : 0;
+      vulnStatus.innerHTML = '<span class="spinner"></span>Running... (' + secs + 's elapsed)';
+
+      // The plain-English checklist re-derives from the whole log, so throttle
+      // it rather than running it on every tick.
+      if (progressSimple && (newLines.length && Date.now() - lastSimpleRender > 2500)) {
+        progressSimple.innerHTML = renderSimpleProgress(fullLog);
+        lastSimpleRender = Date.now();
+      }
 
       if (pollData.status === 'done') {
-        data = { report: pollData.result, log: pollData.log };
+        if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(fullLog);
+        data = { report: pollData.result, log: fullLog };
         break;
       }
       if (pollData.status === 'error') {
         vulnStatus.textContent = pollData.error || 'Scan failed.';
+        if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(fullLog);
         return;
       }
     }
@@ -1946,7 +2509,7 @@ runVulnBtn.addEventListener('click', async () => {
     const logCard = document.getElementById('vuln-log-card');
     const logContent = document.getElementById('vuln-log-content');
     logCard.style.display = 'block';
-    logContent.innerHTML = formatScanLogLines(data.log);
+    logContent.innerHTML = formatScanLogTail(data.log);
 
     vulnSummary.style.display = 'grid';
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
