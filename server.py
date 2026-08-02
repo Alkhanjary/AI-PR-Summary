@@ -2549,6 +2549,77 @@ def vuln_scan_history():
     return jsonify({"items": items[:25]})
 
 
+@app.route("/api/browse")
+def browse_folders():
+    """Lists sub-folders of a directory so the dashboard can offer a real
+    folder picker for the 'scan a local folder' option.
+
+    A browser deliberately never reveals the absolute path of a folder the user
+    picks (webkitdirectory only yields relative paths), so the path has to be
+    resolved server-side. Only directory NAMES are returned - never file
+    contents - and the server already binds to loopback with a localhost-only
+    CORS policy, so this doesn't widen what a local user can reach.
+    """
+    raw = (request.args.get("path") or "").strip()
+
+    # No path yet: offer sensible starting points rather than a bare filesystem
+    # root the user then has to click through.
+    if not raw:
+        home = Path.home()
+        shortcuts = []
+        for label, p in (("Home", home), ("Desktop", home / "Desktop"),
+                         ("Documents", home / "Documents"), ("Downloads", home / "Downloads")):
+            if p.is_dir():
+                shortcuts.append({"name": label, "path": str(p)})
+        if os.name == "nt":
+            for letter in "CDEFGH":
+                drive = Path(f"{letter}:\\")
+                if drive.exists():
+                    shortcuts.append({"name": f"{letter}: drive", "path": str(drive)})
+        else:
+            shortcuts.append({"name": "/", "path": "/"})
+        return jsonify({"path": None, "parent": None, "shortcuts": shortcuts, "entries": []})
+
+    try:
+        current = Path(raw).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError):
+        return jsonify({"error": f"No such folder: {raw}"}), 400
+    if not current.is_dir():
+        return jsonify({"error": f"Not a folder: {current}"}), 400
+
+    entries, unreadable = [], False
+    try:
+        for child in sorted(current.iterdir(), key=lambda p: p.name.lower()):
+            try:
+                if not child.is_dir():
+                    continue
+            except OSError:
+                continue  # broken junction / permission denied on stat
+            if child.name.startswith(("$", ".")) and child.name not in (".github",):
+                continue
+            entries.append({"name": child.name, "path": str(child)})
+    except PermissionError:
+        unreadable = True
+
+    parent = str(current.parent) if current.parent != current else None
+    # Flag folders that look like a project, so the right one is easy to spot.
+    markers = ("package.json", "pyproject.toml", "requirements.txt", "docker-compose.yml",
+               "setup.py", "go.mod", "Cargo.toml", ".git")
+    for e in entries:
+        try:
+            e["is_project"] = any((Path(e["path"]) / m).exists() for m in markers)
+        except OSError:
+            e["is_project"] = False
+
+    return jsonify({
+        "path": str(current),
+        "parent": parent,
+        "entries": entries,
+        "unreadable": unreadable,
+        "is_project": any((current / m).exists() for m in markers),
+    })
+
+
 @app.route("/api/vuln-scan/rename", methods=["PATCH"])
 def vuln_scan_rename():
     """Rename a scan. Body: {scan_ref: 'job:<id>' or 'ts:<ts>', name: '...'}"""

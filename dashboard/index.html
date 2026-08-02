@@ -480,13 +480,39 @@
     </div>
     <div class="row" id="vuln-local-row" style="display:none;flex-direction:column;align-items:stretch;gap:4px;">
       <div class="field-group" style="flex:1;">
-        <span class="field-label">Folder path on this machine</span>
-        <input type="text" id="vuln-local-path" placeholder="C:\Users\you\Desktop\my-project"
-               style="width:100%;font-family:monospace;">
+        <span class="field-label">Folder on this machine</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="vuln-local-path" placeholder="Click Browse, or type a path"
+                 style="flex:1;font-family:monospace;">
+          <button class="btn btn-sm" id="vuln-browse-btn" onclick="openFolderPicker()"
+                  style="white-space:nowrap;">Browse…</button>
+        </div>
       </div>
       <span class="hint-text">Read directly by the server — nothing is uploaded, so
         docker-compose.yml, pyproject.toml and package.json all stay intact.
         Only works for folders on the machine running server.py.</span>
+
+      <!-- folder picker -->
+      <div id="folder-picker" style="display:none;border:1px solid var(--border,#e2e8f0);
+           border-radius:8px;margin-top:6px;overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+             background:#1e293b;color:#f1f5f9;font-size:12px;">
+          <button class="btn btn-sm" id="fp-up" onclick="folderPickerUp()"
+                  style="padding:2px 9px;font-size:12px;">↑ Up</button>
+          <span id="fp-current" style="flex:1;font-family:monospace;font-size:11px;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Loading…</span>
+          <button class="btn btn-sm" onclick="closeFolderPicker()"
+                  style="padding:2px 9px;font-size:12px;background:#475569;color:#fff;border:none;">Close</button>
+        </div>
+        <div id="fp-list" style="max-height:260px;overflow-y:auto;padding:6px;"></div>
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+             border-top:1px solid var(--border,#e2e8f0);background:var(--bg-subtle,#f8fafc);">
+          <span id="fp-selected" class="hint-text" style="flex:1;font-family:monospace;font-size:11px;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <button class="btn btn-sm" id="fp-use" onclick="useCurrentFolder()"
+                  style="background:#3b82f6;color:#fff;border:none;white-space:nowrap;">Use this folder</button>
+        </div>
+      </div>
     </div>
     <div class="row" id="vuln-upload-row" style="display:none;flex-direction:column;align-items:stretch;gap:4px;">
       <div>
@@ -1744,6 +1770,93 @@ function startRename(nameEl, ref) {
   };
   inp.addEventListener('blur', save);
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = current; inp.blur(); } });
+}
+
+// ---- folder picker -------------------------------------------------------
+// A browser never exposes the absolute path of a picked folder, so the server
+// does the listing and hands back real paths.
+let _fpCurrent = null;
+
+function openFolderPicker() {
+  document.getElementById('folder-picker').style.display = 'block';
+  const typed = document.getElementById('vuln-local-path').value.trim();
+  loadFolder(typed || null);
+}
+
+function closeFolderPicker() {
+  document.getElementById('folder-picker').style.display = 'none';
+}
+
+async function loadFolder(path) {
+  const list = document.getElementById('fp-list');
+  const cur = document.getElementById('fp-current');
+  const upBtn = document.getElementById('fp-up');
+  const useBtn = document.getElementById('fp-use');
+  const sel = document.getElementById('fp-selected');
+  list.innerHTML = '<div class="hint-text" style="padding:8px;">Loading…</div>';
+
+  let data;
+  try {
+    const res = await fetch(API_BASE + '/api/browse' + (path ? '?path=' + encodeURIComponent(path) : ''));
+    data = await res.json();
+    if (data.error) {
+      list.innerHTML = '<div class="hint-text" style="padding:8px;color:#dc2626;">' + esc(data.error) + '</div>';
+      return;
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="hint-text" style="padding:8px;color:#dc2626;">'
+      + 'Could not reach the server. Is server.py running?</div>';
+    return;
+  }
+
+  _fpCurrent = data.path;
+  const atRoot = !data.path;
+  cur.textContent = data.path || 'Pick a starting point';
+  upBtn.style.visibility = data.parent ? 'visible' : 'hidden';
+  useBtn.style.display = atRoot ? 'none' : '';
+  sel.textContent = atRoot ? '' : data.path + (data.is_project ? '  ✓ looks like a project' : '');
+
+  const rows = [];
+  if (atRoot) {
+    for (const s of data.shortcuts || []) {
+      rows.push(fpRow('📁', s.name, s.path, false));
+    }
+  } else {
+    for (const e of data.entries || []) {
+      rows.push(fpRow(e.is_project ? '📦' : '📁', e.name, e.path, e.is_project));
+    }
+    if (!(data.entries || []).length) {
+      rows.push('<div class="hint-text" style="padding:8px;">'
+        + (data.unreadable ? 'Permission denied reading this folder.' : 'No sub-folders here.')
+        + ' You can still choose it below.</div>');
+    }
+  }
+  list.innerHTML = rows.join('');
+}
+
+function fpRow(icon, name, path, isProject) {
+  return '<div class="fp-row" onclick="loadFolder(\'' + attr(path) + '\')" '
+    + 'style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;'
+    + 'border-radius:6px;font-size:13px;" '
+    + 'onmouseover="this.style.background=\'rgba(127,127,127,0.12)\'" '
+    + 'onmouseout="this.style.background=\'transparent\'">'
+    + '<span>' + icon + '</span><span style="flex:1;">' + esc(name) + '</span>'
+    + (isProject ? '<span style="font-size:10px;color:#16a34a;font-weight:600;">project</span>' : '')
+    + '</div>';
+}
+
+function folderPickerUp() {
+  if (!_fpCurrent) return;
+  fetch(API_BASE + '/api/browse?path=' + encodeURIComponent(_fpCurrent))
+    .then(r => r.json())
+    .then(d => loadFolder(d.parent || null))
+    .catch(() => {});
+}
+
+function useCurrentFolder() {
+  if (!_fpCurrent) return;
+  document.getElementById('vuln-local-path').value = _fpCurrent;
+  closeFolderPicker();
 }
 
 async function downloadHistoryReport(ref, fmt, btn) {
