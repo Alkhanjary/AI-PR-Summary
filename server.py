@@ -2831,9 +2831,11 @@ def count_findings_by_severity(findings):
 
 
 DETAIL_BATCH_SIZE = 5      # findings per LLM call - small enough to stay specific
-DETAIL_MAX_FINDINGS = 60   # ceiling; beyond this the long tail adds minutes for
-                           # little value, and the report says what was skipped
-DETAIL_PARALLEL = 6        # batches in flight at once. The batches are fully
+DETAIL_MAX_FINDINGS = 0    # 0 = no cap: EVERY finding gets a write-up. Batches
+                           # run in parallel, so covering them all costs roughly
+                           # (batches / DETAIL_PARALLEL) rounds rather than the
+                           # sum of every call.
+DETAIL_PARALLEL = 8        # batches in flight at once. The batches are fully
                            # independent, so running them sequentially made a
                            # large report take the SUM of every call instead of
                            # roughly the slowest one. Capped to stay polite to
@@ -2863,7 +2865,10 @@ def enrich_findings_with_detail(findings, log=None):
         range(len(findings)),
         key=lambda i: order.get((findings[i].get("severity") or "").lower(), len(SEVERITY_ORDER)),
     )
-    selected = ranked[:DETAIL_MAX_FINDINGS]
+    # DETAIL_MAX_FINDINGS = 0 means no cap - every finding gets expanded.
+    # Ordering by severity still matters: it decides which write-ups land
+    # first, so the important ones are done even if a later batch fails.
+    selected = ranked if DETAIL_MAX_FINDINGS <= 0 else ranked[:DETAIL_MAX_FINDINGS]
 
     def payload_for(idx_list):
         out = []
@@ -2944,7 +2949,7 @@ def enrich_findings_with_detail(findings, log=None):
                         f"caps detailed write-ups at {DETAIL_MAX_FINDINGS}")
         note = "; ".join(bits) + "."
     if log is not None:
-        log(f"Detailed analysis written for {len(details)}/{len(selected)} selected finding(s).")
+        log(f"Detailed analysis written for {len(details)}/{len(selected)} finding(s).")
     return details, note
 
 
