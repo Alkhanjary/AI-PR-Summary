@@ -2953,18 +2953,43 @@ def enrich_findings_with_detail(findings, log=None):
     return details, note
 
 
+def _flatten_detail_value(val):
+    """Collapses a detail field to a single clean line.
+
+    The model sometimes returns a fenced code block despite being told not
+    to. Fences don't survive this report's line-based markdown parser: the
+    ``` markers leaked onto the page as stray backticks and the code lost
+    its formatting anyway. Unwrapping them to inline code keeps the content
+    without the broken rendering.
+    """
+    text = str(val or "").strip()
+    if not text:
+        return ""
+    # ```lang\ncode\n``` -> `code`
+    text = re.sub(r"```[a-zA-Z0-9_+-]*\s*\n?(.*?)```", lambda m: "`" + " ".join(m.group(1).split()) + "`",
+                  text, flags=re.DOTALL)
+    text = text.replace("```", "")
+    return " ".join(text.split())
+
+
 def _detail_section(detail):
     """Renders one finding's AI-written detail as markdown bullets."""
     if not detail:
         return []
     out = []
-    for key, label in (("what", "What this is"), ("why", "Why it matters here"),
-                       ("attack", "How it could be exploited"), ("fix", "How to fix it"),
-                       ("verify", "How to verify the fix"),
-                       ("severity_note", "On the severity rating")):
-        val = (detail.get(key) or "").strip()
+    # Deliberately short: what / why / how to fix. "verify" and the severity
+    # commentary were dropped - with every finding expanded they roughly
+    # doubled the length of each entry without changing what a developer
+    # actually does about it. severity_note still surfaces below, but only
+    # when the model flags the rating as wrong.
+    for key, label in (("what", "What this is"), ("why", "Why it matters"),
+                       ("attack", "How it's exploited"), ("fix", "Fix")):
+        val = _flatten_detail_value(detail.get(key))
         if val:
             out.append(f"- **{label}:** {val}")
+    note = _flatten_detail_value(detail.get("severity_note"))
+    if note:
+        out.append(f"- **Severity note:** {note}")
     return out
 
 
@@ -3141,23 +3166,9 @@ def build_findings_markdown(result, details=None, detail_note=""):
     # Contents: an index of every finding by number, so a 20-page report can be
     # navigated without scrolling through it. Built from the same ordering the
     # detail sections use, so the numbers line up exactly.
-    lines.append("## Contents")
-    lines.append("")
-    toc_n = 0
-    for sev in SEVERITY_ORDER + (["other"] if other else []):
-        group = other if sev == "other" else grouped[sev]
-        if not group:
-            continue
-        label = "Other" if sev == "other" else sev.capitalize()
-        lines.append(f"**{label} severity** ({len(group)})")
-        lines.append("")
-        for f in group:
-            toc_n += 1
-            cat = f.get("category") or f.get("rule") or "finding"
-            loc = loc_of(f)
-            lines.append(f"- **#{toc_n}** {cat} — {loc}")
-        lines.append("")
-
+    # No "Contents" index: it restated every finding a second time (about ten
+    # pages on a real scan) while the severity/category/hotspot tables above
+    # already give the overview, and each finding is numbered where it appears.
     lines.append("## Detailed Findings")
     lines.append("")
 
@@ -3259,8 +3270,14 @@ def parse_markdown_blocks(md_text):
     return blocks
 
 
+# Single-asterisk emphasis, matched only when it isn't part of a ** pair.
+# Applied after bold so "**x**" is already consumed by then.
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)")
+
+
 def strip_md_inline(text):
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = _MD_ITALIC_RE.sub(r"\1", text)
     text = re.sub(r"`(.+?)`", r"\1", text)
     return text
 
@@ -3552,8 +3569,14 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         c.line(0.75 * inch, 0.54 * inch, W - 0.75 * inch, 0.54 * inch)
         c.setFillColor(C_MUTED)
         c.setFont(F_REG, 7.5)
+        # The full subtitle carries an absolute path plus counts plus a
+        # timestamp - repeating all of it on every page is noise. The cover
+        # already states it in full, so the footer keeps just the target.
         sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
-        c.drawString(0.75 * inch, 0.36 * inch, sub)
+        short_sub = sub.split(" - ")[0].strip()
+        if len(short_sub) > 70:
+            short_sub = "..." + short_sub[-67:]
+        c.drawString(0.75 * inch, 0.36 * inch, short_sub)
         c.drawRightString(W - 0.75 * inch, 0.36 * inch, f"Page {doc.page}")
         c.restoreState()
 
@@ -3600,6 +3623,9 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         source text can inject reportlab markup."""
         out = xml_escape(_ascii_fallback(_html.unescape(text or ""), ASCII_ONLY))
         out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
+        # Without this, the model's *emphasis* reached the page as literal
+        # asterisks ("*Why it matters:*").
+        out = _MD_ITALIC_RE.sub(r"<i>\1</i>", out)
         out = re.sub(r"`(.+?)`", rf'<font face="{F_MONO}" size="8.5">\1</font>', out)
         return out
 
@@ -3615,9 +3641,18 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         rows = [list(r) + [""] * (ncols - len(r)) for r in rows]
         has_header = any(c.strip() for c in rows[0]) and len(rows) > 1
 
-        first_w = min(2.9 * inch, CNTW * 0.42)
-        rest_w = (CNTW - first_w) / max(1, ncols - 1) if ncols > 1 else 0
-        col_widths = [first_w] + [rest_w] * (ncols - 1)
+        # A key/value table wants a narrow label column, but a two-column
+        # index of findings wants even halves - decide from how much text the
+        # first column actually carries rather than assuming it's a label.
+        body_rows = rows[1:] if has_header else rows
+        avg_first = (sum(len(r[0]) for r in body_rows) / len(body_rows)) if body_rows else 0
+        if avg_first > 25:
+            col_widths = [CNTW / ncols] * ncols
+            rest_w = CNTW / ncols
+        else:
+            first_w = min(2.9 * inch, CNTW * 0.42)
+            rest_w = (CNTW - first_w) / max(1, ncols - 1) if ncols > 1 else 0
+            col_widths = [first_w] + [rest_w] * (ncols - 1)
 
         def _bar(units):
             """A run of block characters is a text bar chart in the source; in

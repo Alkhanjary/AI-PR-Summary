@@ -294,7 +294,7 @@ array, one object per finding, no markdown fences and no commentary:
     "what": "ONE sentence: what the flagged code or response is doing wrong. Name the specific mechanism - not a textbook definition of the category.",
     "why": "ONE sentence: what an attacker can reach, read, change or run because of this specific issue.",
     "attack": "ONE or TWO sentences: the input or request an attacker sends and what happens. Note any precondition (auth, local access, specific config) in the same breath.",
-    "fix": "The specific change to make, referencing the actual construct in the evidence. A corrected snippet of a few lines only when the language is obvious. Prefer the platform's built-in safe API over a new dependency.",
+    "fix": "ONE or TWO sentences: the specific change to make, referencing the actual construct in the evidence. Prefer the platform's built-in safe API over a new dependency. Plain prose only - NO code blocks, NO triple backticks, NO newlines. A short inline `snippet` is fine.",
     "verify": "ONE short sentence: what to run, request, or observe to confirm the fix.",
     "severity_note": "ONE short sentence, and only if the stated severity looks wrong or it looks like a false positive. Otherwise return an empty string."
   }
