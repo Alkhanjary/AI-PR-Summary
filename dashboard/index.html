@@ -692,6 +692,36 @@
 </div>
 
 <script>
+// Escape before interpolating ANY value into an innerHTML string.
+//
+// Everything this dashboard renders from the GitHub API is attacker-controlled:
+// repo and branch names, PR titles, commit messages, filenames, user bios. The
+// whole point of the tool is pointing it at repos you don't own, so "it came
+// from the API" is the opposite of trustworthy. Escaping quotes matters too --
+// several of these values land inside HTML attributes.
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Safe for a value used inside a single-quoted inline handler, e.g.
+// onclick="doThing('${attr(id)}')" -- escapes the JS string context first,
+// then the HTML attribute context.
+function attr(s) {
+  return esc(String(s === null || s === undefined ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
+// GitHub label colors land inside a style="" attribute, where escaping alone
+// wouldn't stop CSS injection. Only a bare hex color is ever allowed through.
+function safeColor(c) {
+  return /^[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '888888';
+}
+
 function currentTheme() {
   const saved = localStorage.getItem('theme');
   if (saved === 'dark' || saved === 'light') return saved;
@@ -747,7 +777,7 @@ async function loadRepos(preferredRepo) {
   const username = usernameInput.value.trim();
   if (!username) { statusEl.textContent = 'Enter a GitHub username'; return; }
   closeSuggestions();
-  statusEl.innerHTML = '<span class="spinner"></span>Loading repos for ' + username + '...';
+  statusEl.innerHTML = '<span class="spinner"></span>Loading repos for ' + esc(username) + '...';
   try {
     const res = await fetch(API_BASE + '/api/github/repos?username=' + encodeURIComponent(username));
     const repos = await res.json();
@@ -757,7 +787,7 @@ async function loadRepos(preferredRepo) {
     }
     saveRecentUsername(username);
     repoCache = repos;
-    repoSelect.innerHTML = '<option value="">-- Select a repo --</option>' + repos.map(r => '<option value="' + r.full_name + '">' + r.name + '</option>').join('');
+    repoSelect.innerHTML = '<option value="">-- Select a repo --</option>' + repos.map(r => '<option value="' + esc(r.full_name) + '">' + esc(r.name) + '</option>').join('');
     statusEl.textContent = repos.length + ' repos loaded.';
     hasRepos = repos.length > 0;
     updateRepoControlsForActiveTab();
@@ -785,7 +815,7 @@ async function loadMonitorBranches() {
     const data = await res.json();
     const branches = data.branches || [];
     branchSelect.innerHTML = '<option value="">(default branch)</option>' +
-      branches.map(b => '<option value="' + b + '">' + b.replace(/^origin\//, '') + '</option>').join('');
+      branches.map(b => '<option value="' + esc(b) + '">' + esc(b.replace(/^origin\//, '')) + '</option>').join('');
   } catch (e) {
     branchSelect.innerHTML = '<option value="">(default branch)</option>';
   }
@@ -813,7 +843,7 @@ function renderRecentSuggestions() {
   const recents = getRecentUsernames();
   if (recents.length === 0) { closeSuggestions(); return; }
   usernameSuggestions.innerHTML = '<div class="suggestions-heading">Recently viewed</div>' + recents.map(name =>
-    '<div class="username-suggestion" data-login="' + name + '"><span class="username-suggestion-icon">&#8635;</span><span>' + name + '</span></div>'
+    '<div class="username-suggestion" data-login="' + esc(name) + '"><span class="username-suggestion-icon">&#8635;</span><span>' + esc(name) + '</span></div>'
   ).join('');
   usernameSuggestions.classList.add('open');
   suggestionIndex = -1;
@@ -840,7 +870,7 @@ async function fetchUsernameSuggestions(q) {
     if (usernameInput.value.trim() !== q) return;
     if (items.length === 0) { closeSuggestions(); return; }
     usernameSuggestions.innerHTML = items.map(u =>
-      '<div class="username-suggestion" data-login="' + u.login + '"><img src="' + u.avatar_url + '" alt=""><span>' + u.login + '</span></div>'
+      '<div class="username-suggestion" data-login="' + esc(u.login) + '"><img src="' + esc(u.avatar_url) + '" alt=""><span>' + esc(u.login) + '</span></div>'
     ).join('');
     usernameSuggestions.classList.add('open');
     suggestionIndex = -1;
@@ -918,7 +948,7 @@ function applyActivityFilter() {
   const hint = document.getElementById('pr-label-filter-hint');
   if (activityLabelFilter) {
     hint.style.display = 'inline';
-    hint.innerHTML = 'Filtering by label: <b>' + activityLabelFilter + '</b> &middot; <a href="#" id="pr-label-filter-clear" style="color:#4f46e5;">clear</a>';
+    hint.innerHTML = 'Filtering by label: <b>' + esc(activityLabelFilter) + '</b> &middot; <a href="#" id="pr-label-filter-clear" style="color:#4f46e5;">clear</a>';
     const clearLink = document.getElementById('pr-label-filter-clear');
     if (clearLink) clearLink.addEventListener('click', e2 => { e2.preventDefault(); activityLabelFilter = null; applyActivityFilter(); });
   } else {
@@ -959,7 +989,7 @@ listEl.addEventListener('click', async e => {
     });
     const scanData = await scanRes.json();
     if (!scanRes.ok) {
-      detailEl.innerHTML = '<div class="section-body" style="color:#b91c1c;">' + (scanData.error || 'Could not generate summary.') + '</div>';
+      detailEl.innerHTML = '<div class="section-body" style="color:#b91c1c;">' + esc(scanData.error || 'Could not generate summary.') + '</div>';
       return;
     }
     const { html, riskLevel } = renderSummarySections(extractSections(scanData.markdown || ''));
@@ -1050,7 +1080,7 @@ function timeAgo(iso) {
 function labelChips(labels) {
   if (!labels || labels.length === 0) return '';
   return '<div class="label-chips">' + labels.map(l =>
-    '<span class="label-chip" data-label="' + l.name.toLowerCase() + '" style="cursor:pointer;background:#' + l.color + '22;color:#' + l.color + ';border-color:#' + l.color + '55;">' + l.name + '</span>'
+    '<span class="label-chip" data-label="' + esc(l.name.toLowerCase()) + '" style="cursor:pointer;background:#' + safeColor(l.color) + '22;color:#' + safeColor(l.color) + ';border-color:#' + safeColor(l.color) + '55;">' + esc(l.name) + '</span>'
   ).join('') + '</div>';
 }
 function renderChart(counts) {
@@ -1089,7 +1119,7 @@ async function loadUserOverview(username) {
 
   emptyState.style.display = 'none';
   profileCard.style.display = 'block';
-  profileCard.innerHTML = '<div class="card"><span class="spinner"></span>Loading profile for ' + username + '...</div>';
+  profileCard.innerHTML = '<div class="card"><span class="spinner"></span>Loading profile for ' + esc(username) + '...</div>';
   userMetrics.style.display = 'none';
   chartGrid.style.display = 'none';
   topReposEl.innerHTML = '';
@@ -1102,7 +1132,7 @@ async function loadUserOverview(username) {
     ]);
     const user = await userRes.json();
     if (!userRes.ok || user.message) {
-      profileCard.innerHTML = '<div class="card">Could not load profile for "' + username + '".</div>';
+      profileCard.innerHTML = '<div class="card">Could not load profile for "' + esc(username) + '".</div>';
       return;
     }
     const activity = await activityRes.json().catch(() => ({ items: [] }));
@@ -1114,15 +1144,15 @@ async function loadUserOverview(username) {
 
     profileCard.innerHTML =
       '<div class="profile-card">' +
-        '<img class="profile-avatar" src="' + user.avatar_url + '" alt="">' +
+        '<img class="profile-avatar" src="' + esc(user.avatar_url) + '" alt="">' +
         '<div class="profile-info">' +
-          '<div class="profile-name">' + (user.name || user.login) + '<span class="profile-login">@' + user.login + '</span></div>' +
-          (user.bio ? '<div class="profile-bio">' + user.bio + '</div>' : '') +
+          '<div class="profile-name">' + esc(user.name || user.login) + '<span class="profile-login">@' + esc(user.login) + '</span></div>' +
+          (user.bio ? '<div class="profile-bio">' + esc(user.bio) + '</div>' : '') +
           '<div class="profile-meta">' +
-            (user.company ? '<span>' + user.company + '</span>' : '') +
-            (user.location ? '<span>' + user.location + '</span>' : '') +
+            (user.company ? '<span>' + esc(user.company) + '</span>' : '') +
+            (user.location ? '<span>' + esc(user.location) + '</span>' : '') +
             '<span>Joined ' + new Date(user.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) + '</span>' +
-            '<a href="' + user.html_url + '" target="_blank">View on GitHub &rarr;</a>' +
+            '<a href="' + esc(user.html_url) + '" target="_blank">View on GitHub &rarr;</a>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -1185,10 +1215,10 @@ async function loadUserOverview(username) {
     topReposEl.innerHTML = topRepos.length === 0 ? '' : '<div class="section-label">Top repositories</div>' + topRepos.map(r =>
       '<div class="card">' +
         '<div class="top">' +
-          '<a href="' + r.html_url + '" target="_blank" class="title">' + r.name + '</a>' +
-          (r.language ? '<span class="badge state-merged">' + r.language + '</span>' : '') +
+          '<a href="' + esc(r.html_url) + '" target="_blank" class="title">' + esc(r.name) + '</a>' +
+          (r.language ? '<span class="badge state-merged">' + esc(r.language) + '</span>' : '') +
         '</div>' +
-        (r.description ? '<div class="section-body">' + r.description + '</div>' : '') +
+        (r.description ? '<div class="section-body">' + esc(r.description) + '</div>' : '') +
         '<div class="meta-row">&#9733; ' + (r.stargazers_count || 0) + ' &middot; forks ' + (r.forks_count || 0) + ' &middot; updated ' + formatDate(r.updated_at) + '</div>' +
       '</div>'
     ).join('');
@@ -1215,13 +1245,13 @@ async function loadUserOverview(username) {
           const isOwn = ownedNames.has(repoName);
           return '<div class="card">' +
             '<div class="top">' +
-              '<span style="font-size:14px;font-weight:700;">' + repoName + '</span>' +
+              '<span style="font-size:14px;font-weight:700;">' + esc(repoName) + '</span>' +
               (isOwn ? '<span class="badge state-merged">owner</span>' : '<span class="badge state-open">contributor</span>') +
             '</div>' +
             prs.map(pr =>
               '<div class="meta-row" style="margin-top:6px;">' +
                 badge(pr.state, 'state-' + pr.state) +
-                ' <a href="' + pr.html_url + '" target="_blank" style="color:#374151;text-decoration:none;">' + pr.title + '</a>' +
+                ' <a href="' + esc(pr.html_url) + '" target="_blank" style="color:#374151;text-decoration:none;">' + esc(pr.title) + '</a>' +
               '</div>'
             ).join('') +
           '</div>';
@@ -1254,13 +1284,13 @@ async function loadCommits(repo) {
       card.className = 'commit-card';
       card.innerHTML =
         '<div class="commit-head">' +
-        '<img class="avatar" src="' + avatarUrl + '" alt="">' +
+        '<img class="avatar" src="' + esc(avatarUrl) + '" alt="">' +
         '<div style="flex:1;">' +
-        '<a href="' + c.html_url + '" target="_blank" class="commit-msg">' + subject + '</a>' +
-        (bodyText ? '<div class="commit-body">' + bodyText + '</div>' : '') +
-        '<div class="commit-meta">' + (authorLogin ? '@' + authorLogin : authorName) + ' &middot; ' + (date ? formatDate(date) + ' (' + timeAgo(date) + ')' : '') + ' &middot; <code style="font-size:11px;">' + sha.slice(0, 7) + '</code></div>' +
-        '<button class="commit-files-btn" data-sha="' + sha + '">Show files changed</button>' +
-        '<div class="file-list" id="files-' + sha + '"></div>' +
+        '<a href="' + esc(c.html_url) + '" target="_blank" class="commit-msg">' + esc(subject) + '</a>' +
+        (bodyText ? '<div class="commit-body">' + esc(bodyText) + '</div>' : '') +
+        '<div class="commit-meta">' + esc(authorLogin ? '@' + authorLogin : authorName) + ' &middot; ' + (date ? formatDate(date) + ' (' + timeAgo(date) + ')' : '') + ' &middot; <code style="font-size:11px;">' + esc(sha.slice(0, 7)) + '</code></div>' +
+        '<button class="commit-files-btn" data-sha="' + esc(sha) + '">Show files changed</button>' +
+        '<div class="file-list" id="files-' + esc(sha) + '"></div>' +
         '</div></div>';
       commitsEl.appendChild(card);
     }
@@ -1281,8 +1311,8 @@ async function loadCommits(repo) {
           const data = await res.json();
           const files = data.files || [];
           container.innerHTML = files.map(f =>
-            '<div class="file-row"><span><span class="file-status">' + f.status + '</span>' + f.filename + '</span>' +
-            '<span><span class="file-add">+' + f.additions + '</span> <span class="file-del">-' + f.deletions + '</span></span></div>'
+            '<div class="file-row"><span><span class="file-status">' + esc(f.status) + '</span>' + esc(f.filename) + '</span>' +
+            '<span><span class="file-add">+' + esc(f.additions) + '</span> <span class="file-del">-' + esc(f.deletions) + '</span></span></div>'
           ).join('');
           container.dataset.loaded = 'true';
           btn.textContent = 'Hide files changed';
@@ -1341,11 +1371,11 @@ async function loadDashboard() {
       card.dataset.state = state;
       card.innerHTML =
         '<div class="top">' +
-        '<a href="' + pr.html_url + '" target="_blank" class="title">#' + pr.number + ' ' + pr.title + '</a>' +
+        '<a href="' + esc(pr.html_url) + '" target="_blank" class="title">#' + esc(pr.number) + ' ' + esc(pr.title) + '</a>' +
         badge(state, 'state-' + state) +
         '</div>' +
         labelChips(pr.labels) +
-        '<div class="meta-row"><img class="pr-avatar" src="' + pr.user.avatar_url + '" alt="">' + pr.user.login + ' &middot; ' + formatDate(pr.created_at) + ' &middot; ' + lifetime + '<span id="comments-' + pr.number + '"></span></div>' +
+        '<div class="meta-row"><img class="pr-avatar" src="' + esc(pr.user.avatar_url) + '" alt="">' + esc(pr.user.login) + ' &middot; ' + formatDate(pr.created_at) + ' &middot; ' + lifetime + '<span id="comments-' + esc(pr.number) + '"></span></div>' +
         '<div id="detail-' + pr.number + '">Loading AI summary...</div>';
       listEl.appendChild(card);
 
@@ -1358,7 +1388,7 @@ async function loadDashboard() {
           const detailEl = document.getElementById('detail-' + pr.number);
           if (!botComment) {
             detailEl.innerHTML = '<div class="section-body" style="color:#999;">No AI summary comment yet.</div>' +
-              '<button class="generate-summary-btn" data-pr="' + pr.number + '" data-base="' + pr.base.ref + '" data-head="' + pr.head.ref + '" style="margin-top:6px;">Generate summary now</button>';
+              '<button class="generate-summary-btn" data-pr="' + esc(pr.number) + '" data-base="' + esc(pr.base.ref) + '" data-head="' + esc(pr.head.ref) + '" style="margin-top:6px;">Generate summary now</button>';
             return;
           }
           const { html, riskLevel } = renderSummarySections(extractSections(botComment.body));
@@ -1402,8 +1432,8 @@ async function loadPRsForScan() {
       return;
     }
     prSelect.innerHTML = prs.map(pr =>
-      '<option value="' + pr.number + '" data-base="' + pr.base.ref + '" data-head="' + pr.head.ref + '">' +
-      '#' + pr.number + ' ' + pr.title + '</option>'
+      '<option value="' + esc(pr.number) + '" data-base="' + esc(pr.base.ref) + '" data-head="' + esc(pr.head.ref) + '">' +
+      '#' + esc(pr.number) + ' ' + esc(pr.title) + '</option>'
     ).join('');
     await loadDiffForSelectedPR();
   } catch (e) {
@@ -1652,6 +1682,11 @@ async function loadVulnScanHistoryFull() {
                 Open scan →</button>` : ''}
               <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#0f172a;color:#94a3b8;"
                 onclick="openHistoryDetail(${idx})">View findings</button>
+              <span style="font-size:11px;color:#94a3b8;align-self:center;">Report:</span>
+              ${['pdf','docx','html','markdown'].map(f =>
+                `<button class="btn btn-sm" style="font-size:11px;padding:3px 8px;"
+                   onclick="downloadHistoryReport('${ref}','${f}',this)"
+                   >${f === 'markdown' ? 'md' : f}</button>`).join('')}
               <button class="btn btn-sm" title="Delete this scan"
                 style="font-size:11px;padding:3px 10px;background:transparent;color:#dc2626;
                        border:1px solid #fecaca;margin-left:auto;"
@@ -1673,9 +1708,8 @@ async function loadVulnScanHistoryFull() {
   }
 }
 
-function _esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// Kept as an alias so existing history-tab calls keep working.
+const _esc = esc;
 
 function startRename(nameEl, ref) {
   if (nameEl.tagName === 'INPUT') return;
@@ -1710,6 +1744,39 @@ function startRename(nameEl, ref) {
   };
   inp.addEventListener('blur', save);
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = current; inp.blur(); } });
+}
+
+async function downloadHistoryReport(ref, fmt, btn) {
+  const original = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/report', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      // scan_ref works for both live jobs and scans restored from disk.
+      body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '', format: fmt}),
+    });
+    if (!res.ok) {
+      let msg = 'Report failed.';
+      try { msg = (await res.json()).error || msg; } catch (e) {}
+      alert(msg);
+      return;
+    }
+    const blob = await res.blob();
+    const ext = {pdf:'pdf', docx:'docx', html:'html', markdown:'md'}[fmt] || fmt;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'vuln-report.' + ext;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch (e) {
+    alert('Could not reach the server to generate the report.');
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
 }
 
 async function deleteScan(ref, btn) {
@@ -2045,17 +2112,20 @@ let vulnRenderedCount = 0;
 let vulnSortedFindings = [];
 
 function buildFindingCard(f) {
-  const verdictNote = f.ai_verdict ? ' &middot; AI: ' + f.ai_verdict + (f.ai_reason ? ' (' + f.ai_reason + ')' : '') : '';
+  // Every field here is untrusted: `evidence` is a verbatim line of source from
+  // whatever repo was scanned, and file paths/descriptions can carry markup
+  // too. Scanning a hostile repo must never be able to run script in this page.
+  const verdictNote = f.ai_verdict ? ' &middot; AI: ' + esc(f.ai_verdict) + (f.ai_reason ? ' (' + esc(f.ai_reason) + ')' : '') : '';
   const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
   return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
     '<div class="top">' +
-    '<span style="font-size:14px;font-weight:700;">' + (f.file || '') + ':' + (f.line || '') + fixtureTag + '</span>' +
+    '<span style="font-size:14px;font-weight:700;">' + esc(f.file || '') + ':' + esc(f.line || '') + fixtureTag + '</span>' +
     vulnSeverityBadge(f.severity) +
     '</div>' +
-    '<div class="section-body" style="margin-top:6px;">' + (f.description || '') + verdictNote + '</div>' +
-    (f.evidence ? '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + f.evidence + '</div>' : '') +
-    (f.impact ? '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + f.impact + '</div>' : '') +
-    (f.improvement ? '<div class="section-body"><b>Fix:</b> ' + f.improvement + '</div>' : '') +
+    '<div class="section-body" style="margin-top:6px;">' + esc(f.description || '') + verdictNote + '</div>' +
+    (f.evidence ? '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + esc(f.evidence) + '</div>' : '') +
+    (f.impact ? '<div class="section-body" style="margin-top:6px;"><b>Impact:</b> ' + esc(f.impact) + '</div>' : '') +
+    (f.improvement ? '<div class="section-body"><b>Fix:</b> ' + esc(f.improvement) + '</div>' : '') +
     '</div>';
 }
 
@@ -3064,7 +3134,7 @@ if (compareToggleBtn) {
     const otherUsername = document.getElementById('overview-compare-input').value.trim();
     const wrap = document.getElementById('overview-compare-result');
     if (!otherUsername) return;
-    wrap.innerHTML = '<div class="card"><span class="spinner"></span>Loading ' + otherUsername + '...</div>';
+    wrap.innerHTML = '<div class="card"><span class="spinner"></span>Loading ' + esc(otherUsername) + '...</div>';
     try {
       const [userRes, reposRes] = await Promise.all([
         fetch(API_BASE + '/api/github/user?username=' + encodeURIComponent(otherUsername)),
@@ -3072,7 +3142,7 @@ if (compareToggleBtn) {
       ]);
       const user = await userRes.json();
       const repos = await reposRes.json();
-      if (!userRes.ok || user.message) { wrap.innerHTML = '<div class="card">Could not load "' + otherUsername + '".</div>'; return; }
+      if (!userRes.ok || user.message) { wrap.innerHTML = '<div class="card">Could not load "' + esc(otherUsername) + '".</div>'; return; }
       const repoArr = Array.isArray(repos) ? repos.filter(r => !r.fork) : [];
       const stars = repoArr.reduce((s, r) => s + (r.stargazers_count || 0), 0);
       wrap.innerHTML =

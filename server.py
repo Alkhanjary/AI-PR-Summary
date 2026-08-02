@@ -40,7 +40,59 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
-CORS(app)
+
+# This API can read arbitrary local folders and run build commands, so a
+# wildcard CORS policy is genuinely dangerous: any website you happened to have
+# open could call http://127.0.0.1:5000 and read the response. Restrict it to
+# origins the dashboard is actually served from.
+#
+# "null" covers opening dashboard/index.html straight off disk (file:// sends
+# Origin: null). That is how the README tells you to run it, so it has to work -
+# but it is the weakest entry here, since a sandboxed iframe can also present a
+# null origin. Serve the dashboard over http://127.0.0.1 and set
+# DASHBOARD_ALLOW_FILE_ORIGIN=0 to drop it.
+_allowed_origins = [
+    re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"),
+]
+if os.environ.get("DASHBOARD_ALLOW_FILE_ORIGIN", "1") != "0":
+    _allowed_origins.append("null")
+_extra_origins = [o.strip() for o in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS(app, origins=_allowed_origins + _extra_origins, supports_credentials=False)
+
+
+@app.after_request
+def _security_headers(resp):
+    """Baseline hardening for the dashboard's own responses.
+
+    The CSP matters most here: the dashboard is a single HTML file that renders
+    data pulled from GitHub (PR titles, commit messages, branch names), so it
+    limits the blast radius if any escaping is ever missed.
+
+    Deliberately NOT set:
+      - Strict-Transport-Security: this serves plain HTTP on loopback, and HSTS
+        is ignored over HTTP anyway. Setting it would only risk poisoning the
+        browser's HSTS state for localhost across every other project.
+      - X-XSS-Protection: deprecated, removed from modern browsers, and its
+        legacy auditor introduced vulnerabilities of its own. CSP replaces it.
+    """
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Permissions-Policy",
+                            "camera=(), microphone=(), geolocation=(), interest-cohort=()")
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        # The dashboard is one self-contained file with inline <script>/<style>.
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https://avatars.githubusercontent.com; "
+        "connect-src 'self' http://127.0.0.1:5000 http://localhost:5000; "
+        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    )
+    # Don't advertise the exact Werkzeug/Python versions.
+    resp.headers["Server"] = "dashboard"
+    return resp
 
 # The exact interpreter running this server - used instead of a hardcoded
 # "py" (Windows-launcher-only, not guaranteed even there) or "python3"
@@ -688,7 +740,7 @@ def _finding_key(f):
     )
 
 
-def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None):
+def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_scanned=None):
     """Persists this scan to disk and compares it against the previous scan
     for the same repo_key. Returns a delta dict with new/fixed/recurring counts."""
     ts = timestamp or time.time()
@@ -697,8 +749,15 @@ def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None):
         "timestamp": ts,
         "name": "",
         "scan_types": list(scan_types or []),
+        "files_scanned": files_scanned,
+        # Keep the fields the report builder needs (evidence/impact/improvement),
+        # not just the ones the trend comparison uses - otherwise a report
+        # generated from history is missing the parts that make it useful.
         "findings": [
-            {k: f.get(k) for k in ("file", "line", "severity", "category", "description", "scan_type")}
+            {k: f.get(k) for k in (
+                "file", "line", "severity", "category", "description", "scan_type",
+                "evidence", "impact", "improvement", "source", "ai_verdict", "ai_reason",
+            )}
             for f in (findings or [])
         ],
     }
@@ -2331,8 +2390,9 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
                             job["log"].append(f"AI-found finding(s) alone triggered the gate (threshold: {fail_on}).")
 
             all_findings = report.get("findings") or []
-            repo_key = repo or "(uploaded)"
-            delta = save_and_compare_scan(repo_key, all_findings, scan_types)
+            repo_key = repo or (local_path if local_path else "(uploaded)")
+            delta = save_and_compare_scan(repo_key, all_findings, scan_types,
+                                          files_scanned=report.get("files_scanned"))
             report["history_delta"] = delta
             job["status"] = "done"
             job["result"] = report
@@ -2582,6 +2642,7 @@ def _resolve_scan(ref):
             "findings": findings, "name": job.get("name", ""),
             "repo": job.get("repo", ""), "timestamp": job["started"],
             "counts": count_findings_by_severity(findings),
+            "files_scanned": job["result"].get("files_scanned"),
         }
     if (ref or "").startswith("ts:"):
         ts = float(ref[3:])
@@ -2595,6 +2656,7 @@ def _resolve_scan(ref):
             "findings": findings, "name": rec.get("name", ""),
             "repo": rec.get("repo", ""), "timestamp": rec.get("timestamp", 0),
             "counts": count_findings_by_severity(findings),
+            "files_scanned": rec.get("files_scanned"),
         }
     return None
 
@@ -3011,6 +3073,16 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
                 prefix = "• " if bkind == "bullet" else ""
                 body_paras.append(Paragraph(prefix + esc, S_FBOD))
 
+        # The card's border is drawn per-section rather than by wrapping the
+        # whole thing in an outer Table. A KeepTogether nested inside a table
+        # cell has no computable height, which makes reportlab raise
+        # LayoutError the moment a card lands near a page break.
+        hdr.setStyle(TableStyle([
+            ("LINEABOVE",  (0, 0), (-1, 0), 1, fg),
+            ("LINEBEFORE", (0, 0), (0, -1), 1, fg),
+            ("LINEAFTER",  (-1, 0), (-1, -1), 1, fg),
+        ]))
+
         elements = [hdr]
         if body_paras:
             body_tbl = Table([[body_paras]], colWidths=[CNTW])
@@ -3021,18 +3093,16 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
                 ("TOPPADDING",    (0, 0), (-1, -1), 8),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                 ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                ("LINEBEFORE",    (0, 0), (0, -1), 1, fg),
+                ("LINEAFTER",     (-1, 0), (-1, -1), 1, fg),
+                ("LINEBELOW",     (0, -1), (-1, -1), 1, fg),
             ]))
             elements.append(body_tbl)
+        else:
+            hdr.setStyle(TableStyle([("LINEBELOW", (0, -1), (-1, -1), 1, fg)]))
 
-        card = Table([[KeepTogether(elements)]], colWidths=[CNTW])
-        card.setStyle(TableStyle([
-            ("BOX",            (0, 0), (-1, -1), 1, fg),
-            ("TOPPADDING",     (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING",  (0, 0), (-1, -1), 0),
-            ("LEFTPADDING",    (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING",   (0, 0), (-1, -1), 0),
-        ]))
-        return [Spacer(1, 6), card]
+        # KeepTogether at the top level is fine - it only breaks inside a cell.
+        return [Spacer(1, 6), KeepTogether(elements)]
 
     # ── Pre-group blocks: flatten h4 + following bullets into finding cards ─
     raw_blocks = parse_markdown_blocks(md_text)
@@ -3149,13 +3219,32 @@ def vuln_scan_report():
     file in the requested format."""
     data = request.get_json(force=True)
     job_id = data.get("job_id", "")
+    scan_ref = (data.get("scan_ref") or "").strip()
     fmt = (data.get("format") or "markdown").lower()
 
+    # Prefer the live job (it carries the full scanner output), but fall back to
+    # the persisted history so reports still work for scans from an earlier
+    # session - in-memory jobs are lost on restart and pruned once over the cap.
+    result = None
     job = VULN_JOBS.get(job_id)
-    if not job or job.get("status") != "done" or not job.get("result"):
-        return jsonify({"error": "No completed scan found for that job_id."}), 400
+    if job and job.get("status") == "done" and job.get("result"):
+        result = job["result"]
+    else:
+        saved = _resolve_scan(scan_ref or (f"job:{job_id}" if job_id else ""))
+        if saved:
+            result = {
+                "findings": saved["findings"],
+                "files_scanned": saved.get("files_scanned"),
+                "exit_code": None,
+                "from_history": True,
+            }
 
-    result = job["result"]
+    if not result:
+        return jsonify({
+            "error": "No completed scan found. If this scan is from an earlier session, "
+                     "open it from the History tab so its saved copy can be used."
+        }), 400
+
     findings = result.get("findings", [])
     if not findings:
         return jsonify({"error": "No findings to report on."}), 400
@@ -3206,8 +3295,22 @@ def vuln_scan_report():
 
 
 if __name__ == "__main__":
-    # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
-    # without it, checking out a branch in a cached clone (which touches
-    # file mtimes, including any server.py inside a cloned repo) can
-    # trigger an unwanted restart mid-request.
-    app.run(port=5000, debug=True, exclude_patterns=["*/.repo-cache/*", "*\\.repo-cache\\*"])
+    # debug=True enables the Werkzeug interactive debugger, which hands out a
+    # Python console on any unhandled exception - that is arbitrary code
+    # execution for anyone who can reach the port. It also made the reloader
+    # restart mid-scan whenever a file changed, losing running jobs. Off by
+    # default now; set DASHBOARD_DEBUG=1 when you actually want it.
+    debug = os.environ.get("DASHBOARD_DEBUG", "0") == "1"
+    if debug:
+        print("WARNING: debug mode is on - the Werkzeug debugger allows code "
+              "execution. Never use this on a shared or reachable machine.")
+    # host stays on loopback so the API (which reads local folders and runs
+    # build commands) is never exposed to the local network.
+    app.run(
+        host="127.0.0.1", port=5000, debug=debug,
+        # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
+        # without it, checking out a branch in a cached clone (which touches
+        # file mtimes, including any server.py inside a cloned repo) can
+        # trigger an unwanted restart mid-request.
+        exclude_patterns=["*/.repo-cache/*", "*\\.repo-cache\\*"],
+    )
