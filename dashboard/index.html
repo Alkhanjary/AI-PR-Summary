@@ -77,12 +77,12 @@
     /* Neutrals carry a slight blue cast rather than being pure grey - it
        reads as deliberate rather than unfinished, and makes the accent sit
        in the same family instead of looking bolted on. */
-    --bg: #f5f7fb;
+    --bg: #eef1f7;
     --bg-dot: transparent;
     --surface: #ffffff;
     --surface-alt: #f1f4f9;
-    --border: #dee4ee;
-    --border-soft: #e6ebf3;
+    --border: #d5dded;
+    --border-soft: #dfe6f2;
     --text-primary: #0f1729;
     --text-secondary: #4d586b;
     --text-tertiary: #27324a;
@@ -97,10 +97,10 @@
        A single flat shadow is what makes cards look pasted on. */
     --shadow-soft: rgba(15,23,41,0.05);
     --shadow-card: rgba(15,23,41,0.07);
-    --elev-1: 0 1px 2px rgba(15,23,41,0.05), 0 1px 3px rgba(15,23,41,0.04);
-    --elev-2: 0 2px 4px rgba(15,23,41,0.05), 0 6px 16px rgba(15,23,41,0.07);
-    --elev-3: 0 8px 24px rgba(15,23,41,0.10), 0 2px 6px rgba(15,23,41,0.06);
-    --divider: #e8edf5;
+    --elev-1: 0 1px 2px rgba(15,23,41,0.07), 0 1px 3px rgba(15,23,41,0.05);
+    --elev-2: 0 2px 4px rgba(15,23,41,0.07), 0 6px 16px rgba(15,23,41,0.10);
+    --elev-3: 0 10px 30px rgba(15,23,41,0.13), 0 2px 6px rgba(15,23,41,0.08);
+    --divider: #e2e8f3;
     --segmented-bg: #e9eef7;
     --accent: #4f46e5;
     --accent-hover: #4338ca;
@@ -108,12 +108,35 @@
     --accent-text: #4338ca;
     --accent-glow: rgba(79,70,229,0.22);
     --accent-gradient: linear-gradient(135deg, #4f46e5, #6366f1);
-    --sidebar-bg: linear-gradient(180deg, #131a2e 0%, #0d1322 100%);
-    --sidebar-border: #222c45;
+    --sidebar-bg: linear-gradient(180deg, #ffffff 0%, #f7f9fd 100%);
+    --sidebar-border: #dde3f0;
+    --sidebar-fg: #0f1729;
+    --sidebar-fg-active: #4338ca;
+    --sidebar-fg-muted: #5b6680;
+    --sidebar-item-hover: #eef1f9;
+    --sidebar-item-active: #eaeeff;
     --header-bg: #ffffff;
     --header-shadow: rgba(15,23,41,0.06);
     --hero-bg: linear-gradient(135deg, #eef1fb 0%, #f5f7fb 60%);
     --hero-text: #0f1729;
+    /* Light theme keeps a LIGHT header. A dark slab across the top of an
+       otherwise white page dominated it and left the content looking washed
+       out; the tint carries the accent without taking over. */
+    --header-surface: linear-gradient(135deg, #eef1fd 0%, #f6f8fd 55%, #ffffff 100%);
+    --header-border: #dde3f0;
+    --header-grid: rgba(15,23,41,0.035);
+    --header-aurora-1: rgba(99,102,241,0.20);
+    --header-aurora-2: rgba(56,189,248,0.16);
+    --header-aurora-3: rgba(217,70,239,0.12);
+    --header-fg: #0f1729;
+    --header-fg-muted: #56617a;
+    --header-fg-faint: #8792a8;
+    --header-eyebrow: #4338ca;
+    --header-field-bg: rgba(255,255,255,0.85);
+    --header-field-bg-hover: #ffffff;
+    --header-field-border: #d3dbeb;
+    --sev-critical-fg: #b42318;
+    --sev-high-fg: #b54708;
     color-scheme: light;
   }
   :root[data-theme="dark"] {
@@ -148,10 +171,30 @@
     --accent-gradient: linear-gradient(135deg, #6366f1, #818cf8);
     --sidebar-bg: linear-gradient(180deg, #0d1322 0%, #070a12 100%);
     --sidebar-border: #1e2740;
+    --sidebar-fg: #ffffff;
+    --sidebar-fg-active: #ffffff;
+    --sidebar-fg-muted: rgba(255,255,255,0.55);
+    --sidebar-item-hover: rgba(255,255,255,0.05);
+    --sidebar-item-active: rgba(255,255,255,0.07);
     --header-bg: #131a28;
     --header-shadow: rgba(0,0,0,0.45);
     --hero-bg: linear-gradient(135deg, #161f33 0%, #111828 60%);
     --hero-text: #e8ecf5;
+    --header-surface: linear-gradient(135deg, #1d2757 0%, #151d40 45%, #0e1530 100%);
+    --header-border: rgba(255,255,255,0.08);
+    --header-grid: rgba(255,255,255,0.05);
+    --header-aurora-1: rgba(129,140,248,0.55);
+    --header-aurora-2: rgba(56,189,248,0.38);
+    --header-aurora-3: rgba(217,70,239,0.30);
+    --header-fg: #ffffff;
+    --header-fg-muted: rgba(226,232,255,0.72);
+    --header-fg-faint: rgba(226,232,255,0.55);
+    --header-eyebrow: #b9c4ff;
+    --header-field-bg: rgba(255,255,255,0.10);
+    --header-field-bg-hover: rgba(255,255,255,0.16);
+    --header-field-border: rgba(255,255,255,0.18);
+    --sev-critical-fg: #ff8f8f;
+    --sev-high-fg: #ffc078;
     color-scheme: dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -187,10 +230,30 @@
       --accent-gradient: linear-gradient(135deg, #6366f1, #818cf8);
       --sidebar-bg: linear-gradient(180deg, #0d1322 0%, #070a12 100%);
       --sidebar-border: #1e2740;
+      --sidebar-fg: #ffffff;
+      --sidebar-fg-active: #ffffff;
+      --sidebar-fg-muted: rgba(255,255,255,0.55);
+      --sidebar-item-hover: rgba(255,255,255,0.05);
+      --sidebar-item-active: rgba(255,255,255,0.07);
       --header-bg: #131a28;
       --header-shadow: rgba(0,0,0,0.45);
       --hero-bg: linear-gradient(135deg, #161f33 0%, #111828 60%);
       --hero-text: #e8ecf5;
+      --header-surface: linear-gradient(135deg, #1d2757 0%, #151d40 45%, #0e1530 100%);
+      --header-border: rgba(255,255,255,0.08);
+      --header-grid: rgba(255,255,255,0.05);
+      --header-aurora-1: rgba(129,140,248,0.55);
+      --header-aurora-2: rgba(56,189,248,0.38);
+      --header-aurora-3: rgba(217,70,239,0.30);
+      --header-fg: #ffffff;
+      --header-fg-muted: rgba(226,232,255,0.72);
+      --header-fg-faint: rgba(226,232,255,0.55);
+      --header-eyebrow: #b9c4ff;
+      --header-field-bg: rgba(255,255,255,0.10);
+      --header-field-bg-hover: rgba(255,255,255,0.16);
+      --header-field-border: rgba(255,255,255,0.18);
+      --sev-critical-fg: #ff8f8f;
+      --sev-high-fg: #ffc078;
       color-scheme: dark;
     }
   }
@@ -210,12 +273,12 @@
   .sidebar:hover, .sidebar:focus-within { width: 226px; overflow: visible; }
   .sidebar-brand { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-6) var(--space-6); white-space: nowrap; }
   .sidebar-brand-mark { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: var(--weight-bold); font-size: var(--text-sm); flex-shrink: 0; letter-spacing: 0.02em; }
-  .sidebar-brand-text { color: #fff; font-weight: var(--weight-bold); font-size: var(--text-md); opacity: 0; transition: opacity 0.15s ease; }
+  .sidebar-brand-text { color: var(--sidebar-fg); font-weight: var(--weight-bold); font-size: var(--text-md); opacity: 0; transition: opacity 0.15s ease; }
   .sidebar:hover .sidebar-brand-text { opacity: 1; }
   .sidebar-nav { display: flex; flex-direction: column; gap: var(--space-1); }
-  .nav-item { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: rgba(255,255,255,0.55); cursor: pointer; white-space: nowrap; position: relative; font-size: var(--text-md); font-weight: var(--weight-medium); transition: background 0.15s ease, color 0.15s ease; }
-  .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
-  .nav-item.active { color: #fff; background: rgba(255,255,255,0.07); font-weight: var(--weight-semibold); }
+  .nav-item { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: var(--sidebar-fg-muted); cursor: pointer; white-space: nowrap; position: relative; font-size: var(--text-md); font-weight: var(--weight-medium); transition: background 0.15s ease, color 0.15s ease; }
+  .nav-item:hover { background: var(--sidebar-item-hover); color: var(--sidebar-fg); }
+  .nav-item.active { color: var(--sidebar-fg-active); background: var(--sidebar-item-active); font-weight: var(--weight-semibold); }
   .nav-item.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; background: var(--accent); border-radius: 0 3px 3px 0; }
   .nav-icon { width: 20px; height: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
   .nav-icon svg { width: 20px; height: 20px; }
@@ -275,9 +338,9 @@
     padding: var(--space-8) var(--space-7);
     margin: 0 calc(-1 * var(--space-6)) var(--space-6);
     border-radius: 0 0 var(--radius-xl) var(--radius-xl);
-    background: linear-gradient(135deg, #1d2757 0%, #151d40 45%, #0e1530 100%);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    box-shadow: var(--elev-3);
+    background: var(--header-surface);
+    border-bottom: 1px solid var(--header-border);
+    box-shadow: var(--elev-2);
     isolation: isolate;
   }
   /* Slow-drifting aurora. Two blurred colour blooms on a long loop - the
@@ -286,9 +349,9 @@
   header::before {
     content: ''; position: absolute; inset: -40% -20%; z-index: -1; pointer-events: none;
     background:
-      radial-gradient(closest-side, rgba(129,140,248,0.55), transparent 70%) 8% 18% / 46% 62% no-repeat,
-      radial-gradient(closest-side, rgba(56,189,248,0.38), transparent 70%) 78% 88% / 44% 60% no-repeat,
-      radial-gradient(closest-side, rgba(217,70,239,0.30), transparent 70%) 52% 8% / 38% 54% no-repeat;
+      radial-gradient(closest-side, var(--header-aurora-1), transparent 70%) 8% 18% / 46% 62% no-repeat,
+      radial-gradient(closest-side, var(--header-aurora-2), transparent 70%) 78% 88% / 44% 60% no-repeat,
+      radial-gradient(closest-side, var(--header-aurora-3), transparent 70%) 52% 8% / 38% 54% no-repeat;
     filter: blur(28px);
     animation: header-aurora 26s ease-in-out infinite alternate;
   }
@@ -305,8 +368,8 @@
   header::after {
     content: ''; position: absolute; inset: 0; pointer-events: none;
     background-image:
-      linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+      linear-gradient(var(--header-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--header-grid) 1px, transparent 1px);
     background-size: 34px 34px;
     -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.8), transparent 78%);
     mask-image: linear-gradient(180deg, rgba(0,0,0,0.8), transparent 78%);
@@ -318,7 +381,7 @@
     display: inline-flex; align-items: center; gap: var(--space-3);
     font-size: var(--text-2xs); font-weight: var(--weight-semibold);
     letter-spacing: 0.10em; text-transform: uppercase;
-    color: #b9c4ff; margin-bottom: var(--space-3);
+    color: var(--header-eyebrow); margin-bottom: var(--space-3);
   }
   .header-dot {
     width: 6px; height: 6px; border-radius: var(--radius-pill);
@@ -326,9 +389,9 @@
   }
   h1 {
     font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0;
-    color: #ffffff; letter-spacing: -0.02em; line-height: var(--leading-tight);
+    color: var(--header-fg); letter-spacing: -0.02em; line-height: var(--leading-tight);
   }
-  .subtitle { font-size: var(--text-sm); color: rgba(226,232,255,0.72); margin-top: var(--space-2); }
+  .subtitle { font-size: var(--text-sm); color: var(--header-fg-muted); margin-top: var(--space-2); }
 
   .hero-search { position: relative; z-index: 2; margin-left: auto; flex: 0 1 340px; min-width: 220px; }
   .hero-search .username-field { background: none; border: none; padding: 0; box-shadow: none; }
@@ -336,22 +399,22 @@
      than a white box punched into the gradient. */
   .hero-search .username-field input {
     width: 100%;
-    background: rgba(255,255,255,0.10);
+    background: var(--header-field-bg);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.18);
+    border: 1px solid var(--header-field-border);
     padding: var(--space-3) var(--space-4) var(--space-3) var(--space-7);
     font-size: var(--text-base); border-radius: var(--radius-lg);
-    color: #ffffff;
+    color: var(--header-fg);
     transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  .hero-search .username-field input::placeholder { color: rgba(226,232,255,0.55); }
-  .hero-search .username-field input:hover { background: rgba(255,255,255,0.14); }
+  .hero-search .username-field input::placeholder { color: var(--header-fg-faint); }
+  .hero-search .username-field input:hover { background: var(--header-field-bg-hover); }
   .hero-search .username-field input:focus {
-    outline: none; background: rgba(255,255,255,0.17);
-    border-color: rgba(255,255,255,0.42);
+    outline: none; background: var(--header-field-bg-hover);
+    border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(129,140,248,0.28);
   }
-  .hero-search .username-icon { left: 11px; color: rgba(226,232,255,0.70); }
+  .hero-search .username-icon { left: 11px; color: var(--header-fg-muted); }
 
   /* Populated once a scan or profile loads, so the header carries live state
      instead of being purely decorative. Hidden until it has something to say. */
@@ -360,15 +423,15 @@
   .header-stat {
     display: inline-flex; align-items: baseline; gap: var(--space-2);
     padding: var(--space-2) var(--space-4);
-    background: rgba(255,255,255,0.09);
-    border: 1px solid rgba(255,255,255,0.14);
+    background: var(--header-field-bg);
+    border: 1px solid var(--header-field-border);
     border-radius: var(--radius-pill);
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
-  .header-stat b { font-size: var(--text-base); font-weight: var(--weight-bold); color: #fff; letter-spacing: -0.01em; }
-  .header-stat span { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.07em; color: rgba(226,232,255,0.66); }
-  .header-stat.is-critical b { color: #ff8f8f; }
-  .header-stat.is-high b { color: #ffc078; }
+  .header-stat b { font-size: var(--text-base); font-weight: var(--weight-bold); color: var(--header-fg); letter-spacing: -0.01em; }
+  .header-stat span { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.07em; color: var(--header-fg-muted); }
+  .header-stat.is-critical b { color: var(--sev-critical-fg); }
+  .header-stat.is-high b { color: var(--sev-high-fg); }
   .username-icon { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #9ca3af; pointer-events: none; display: flex; }
   .username-icon svg { width: 16px; height: 16px; }
   .suggestions-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); font-size: var(--text-xs); font-weight: var(--weight-bold); color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--space-3) var(--space-4) var(--space-2); }
@@ -493,8 +556,8 @@
   .file-del { color: #ef4444; font-weight: var(--weight-semibold); }
   .file-status { font-size: var(--text-2xs); text-transform: uppercase; color: var(--text-muted); margin-right: 6px; }
 
-  .theme-toggle { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: rgba(255,255,255,0.62); cursor: pointer; white-space: nowrap; background: none; border: none; font-family: inherit; font-size: var(--text-md); font-weight: var(--weight-semibold); width: 100%; text-align: left; margin-top: auto; }
-  .theme-toggle:hover { background: rgba(255,255,255,0.08); color: #fff; box-shadow: none; transform: none; }
+  .theme-toggle { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: var(--sidebar-fg-muted); cursor: pointer; white-space: nowrap; background: none; border: none; font-family: inherit; font-size: var(--text-md); font-weight: var(--weight-semibold); width: 100%; text-align: left; margin-top: auto; }
+  .theme-toggle:hover { background: var(--sidebar-item-hover); color: var(--sidebar-fg); box-shadow: none; transform: none; }
   .theme-toggle .nav-icon svg { width: 20px; height: 20px; }
   /* ---- Command palette ------------------------------------------------ */
   .cmdk-overlay { position: fixed; inset: 0; background: rgba(10,12,16,0.45); backdrop-filter: blur(2px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 12vh; }
