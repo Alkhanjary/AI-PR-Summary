@@ -108,17 +108,17 @@
     --accent-text: #4338ca;
     --accent-glow: rgba(79,70,229,0.22);
     --accent-gradient: linear-gradient(135deg, #4f46e5, #6366f1);
-    /* White like the cards, separated by a crisp border and its own
-       elevation rather than by a fill. At near-white with a hairline border
-       it read as empty space; at a heavier tint it fought the page. */
-    --sidebar-bg: #ffffff;
-    --sidebar-border: #ccd6ea;
-    --sidebar-shadow: 1px 0 3px rgba(15,23,41,0.05);
-    --sidebar-fg: #0f1729;
-    --sidebar-fg-active: #4338ca;
-    --sidebar-fg-muted: #55617a;
-    --sidebar-item-hover: rgba(79,70,229,0.07);
-    --sidebar-item-active: rgba(79,70,229,0.12);
+    /* Graphite rail: a neutral dark with no blue cast, so it reads as
+       chrome rather than as another coloured panel competing with the
+       indigo accent. Tuned here - change --sidebar-bg alone to restyle it. */
+    --sidebar-bg: linear-gradient(180deg, #242830 0%, #1b1e25 100%);
+    --sidebar-border: #333944;
+    --sidebar-fg: #ffffff;
+    --sidebar-fg-active: #ffffff;
+    --sidebar-fg-muted: rgba(233,236,242,0.60);
+    --sidebar-item-hover: rgba(255,255,255,0.07);
+    --sidebar-item-active: rgba(129,140,248,0.24);
+    --sidebar-shadow: none;
     --header-bg: #ffffff;
     --header-shadow: rgba(15,23,41,0.06);
     --hero-bg: linear-gradient(135deg, #eef1fb 0%, #f5f7fb 60%);
