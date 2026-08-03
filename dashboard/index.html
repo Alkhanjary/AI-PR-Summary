@@ -571,11 +571,6 @@
     </div>
   </div>
 
-  <div class="panel-card" id="vuln-history-card" style="display:none;">
-    <div class="panel-card-title">Recent scans</div>
-    <div id="vuln-history-list"></div>
-  </div>
-
   <div class="status" id="vuln-status"></div>
   <div id="vuln-ai-note" class="hint-text" style="display:none;margin-bottom:8px;"></div>
   <div class="panel-card" id="vuln-log-card" style="display:none;">
@@ -1107,7 +1102,6 @@ function updateRepoControlsForActiveTab() {
     repoToolbar.style.display = 'none';
   } else if (activePanel === 'vuln') {
     toggleVulnSource();
-    loadVulnScanHistory();
   } else {
     if (hasRepos) placeRepoSelect('repo-select-slot-top');
     repoToolbar.style.display = hasRepos ? 'flex' : 'none';
@@ -2123,7 +2117,6 @@ async function deleteScan(ref, btn) {
     _vulnCompareSelected = _vulnCompareSelected.filter(r => r !== ref);
     document.getElementById('vuln-compare-panel').style.display = 'none';
     await loadVulnScanHistoryFull();
-    loadVulnScanHistory();   // keep the sidebar "Recent scans" card in sync
   } catch (e) {
     btn.textContent = 'Delete';
     btn.disabled = false;
@@ -2321,37 +2314,6 @@ function openHistoryDetail(idx) {
     </div>`;
   panel.style.display = 'block';
   panel.scrollIntoView({behavior:'smooth', block:'start'});
-}
-
-async function loadVulnScanHistory() {
-  const card = document.getElementById('vuln-history-card');
-  const list = document.getElementById('vuln-history-list');
-  try {
-    const res = await fetch(API_BASE + '/api/vuln-scan/history');
-    const data = await res.json();
-    const items = (data.items || []).filter(i => i.status === 'done');
-    if (items.length === 0) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
-    list.innerHTML = items.map(i => {
-      const when = new Date(i.started * 1000).toLocaleString();
-      const counts = i.counts || {};
-      const trendHtml = renderTrendBadge(i.history_delta);
-      const clickAttr = i.job_id ? ' data-job="' + i.job_id + '" style="cursor:pointer;"' : '';
-      return '<div class="card"' + clickAttr + '>' +
-        '<div class="top"><span style="font-weight:600;">' + (i.repo || 'scan') + '</span>' +
-        '<span class="hint-text">' + when + (i.source === 'history' ? ' · saved' : '') + '</span></div>' +
-        '<div class="meta-row">' + trendHtml + '</div>' +
-        '<div class="section-body">' + (i.total_findings || 0) + ' finding(s) &mdash; ' +
-        (counts.critical || 0) + ' critical, ' + (counts.high || 0) + ' high, ' +
-        (counts.medium || 0) + ' medium, ' + (counts.low || 0) + ' low</div>' +
-        '</div>';
-    }).join('');
-    list.querySelectorAll('[data-job]').forEach(el => {
-      el.addEventListener('click', () => loadVulnScanFromHistory(el.dataset.job));
-    });
-  } catch (e) {
-    card.style.display = 'none';
-  }
 }
 
 async function loadVulnScanFromHistory(jobId) {
