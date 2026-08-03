@@ -270,11 +270,16 @@
 
   .app-shell { display: flex; align-items: stretch; min-height: 100vh; }
   .sidebar { width: 72px; flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; padding: var(--space-6) 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease, background 0.2s ease; z-index: 30; }
-  .sidebar:hover, .sidebar:focus-within { width: 226px; overflow: visible; }
+  /* Expand on hover, or on KEYBOARD focus only. Plain :focus-within meant
+     clicking anything focusable in here (the theme toggle is a real button)
+     left the rail pinned open until you clicked elsewhere - the "stuck"
+     sidebar. :focus-visible doesn't latch on mouse clicks. */
+  .sidebar:hover, .sidebar.kbd-open { width: 226px; overflow: visible; }
   .sidebar-brand { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-6) var(--space-6); white-space: nowrap; }
   .sidebar-brand-mark { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: var(--weight-bold); font-size: var(--text-sm); flex-shrink: 0; letter-spacing: 0.02em; }
   .sidebar-brand-text { color: var(--sidebar-fg); font-weight: var(--weight-bold); font-size: var(--text-md); opacity: 0; transition: opacity 0.15s ease; }
-  .sidebar:hover .sidebar-brand-text { opacity: 1; }
+  .sidebar:hover .sidebar-brand-text,
+  .sidebar.kbd-open .sidebar-brand-text { opacity: 1; }
   .sidebar-nav { display: flex; flex-direction: column; gap: var(--space-1); }
   .nav-item { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: var(--sidebar-fg-muted); cursor: pointer; white-space: nowrap; position: relative; font-size: var(--text-md); font-weight: var(--weight-medium); transition: background 0.15s ease, color 0.15s ease; }
   .nav-item:hover { background: var(--sidebar-item-hover); color: var(--sidebar-fg); }
@@ -283,7 +288,8 @@
   .nav-icon { width: 20px; height: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
   .nav-icon svg { width: 20px; height: 20px; }
   .nav-label { opacity: 0; transform: translateX(-6px); transition: opacity 0.15s ease, transform 0.15s ease; }
-  .sidebar:hover .nav-label { opacity: 1; transform: translateX(0); }
+  .sidebar:hover .nav-label,
+  .sidebar.kbd-open .nav-label { opacity: 1; transform: translateX(0); }
 
   .main-content { flex: 1; min-width: 0; max-width: 1300px; padding: 0 var(--space-6) var(--space-8); }
 
@@ -330,7 +336,6 @@
      holds the search, then gets out of the way of the data below. */
   header {
     position: relative;
-    overflow: hidden;
     display: flex; align-items: center; gap: var(--space-6); flex-wrap: wrap;
     /* Bleeds to the container edge, so the negative margin has to track
        .main-content's padding exactly - a hardcoded -2rem against 24px of
@@ -346,8 +351,12 @@
   /* Slow-drifting aurora. Two blurred colour blooms on a long loop - the
      movement is barely perceptible frame to frame, which keeps it premium
      rather than distracting for something you stare at all day. */
-  header::before {
-    content: ''; position: absolute; inset: -40% -20%; z-index: -1; pointer-events: none;
+  .header-fx {
+    position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    overflow: hidden; border-radius: inherit;
+  }
+  .header-fx::before {
+    content: ''; position: absolute; inset: -40% -20%; pointer-events: none;
     background:
       radial-gradient(closest-side, var(--header-aurora-1), transparent 70%) 8% 18% / 46% 62% no-repeat,
       radial-gradient(closest-side, var(--header-aurora-2), transparent 70%) 78% 88% / 44% 60% no-repeat,
@@ -361,11 +370,11 @@
     100% { transform: translate3d(-3%,2%,0) scale(1.04); }
   }
   @media (prefers-reduced-motion: reduce) {
-    header::before { animation: none; }
+    .header-fx::before { animation: none; }
   }
   /* Fine grid, masked out toward the bottom - gives the panel depth without
      competing with the text sitting on it. */
-  header::after {
+  .header-fx::after {
     content: ''; position: absolute; inset: 0; pointer-events: none;
     background-image:
       linear-gradient(var(--header-grid) 1px, transparent 1px),
@@ -689,6 +698,7 @@
 
   <div class="main-content">
     <header>
+      <div class="header-fx" aria-hidden="true"></div>
       <div class="header-titles">
         <div class="header-eyebrow">
           <span class="header-dot"></span>Security &amp; delivery intelligence
@@ -4247,6 +4257,26 @@ function applyFindingFilter(query) {
   // otherwise the detail pane keeps showing something now hidden.
   if (typeof selectFinding === 'function') selectFinding(0);
 }
+// Sidebar expand-on-focus, keyboard only.
+// Plain :focus-within latched the rail open after any mouse click inside it
+// (the theme toggle is a real button), so it stayed expanded until you
+// clicked elsewhere. Track input modality explicitly: only a keyboard-driven
+// focus expands it, and it always collapses when focus leaves.
+(function () {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  let viaKeyboard = false;
+  document.addEventListener('keydown', e => { if (e.key === 'Tab') viaKeyboard = true; }, true);
+  document.addEventListener('mousedown', () => { viaKeyboard = false; }, true);
+  sidebar.addEventListener('focusin', () => { if (viaKeyboard) sidebar.classList.add('kbd-open'); });
+  sidebar.addEventListener('focusout', () => {
+    // focusout fires before the next focusin, so defer until focus settles.
+    setTimeout(() => {
+      if (!sidebar.contains(document.activeElement)) sidebar.classList.remove('kbd-open');
+    }, 0);
+  });
+})();
+
 </script>
 
 </body>
