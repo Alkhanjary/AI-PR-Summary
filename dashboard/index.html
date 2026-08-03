@@ -102,23 +102,24 @@
     --elev-3: 0 10px 30px rgba(15,23,41,0.13), 0 2px 6px rgba(15,23,41,0.08);
     --divider: #e2e8f3;
     --segmented-bg: #e9eef7;
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
-    --accent-soft: #eef0fe;
-    --accent-text: #4338ca;
-    --accent-glow: rgba(79,70,229,0.22);
-    --accent-gradient: linear-gradient(135deg, #4f46e5, #6366f1);
-    /* Graphite rail: a neutral dark with no blue cast, so it reads as
-       chrome rather than as another coloured panel competing with the
-       indigo accent. Tuned here - change --sidebar-bg alone to restyle it. */
-    --sidebar-bg: linear-gradient(180deg, #242830 0%, #1b1e25 100%);
-    --sidebar-border: #333944;
+    --accent: #0284c7;
+    --accent-hover: #0369a1;
+    --accent-soft: #e6f3fc;
+    --accent-text: #0369a1;
+    --accent-glow: rgba(2,132,199,0.22);
+    --accent-gradient: linear-gradient(135deg, #0284c7, #0ea5e9);
+    /* Slate-blue rail. Text, hover, active and the brand mark all derive
+       from it, so changing --sidebar-bg alone restyles the whole rail. */
+    --sidebar-bg: linear-gradient(170deg, #334155 0%, #1e293b 100%);
+    --sidebar-border: rgba(255,255,255,0.14);
     --sidebar-fg: #ffffff;
     --sidebar-fg-active: #ffffff;
-    --sidebar-fg-muted: rgba(233,236,242,0.60);
-    --sidebar-item-hover: rgba(255,255,255,0.07);
-    --sidebar-item-active: rgba(129,140,248,0.24);
-    --sidebar-shadow: none;
+    --sidebar-fg-muted: rgba(255,255,255,0.70);
+    --sidebar-item-hover: rgba(255,255,255,0.10);
+    --sidebar-item-active: rgba(56,189,248,0.24);
+    --sidebar-shadow: 2px 0 14px rgba(30,41,59,0.20);
+    --sidebar-mark-bg: #38bdf8;
+    --sidebar-mark-fg: #0f172a;
     --header-bg: #ffffff;
     --header-shadow: rgba(15,23,41,0.06);
     --hero-bg: linear-gradient(135deg, #eef1fb 0%, #f5f7fb 60%);
@@ -126,19 +127,19 @@
     /* Light theme keeps a LIGHT header. A dark slab across the top of an
        otherwise white page dominated it and left the content looking washed
        out; the tint carries the accent without taking over. */
-    --header-surface: linear-gradient(135deg, #eef1fd 0%, #f6f8fd 55%, #ffffff 100%);
-    --header-border: #dde3f0;
+    --header-surface: linear-gradient(135deg, #e9f2fb 0%, #f4f8fd 55%, #ffffff 100%);
+    --header-border: #d5e2f0;
     --header-grid: rgba(15,23,41,0.035);
-    --header-aurora-1: rgba(99,102,241,0.20);
-    --header-aurora-2: rgba(56,189,248,0.16);
-    --header-aurora-3: rgba(217,70,239,0.12);
+    --header-aurora-1: rgba(14,165,233,0.22);
+    --header-aurora-2: rgba(2,132,199,0.16);
+    --header-aurora-3: rgba(99,102,241,0.14);
     --header-fg: #0f1729;
     --header-fg-muted: #56617a;
     --header-fg-faint: #8792a8;
-    --header-eyebrow: #4338ca;
+    --header-eyebrow: #0369a1;
     --header-field-bg: rgba(255,255,255,0.85);
     --header-field-bg-hover: #ffffff;
-    --header-field-border: #d3dbeb;
+    --header-field-border: #d2e0ee;
     --sev-critical-fg: #b42318;
     --sev-high-fg: #b54708;
     color-scheme: light;
@@ -167,15 +168,17 @@
     --elev-3: 0 8px 24px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.4);
     --divider: #222b3d;
     --segmented-bg: #19212f;
-    --accent: #7c8cff;
-    --accent-hover: #94a2ff;
-    --accent-soft: #1c2340;
-    --accent-text: #a9b5ff;
-    --accent-glow: rgba(124,140,255,0.28);
-    --accent-gradient: linear-gradient(135deg, #6366f1, #818cf8);
-    --sidebar-bg: linear-gradient(180deg, #0d1322 0%, #070a12 100%);
-    --sidebar-border: #1e2740;
+    --accent: #38bdf8;
+    --accent-hover: #7dd3fc;
+    --accent-soft: #0c2436;
+    --accent-text: #7dd3fc;
+    --accent-glow: rgba(56,189,248,0.26);
+    --accent-gradient: linear-gradient(135deg, #0284c7, #38bdf8);
+    --sidebar-bg: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    --sidebar-border: #2b3a4f;
     --sidebar-shadow: none;
+    --sidebar-mark-bg: #38bdf8;
+    --sidebar-mark-fg: #0f172a;
     --sidebar-fg: #ffffff;
     --sidebar-fg-active: #ffffff;
     --sidebar-fg-muted: rgba(255,255,255,0.55);
@@ -185,16 +188,16 @@
     --header-shadow: rgba(0,0,0,0.45);
     --hero-bg: linear-gradient(135deg, #161f33 0%, #111828 60%);
     --hero-text: #e8ecf5;
-    --header-surface: linear-gradient(135deg, #1d2757 0%, #151d40 45%, #0e1530 100%);
+    --header-surface: linear-gradient(135deg, #1e293b 0%, #172032 45%, #0f172a 100%);
     --header-border: rgba(255,255,255,0.08);
     --header-grid: rgba(255,255,255,0.05);
-    --header-aurora-1: rgba(129,140,248,0.55);
-    --header-aurora-2: rgba(56,189,248,0.38);
-    --header-aurora-3: rgba(217,70,239,0.30);
+    --header-aurora-1: rgba(56,189,248,0.48);
+    --header-aurora-2: rgba(2,132,199,0.36);
+    --header-aurora-3: rgba(99,102,241,0.28);
     --header-fg: #ffffff;
     --header-fg-muted: rgba(226,232,255,0.72);
     --header-fg-faint: rgba(226,232,255,0.55);
-    --header-eyebrow: #b9c4ff;
+    --header-eyebrow: #7dd3fc;
     --header-field-bg: rgba(255,255,255,0.10);
     --header-field-bg-hover: rgba(255,255,255,0.16);
     --header-field-border: rgba(255,255,255,0.18);
@@ -227,15 +230,19 @@
       --elev-3: 0 8px 24px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.4);
       --divider: #222b3d;
       --segmented-bg: #19212f;
-      --accent: #7c8cff;
-      --accent-hover: #94a2ff;
-      --accent-soft: #1c2340;
-      --accent-text: #a9b5ff;
-      --accent-glow: rgba(124,140,255,0.28);
-      --accent-gradient: linear-gradient(135deg, #6366f1, #818cf8);
-      --sidebar-bg: linear-gradient(180deg, #0d1322 0%, #070a12 100%);
-      --sidebar-border: #1e2740;
+      --accent: #38bdf8;
+      --accent-hover: #7dd3fc;
+      --accent-soft: #0c2436;
+      --accent-text: #7dd3fc;
+      --accent-glow: rgba(56,189,248,0.26);
+      --accent-gradient: linear-gradient(135deg, #0284c7, #38bdf8);
+      --sidebar-bg: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+      --sidebar-border: #2b3a4f;
       --sidebar-shadow: none;
+      --sidebar-mark-bg: #38bdf8;
+      --sidebar-mark-fg: #0f172a;
+    --sidebar-mark-bg: #38bdf8;
+    --sidebar-mark-fg: #0f172a;
       --sidebar-fg: #ffffff;
       --sidebar-fg-active: #ffffff;
       --sidebar-fg-muted: rgba(255,255,255,0.55);
@@ -245,16 +252,16 @@
       --header-shadow: rgba(0,0,0,0.45);
       --hero-bg: linear-gradient(135deg, #161f33 0%, #111828 60%);
       --hero-text: #e8ecf5;
-      --header-surface: linear-gradient(135deg, #1d2757 0%, #151d40 45%, #0e1530 100%);
+      --header-surface: linear-gradient(135deg, #1e293b 0%, #172032 45%, #0f172a 100%);
       --header-border: rgba(255,255,255,0.08);
       --header-grid: rgba(255,255,255,0.05);
-      --header-aurora-1: rgba(129,140,248,0.55);
-      --header-aurora-2: rgba(56,189,248,0.38);
-      --header-aurora-3: rgba(217,70,239,0.30);
+      --header-aurora-1: rgba(56,189,248,0.48);
+      --header-aurora-2: rgba(2,132,199,0.36);
+      --header-aurora-3: rgba(99,102,241,0.28);
       --header-fg: #ffffff;
       --header-fg-muted: rgba(226,232,255,0.72);
       --header-fg-faint: rgba(226,232,255,0.55);
-      --header-eyebrow: #b9c4ff;
+      --header-eyebrow: #7dd3fc;
       --header-field-bg: rgba(255,255,255,0.10);
       --header-field-bg-hover: rgba(255,255,255,0.16);
       --header-field-border: rgba(255,255,255,0.18);
@@ -282,7 +289,7 @@
      sidebar. :focus-visible doesn't latch on mouse clicks. */
   .sidebar:hover, .sidebar.kbd-open { width: 226px; overflow: visible; }
   .sidebar-brand { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-6) var(--space-6); white-space: nowrap; }
-  .sidebar-brand-mark { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: var(--weight-bold); font-size: var(--text-sm); flex-shrink: 0; letter-spacing: 0.02em; }
+  .sidebar-brand-mark { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--sidebar-mark-bg); color: var(--sidebar-mark-fg); display: flex; align-items: center; justify-content: center; font-weight: var(--weight-bold); font-size: var(--text-sm); flex-shrink: 0; letter-spacing: 0.02em; }
   .sidebar-brand-text { color: var(--sidebar-fg); font-weight: var(--weight-bold); font-size: var(--text-md); opacity: 0; transition: opacity 0.15s ease; }
   .sidebar:hover .sidebar-brand-text,
   .sidebar.kbd-open .sidebar-brand-text { opacity: 1; }
