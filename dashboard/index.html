@@ -329,9 +329,64 @@
   .theme-toggle { display: flex; align-items: center; gap: 14px; padding: 12px 22px; color: rgba(255,255,255,0.62); cursor: pointer; white-space: nowrap; background: none; border: none; font-family: inherit; font-size: 14px; font-weight: 600; width: 100%; text-align: left; margin-top: auto; }
   .theme-toggle:hover { background: rgba(255,255,255,0.08); color: #fff; box-shadow: none; transform: none; }
   .theme-toggle .nav-icon svg { width: 20px; height: 20px; }
+  /* ---- Command palette ------------------------------------------------ */
+  .cmdk-overlay { position: fixed; inset: 0; background: rgba(10,12,16,0.45); backdrop-filter: blur(2px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+  .cmdk-overlay.open { display: flex; }
+  .cmdk { width: min(560px, calc(100vw - 2rem)); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.28); overflow: hidden; }
+  .cmdk-input { width: 100%; box-sizing: border-box; border: none; border-bottom: 1px solid var(--border-soft); background: none; padding: 14px 16px; font-size: 15px; color: var(--text-primary); outline: none; font-family: inherit; }
+  .cmdk-input::placeholder { color: var(--text-muted); }
+  .cmdk-list { max-height: 320px; overflow-y: auto; padding: 6px; }
+  .cmdk-group { font-size: 10px; font-weight: 650; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 10px 4px; }
+  .cmdk-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13.5px; color: var(--text-secondary); }
+  .cmdk-item .cmdk-hint { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+  .cmdk-item.sel { background: var(--accent-soft); color: var(--text-primary); }
+  .cmdk-empty { padding: 18px 12px; font-size: 13px; color: var(--text-muted); text-align: center; }
+  kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; background: var(--surface-alt); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; color: var(--text-secondary); }
+
+  /* ---- Toasts --------------------------------------------------------- */
+  .toast-stack { position: fixed; right: 18px; bottom: 18px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+  .toast { display: flex; align-items: flex-start; gap: 9px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 7px; padding: 10px 13px; font-size: 13px; color: var(--text-primary); box-shadow: 0 8px 26px var(--shadow-card); max-width: 380px; animation: toast-in 0.16s ease-out; }
+  .toast.err { border-left-color: #dc2626; }
+  .toast.ok  { border-left-color: #16a34a; }
+  .toast-close { margin-left: 6px; cursor: pointer; color: var(--text-muted); font-size: 15px; line-height: 1; background: none; border: none; padding: 0; }
+  .toast-close:hover { color: var(--text-primary); background: none; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---- Findings quick filter ------------------------------------------ */
+  .finding-filter { position: relative; flex: 1; min-width: 190px; max-width: 340px; }
+  .finding-filter input { width: 100%; box-sizing: border-box; padding: 6px 26px 6px 30px; font-size: 12.5px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); }
+  .finding-filter input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .finding-filter .ff-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-muted); pointer-events: none; }
+  .finding-filter .ff-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 2px 4px; display: none; }
+  .finding-filter .ff-clear:hover { color: var(--text-primary); background: none; }
+  .finding-filter.has-value .ff-clear { display: block; }
+  mark.ff-hit { background: rgba(245,197,24,0.32); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+  /* Keyboard focus ring for the finding list */
+  .finding-card.kb-focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .finding-cat { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--text-secondary); background: var(--surface-alt); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+
+  /* ---- Loading skeletons ---------------------------------------------- */
+  .skeleton { background: linear-gradient(90deg, var(--surface-alt) 25%, var(--divider) 37%, var(--surface-alt) 63%); background-size: 400% 100%; animation: skel 1.3s ease-in-out infinite; border-radius: 5px; }
+  @keyframes skel { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+  .skeleton-row { height: 11px; margin: 8px 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+    .toast { animation: none; }
+    * { scroll-behavior: auto !important; }
+  }
 </style>
 </head>
 <body>
+
+<div class="cmdk-overlay" id="cmdk-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="cmdk" role="combobox" aria-expanded="true" aria-haspopup="listbox">
+    <input class="cmdk-input" id="cmdk-input" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Jump to a panel, or type a command…" aria-controls="cmdk-list">
+    <div class="cmdk-list" id="cmdk-list" role="listbox"></div>
+  </div>
+</div>
+<div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
 <div class="app-shell">
   <nav class="sidebar">
@@ -1108,15 +1163,32 @@ function updateRepoControlsForActiveTab() {
   }
 }
 
+const PANEL_KEY = 'aiprs.lastPanel';
+
+function activatePanel(name, opts) {
+  const tab = document.querySelector('.nav-item[data-panel="' + name + '"]');
+  const panel = document.getElementById('panel-' + name);
+  if (!tab || !panel) return false;
+  document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  tab.classList.add('active');
+  panel.classList.add('active');
+  updateRepoControlsForActiveTab();
+  try { localStorage.setItem(PANEL_KEY, name); } catch (e) {}
+  if (!opts || !opts.silent) window.scrollTo({ top: 0, behavior: 'smooth' });
+  return true;
+}
+
 document.querySelectorAll('.nav-item').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
-    updateRepoControlsForActiveTab();
-  });
+  tab.addEventListener('click', () => activatePanel(tab.dataset.panel));
 });
+
+// Reopen on the panel you were last using. Landing on Overview every reload is
+// a small tax you pay on every visit when you mostly live in one tab.
+try {
+  const last = localStorage.getItem(PANEL_KEY);
+  if (last) activatePanel(last, { silent: true });
+} catch (e) {}
 
 function badge(text, cls) {
   return '<span class="badge ' + cls + '">' + text + '</span>';
@@ -2046,7 +2118,7 @@ async function downloadHistoryReport(ref, fmt, btn) {
       let msg = 'Report failed.';
       try { msg = (await res.json()).error || msg; } catch (e) {}
       if (statusEl) statusEl.textContent = msg;
-      else alert(msg);
+      else toast(msg, 'err');
       return;
     }
     const blob = await res.blob();
@@ -2065,7 +2137,7 @@ async function downloadHistoryReport(ref, fmt, btn) {
     }
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Could not reach the server to generate the report.';
-    else alert('Could not reach the server to generate the report.');
+    else toast('Could not reach the server to generate the report.', 'err');
   } finally {
     clearInterval(ticker);
     btn.textContent = original;
@@ -2110,7 +2182,7 @@ async function deleteScan(ref, btn) {
       btn.style.background = 'transparent';
       btn.style.color = '#dc2626';
       btn.style.borderColor = '#fecaca';
-      alert(data.error);
+      toast(data.error, 'err');
       return;
     }
     // Drop it from the compare selection if it was picked
@@ -2277,7 +2349,7 @@ function openHistoryDetail(idx) {
   const item = _vulnHistoryItems[idx];
   if (!item) return;
   const findings = item.findings || [];
-  if (!findings.length) { alert('No findings stored for this scan.'); return; }
+  if (!findings.length) { toast('No findings stored for this scan.', 'err'); return; }
 
   const panel = document.getElementById('vuln-compare-panel');
   const results = document.getElementById('vuln-compare-results');
@@ -2376,11 +2448,20 @@ function buildFindingCard(f) {
   // whatever repo was scanned, and file paths/descriptions can carry markup
   // too. Scanning a hostile repo must never be able to run script in this page.
   const verdictNote = f.ai_verdict ? ' &middot; AI: ' + esc(f.ai_verdict) + (f.ai_reason ? ' (' + esc(f.ai_reason) + ')' : '') : '';
-  const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
+  const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:var(--text-muted);">(likely test fixture)</span>' : '';
+  // The rule that fired ("xss", "ssrf", ...) was previously not shown at all,
+  // so you couldn't tell two findings in the same file apart without reading
+  // both descriptions - and the quick filter had nothing to match on.
+  const cat = f.category || f.rule;
+  const catTag = cat
+    ? '<span class="finding-cat" title="Rule that produced this finding">' + esc(cat) + '</span>'
+    : '';
+  // Web and network findings have no line number; ":undefined" reads as a bug.
+  const loc = esc(f.file || 'unknown') + (f.line != null && f.line !== '' ? ':' + esc(f.line) : '');
   return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
     '<div class="top">' +
-    '<span style="font-size:14px;font-weight:700;">' + esc(f.file || '') + ':' + esc(f.line || '') + fixtureTag + '</span>' +
-    vulnSeverityBadge(f.severity) +
+    '<span style="font-size:13.5px;font-weight:650;word-break:break-all;">' + loc + fixtureTag + '</span>' +
+    '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + catTag + vulnSeverityBadge(f.severity) + '</span>' +
     '</div>' +
     '<div class="section-body" style="margin-top:6px;">' + esc(f.description || '') + verdictNote + '</div>' +
     (f.evidence ? '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + esc(f.evidence) + '</div>' : '') +
@@ -2429,6 +2510,9 @@ function renderVulnFindingsList() {
   const label = currentVulnBucket === 'dismissed' ? 'Possible false positives' : 'Findings';
   vulnResults.innerHTML = '<div class="section-label">' + label + ' (' + vulnSortedFindings.length + ')</div><div id="vuln-cards"></div>';
   appendVulnCards();
+  installFindingFilter();
+  const _ff = document.getElementById('finding-filter-input');
+  if (_ff && _ff.value) applyFindingFilter(_ff.value);
 }
 
 function appendVulnCards() {
@@ -3463,6 +3547,312 @@ document.addEventListener('keydown', e => {
     loadRepos(last.repo);
   }
 })();
+
+/* ==========================================================================
+   Interaction layer: toasts, command palette, keyboard navigation and a
+   quick filter over the findings list.
+
+   Additive by design - it drives the existing functions rather than replacing
+   them, so deleting this block leaves the app working exactly as before.
+   ========================================================================== */
+
+/* ---- Toasts -------------------------------------------------------------
+   Replaces alert(), which blocks the page and can't stack. */
+function toast(message, kind, ms) {
+  const stack = document.getElementById('toast-stack');
+  if (!stack) { console.log(message); return; }
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' ' + kind : '');
+  el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  const close = document.createElement('button');
+  close.className = 'toast-close';
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '×';
+  close.addEventListener('click', () => el.remove());
+  el.append(text, close);
+  stack.appendChild(el);
+  // Errors stay until dismissed - you may have looked away when it appeared.
+  if (kind !== 'err') setTimeout(() => el.remove(), ms || 4000);
+  return el;
+}
+
+/* ---- Command palette ---------------------------------------------------- */
+const CMDK_PANELS = [
+  ['overview', 'Overview',         'Profile, repos and language mix'],
+  ['monitor',  'Team Performance', 'Commit activity and contributor stats'],
+  ['activity', 'PR Activity',      'Pull requests and AI summaries'],
+  ['run',      'Run Summary',      'Generate a summary for one PR'],
+  ['vuln',     'Vuln Scan',        'Code, web and network scanning'],
+];
+
+function cmdkCommands() {
+  const cmds = CMDK_PANELS.map(function (p) {
+    return { group: 'Go to', title: p[1], desc: p[2], hint: 'Panel',
+             run: function () { activatePanel(p[0]); } };
+  });
+  cmds.push({
+    group: 'Actions', title: 'Toggle dark mode',
+    desc: 'Switch between light and dark', hint: 'Theme',
+    run: function () {
+      // Click the real control so the chart recolouring it does stays in one
+      // place rather than being duplicated here.
+      document.getElementById('theme-toggle').click();
+      toast('Switched to ' + currentTheme() + ' mode');
+    },
+  });
+  cmds.push({
+    group: 'Actions', title: 'Focus search',
+    desc: 'Search a GitHub username', hint: '/',
+    run: function () {
+      const i = document.getElementById('username-input');
+      i.focus(); i.select();
+    },
+  });
+  cmds.push({
+    group: 'Actions', title: 'Run vulnerability scan',
+    desc: 'Start a scan with the current settings', hint: 'Vuln Scan',
+    run: function () {
+      activatePanel('vuln');
+      const b = document.getElementById('run-vuln-btn');
+      if (b && !b.disabled) b.click();
+      else toast('A scan is already running.', 'err');
+    },
+  });
+  cmds.push({
+    group: 'Actions', title: 'Open scan history',
+    desc: 'Past scans, comparison and reports', hint: 'Vuln Scan',
+    run: function () {
+      activatePanel('vuln');
+      const t = document.querySelector('[data-vuln-tab="history"]');
+      if (t) t.click();
+    },
+  });
+  cmds.push({
+    group: 'Help', title: 'Keyboard shortcuts', desc: 'Show every binding', hint: '?',
+    run: showShortcutHelp,
+  });
+  return cmds;
+}
+
+let _cmdkItems = [], _cmdkSel = 0;
+
+function cmdkIsOpen() {
+  return document.getElementById('cmdk-overlay').classList.contains('open');
+}
+function cmdkOpen() {
+  const overlay = document.getElementById('cmdk-overlay');
+  const input = document.getElementById('cmdk-input');
+  overlay.classList.add('open');
+  input.value = '';
+  cmdkRender('');
+  input.focus();
+}
+function cmdkClose() {
+  document.getElementById('cmdk-overlay').classList.remove('open');
+}
+
+function cmdkRender(query) {
+  const q = (query || '').trim().toLowerCase();
+  const all = cmdkCommands();
+  _cmdkItems = q
+    ? all.filter(function (c) { return (c.title + ' ' + c.desc).toLowerCase().indexOf(q) !== -1; })
+    : all;
+  _cmdkSel = 0;
+  const list = document.getElementById('cmdk-list');
+  if (!_cmdkItems.length) {
+    list.innerHTML = '<div class="cmdk-empty">No matches for ' + esc(query) + '</div>';
+    return;
+  }
+  let html = '', lastGroup = null;
+  _cmdkItems.forEach(function (c, i) {
+    if (c.group !== lastGroup) {
+      html += '<div class="cmdk-group">' + esc(c.group) + '</div>';
+      lastGroup = c.group;
+    }
+    html += '<div class="cmdk-item' + (i === 0 ? ' sel' : '') + '" role="option" data-i="' + i + '">' +
+            '<span>' + esc(c.title) + '</span>' +
+            '<span class="cmdk-hint">' + esc(c.hint || '') + '</span></div>';
+  });
+  list.innerHTML = html;
+  list.querySelectorAll('.cmdk-item').forEach(function (el) {
+    el.addEventListener('mouseenter', function () { cmdkSelect(+el.dataset.i); });
+    el.addEventListener('click', function () { cmdkRun(+el.dataset.i); });
+  });
+}
+
+function cmdkSelect(i) {
+  const items = Array.prototype.slice.call(document.querySelectorAll('.cmdk-item'));
+  if (!items.length) return;
+  _cmdkSel = (i + items.length) % items.length;
+  items.forEach(function (el, n) { el.classList.toggle('sel', n === _cmdkSel); });
+  items[_cmdkSel].scrollIntoView({ block: 'nearest' });
+}
+
+function cmdkRun(i) {
+  const cmd = _cmdkItems[i == null ? _cmdkSel : i];
+  cmdkClose();
+  if (cmd) {
+    try { cmd.run(); }
+    catch (e) { toast('That action failed: ' + e.message, 'err'); }
+  }
+}
+
+document.getElementById('cmdk-input').addEventListener('input', function (e) {
+  cmdkRender(e.target.value);
+});
+document.getElementById('cmdk-overlay').addEventListener('mousedown', function (e) {
+  if (e.target.id === 'cmdk-overlay') cmdkClose();
+});
+
+/* ---- Global keyboard shortcuts ------------------------------------------
+   Bindings are skipped while you're typing, except ones that are explicitly
+   modal (Escape) or chorded (Ctrl/Cmd+K). */
+function typingInField(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+document.addEventListener('keydown', function (e) {
+  const mod = e.metaKey || e.ctrlKey;
+
+  if (mod && e.key && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    cmdkIsOpen() ? cmdkClose() : cmdkOpen();
+    return;
+  }
+
+  if (cmdkIsOpen()) {
+    if (e.key === 'Escape') { e.preventDefault(); cmdkClose(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); cmdkSelect(_cmdkSel + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkSelect(_cmdkSel - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); cmdkRun(); }
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    const ff = document.getElementById('finding-filter-input');
+    if (ff && document.activeElement === ff && ff.value) {
+      ff.value = '';
+      ff.dispatchEvent(new Event('input'));
+      return;
+    }
+    if (typingInField(document.activeElement)) document.activeElement.blur();
+    return;
+  }
+
+  if (typingInField(document.activeElement) || mod || e.altKey) return;
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const i = document.getElementById('username-input');
+    i.focus(); i.select();
+    return;
+  }
+  if (e.key === '?') { e.preventDefault(); showShortcutHelp(); return; }
+  if (e.key === 'f') {
+    const ff = document.getElementById('finding-filter-input');
+    if (ff && ff.offsetParent !== null) { e.preventDefault(); ff.focus(); ff.select(); }
+    return;
+  }
+  if (e.key === 'j' || e.key === 'k') {
+    moveFindingFocus(e.key === 'j' ? 1 : -1);
+    e.preventDefault();
+    return;
+  }
+
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= CMDK_PANELS.length) activatePanel(CMDK_PANELS[n - 1][0]);
+});
+
+function showShortcutHelp() {
+  const rows = [
+    ['Ctrl / Cmd + K', 'Command palette'],
+    ['/', 'Search a username'],
+    ['f', 'Filter findings'],
+    ['j / k', 'Next / previous finding'],
+    ['1-5', 'Jump to a panel'],
+    ['Esc', 'Close, clear or unfocus'],
+    ['?', 'This list'],
+  ];
+  toast('Shortcuts:  ' + rows.map(function (r) { return r[0] + ' = ' + r[1]; }).join('   |   '), null, 9000);
+}
+
+/* ---- Keyboard focus through the findings list --------------------------- */
+let _findingFocus = -1;
+function moveFindingFocus(step) {
+  const cards = Array.prototype.slice.call(
+    document.querySelectorAll('#vuln-cards .finding-card')
+  ).filter(function (c) { return c.style.display !== 'none'; });
+  if (!cards.length) return;
+  cards.forEach(function (c) { c.classList.remove('kb-focus'); });
+  _findingFocus = Math.max(0, Math.min(cards.length - 1, _findingFocus + step));
+  const el = cards[_findingFocus];
+  el.classList.add('kb-focus');
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/* ---- Quick filter over the rendered findings ----------------------------
+   Narrows what's already on screen by file, category or description. Sits on
+   top of the severity/type pills rather than replacing them. */
+function installFindingFilter() {
+  const host = document.getElementById('vuln-type-filter');
+  if (!host || document.getElementById('finding-filter-input')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'finding-filter';
+  wrap.innerHTML =
+    '<svg class="ff-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+    '<input id="finding-filter-input" type="text" placeholder="Filter findings  (f)" autocomplete="off">' +
+    '<button class="ff-clear" type="button" aria-label="Clear filter">×</button>';
+  host.appendChild(wrap);
+  const input = wrap.querySelector('input');
+  input.addEventListener('input', function () {
+    wrap.classList.toggle('has-value', !!input.value);
+    applyFindingFilter(input.value);
+  });
+  wrap.querySelector('.ff-clear').addEventListener('click', function () {
+    input.value = '';
+    wrap.classList.remove('has-value');
+    applyFindingFilter('');
+    input.focus();
+  });
+}
+
+function applyFindingFilter(query) {
+  const q = (query || '').trim().toLowerCase();
+  const cards = Array.prototype.slice.call(document.querySelectorAll('#vuln-cards .finding-card'));
+  let shown = 0;
+  cards.forEach(function (card) {
+    const hit = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
+    card.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  const label = document.querySelector('#vuln-results .section-label');
+  if (label) {
+    if (!label.dataset.base) label.dataset.base = label.textContent;
+    label.textContent = q
+      ? label.dataset.base.replace(/\((\d+)\)/, '(' + shown + ' of $1)')
+      : label.dataset.base;
+  }
+  let empty = document.getElementById('ff-empty');
+  if (q && shown === 0) {
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'ff-empty';
+      empty.className = 'card';
+      const host = document.getElementById('vuln-cards');
+      if (host) host.appendChild(empty);
+    }
+    empty.textContent = 'No findings match "' + query + '".';
+    empty.style.display = '';
+  } else if (empty) {
+    empty.style.display = 'none';
+  }
+  _findingFocus = -1;
+}
 </script>
 
 </body>
