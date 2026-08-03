@@ -108,13 +108,17 @@
     --accent-text: #4338ca;
     --accent-glow: rgba(79,70,229,0.22);
     --accent-gradient: linear-gradient(135deg, #4f46e5, #6366f1);
-    --sidebar-bg: linear-gradient(180deg, #ffffff 0%, #f7f9fd 100%);
-    --sidebar-border: #dde3f0;
+    /* White like the cards, separated by a crisp border and its own
+       elevation rather than by a fill. At near-white with a hairline border
+       it read as empty space; at a heavier tint it fought the page. */
+    --sidebar-bg: #ffffff;
+    --sidebar-border: #ccd6ea;
+    --sidebar-shadow: 1px 0 3px rgba(15,23,41,0.05);
     --sidebar-fg: #0f1729;
     --sidebar-fg-active: #4338ca;
-    --sidebar-fg-muted: #5b6680;
-    --sidebar-item-hover: #eef1f9;
-    --sidebar-item-active: #eaeeff;
+    --sidebar-fg-muted: #55617a;
+    --sidebar-item-hover: rgba(79,70,229,0.07);
+    --sidebar-item-active: rgba(79,70,229,0.12);
     --header-bg: #ffffff;
     --header-shadow: rgba(15,23,41,0.06);
     --hero-bg: linear-gradient(135deg, #eef1fb 0%, #f5f7fb 60%);
@@ -171,6 +175,7 @@
     --accent-gradient: linear-gradient(135deg, #6366f1, #818cf8);
     --sidebar-bg: linear-gradient(180deg, #0d1322 0%, #070a12 100%);
     --sidebar-border: #1e2740;
+    --sidebar-shadow: none;
     --sidebar-fg: #ffffff;
     --sidebar-fg-active: #ffffff;
     --sidebar-fg-muted: rgba(255,255,255,0.55);
@@ -230,6 +235,7 @@
       --accent-gradient: linear-gradient(135deg, #6366f1, #818cf8);
       --sidebar-bg: linear-gradient(180deg, #0d1322 0%, #070a12 100%);
       --sidebar-border: #1e2740;
+      --sidebar-shadow: none;
       --sidebar-fg: #ffffff;
       --sidebar-fg-active: #ffffff;
       --sidebar-fg-muted: rgba(255,255,255,0.55);
@@ -269,7 +275,7 @@
   }
 
   .app-shell { display: flex; align-items: stretch; min-height: 100vh; }
-  .sidebar { width: 72px; flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; padding: var(--space-6) 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease, background 0.2s ease; z-index: 30; }
+  .sidebar { width: 72px; flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); box-shadow: var(--sidebar-shadow); display: flex; flex-direction: column; padding: var(--space-6) 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease, background 0.2s ease; z-index: 30; }
   /* Expand on hover, or on KEYBOARD focus only. Plain :focus-within meant
      clicking anything focusable in here (the theme toggle is a real button)
      left the rail pinned open until you clicked elsewhere - the "stuck"
