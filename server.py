@@ -7,8 +7,8 @@ import socket
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -471,7 +471,7 @@ def team_report():
 
     title = "Team Performance Report"
     subtitle = (range_label + " &middot; " if range_label else "") + \
-        "generated " + datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        "generated " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     subtitle_plain = subtitle.replace("&middot;", "-")
 
     if fmt == "markdown":
@@ -711,12 +711,39 @@ def _prune_vuln_jobs():
         VULN_JOBS.pop(jid, None)
 
 
-SCAN_HISTORY_FILE = Path(__file__).resolve().parent / "scan_history.json"
+# Saved scan history lives OUTSIDE the repo, in the user's data directory.
+#
+# It used to sit next to server.py, which meant scanning this project scanned
+# the tool's own saved findings: every stored `evidence` string is a verbatim
+# line of risky-looking source from some earlier scan, so the scanner happily
+# reported eval(), innerHTML and SQL concatenation "in scan_history.json". On
+# the last run that produced six bogus findings and the AI narrative opened its
+# remediation plan with "replace eval() at scan_history.json:89".
+_LEGACY_SCAN_HISTORY_FILE = Path(__file__).resolve().parent / "scan_history.json"
+SCAN_HISTORY_DIR = Path(
+    os.environ.get("AI_PR_SUMMARY_DATA_DIR")
+    or (Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share") / "ai-pr-summary")
+)
+SCAN_HISTORY_FILE = SCAN_HISTORY_DIR / "scan_history.json"
 _scan_history_lock = threading.Lock()
+
+
+def _migrate_legacy_scan_history():
+    """Moves a pre-existing in-repo history file to the data directory once, so
+    upgrading doesn't silently lose saved scans."""
+    try:
+        if not _LEGACY_SCAN_HISTORY_FILE.exists() or SCAN_HISTORY_FILE.exists():
+            return
+        SCAN_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        SCAN_HISTORY_FILE.write_bytes(_LEGACY_SCAN_HISTORY_FILE.read_bytes())
+        _LEGACY_SCAN_HISTORY_FILE.unlink()
+    except Exception:
+        pass
 
 
 def _load_scan_history():
     try:
+        _migrate_legacy_scan_history()
         if SCAN_HISTORY_FILE.exists():
             return json.loads(SCAN_HISTORY_FILE.read_text(encoding="utf-8"))
     except Exception:
@@ -726,6 +753,7 @@ def _load_scan_history():
 
 def _save_scan_history(records):
     try:
+        SCAN_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         SCAN_HISTORY_FILE.write_text(json.dumps(records, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -1136,7 +1164,27 @@ def detect_project(target_dir, skip_docker=False):
 
 
 IGNORED_SCAN_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".repo-cache",
-                     "dist", "build", ".next", ".pytest_cache", "vendor", "target"}
+                     "dist", "build", ".next", ".pytest_cache", "vendor", "target",
+                     # Agent/editor config: not application code, and its
+                     # allowlists are full of literal commands and localhost
+                     # URLs that trip every pattern the scanner has.
+                     ".claude", ".vscode", ".idea"}
+
+# This tool's own output. A saved scan record stores each finding's `evidence`
+# verbatim, so scanning a folder that contains one means re-detecting every
+# risky-looking line the scanner ever saw, attributed to the JSON file.
+SELF_ARTIFACT_FILES = {"scan_history.json"}
+
+
+def _is_self_artifact(file_path):
+    """True for a finding located in this tool's own output or in editor/agent
+    config, neither of which is application code under review."""
+    if not file_path:
+        return False
+    parts = str(file_path).replace("\\", "/").split("/")
+    if parts[-1] in SELF_ARTIFACT_FILES:
+        return True
+    return any(p in IGNORED_SCAN_DIRS for p in parts[:-1])
 MANIFEST_FILES = (
     "package.json", "requirements.txt", "pyproject.toml", "Pipfile", "Gemfile",
     "composer.json", "go.mod", "Cargo.toml", "pom.xml", "build.gradle",
@@ -1366,10 +1414,68 @@ def ai_code_scan_run(target_dir, job):
     return all_findings, len(files)
 
 
-def probe_url(url, timeout=8):
+# Hosts that must never be fetched, however the request arrives. Scanning
+# private and loopback addresses is the tool's actual job, so blocking RFC1918
+# wholesale would break it - but the cloud metadata services hand out IAM
+# credentials to anything that can issue a plain GET, and no legitimate scan
+# target lives there.
+BLOCKED_PROBE_HOSTS = {
+    "169.254.169.254",          # AWS / Azure / DigitalOcean IMDS
+    "metadata.google.internal",  # GCP
+    "metadata.goog",
+    "100.100.100.100",          # Alibaba Cloud
+    "fd00:ec2::254",            # AWS IMDSv6
+}
+MAX_PROBE_REDIRECTS = 5
+
+
+def _probe_target_allowed(url):
+    """Returns (ok, reason). Rejects non-HTTP schemes and cloud metadata hosts.
+
+    Checked on every redirect hop as well as the initial URL: a server that
+    answers with 302 -> http://169.254.169.254/ would otherwise walk straight
+    past a check applied only to what the user typed."""
     try:
-        r = requests.get(url, timeout=timeout, allow_redirects=True)
-        return {"url": url, "status": r.status_code, "headers": dict(r.headers), "body_snippet": r.text[:1500]}
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "could not be parsed as a URL"
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"scheme '{parsed.scheme or 'none'}' is not allowed (http/https only)"
+    host = (parsed.hostname or "").strip("[]").lower()
+    if not host:
+        return False, "has no host"
+    if host in BLOCKED_PROBE_HOSTS:
+        return False, "is a cloud metadata endpoint, which can hand out credentials"
+    return True, ""
+
+
+def probe_url(url, timeout=8):
+    """Fetches a URL for the web scan.
+
+    Redirects are followed manually so each hop can be re-validated; requests'
+    own allow_redirects would follow a 302 into a blocked host without ever
+    consulting the check above."""
+    ok, why = _probe_target_allowed(url)
+    if not ok:
+        return {"url": url, "error": f"refused to fetch: URL {why}"}
+
+    current = url
+    try:
+        for _ in range(MAX_PROBE_REDIRECTS + 1):
+            r = requests.get(current, timeout=timeout, allow_redirects=False)
+            if r.is_redirect or r.is_permanent_redirect:
+                nxt = r.headers.get("Location")
+                if not nxt:
+                    break
+                current = urljoin(current, nxt)
+                ok, why = _probe_target_allowed(current)
+                if not ok:
+                    return {"url": url,
+                            "error": f"refused to follow redirect to {current}: URL {why}"}
+                continue
+            return {"url": url, "final_url": current, "status": r.status_code,
+                    "headers": dict(r.headers), "body_snippet": r.text[:1500]}
+        return {"url": url, "error": f"stopped after {MAX_PROBE_REDIRECTS} redirects"}
     except requests.RequestException as e:
         return {"url": url, "error": str(e)}
 
@@ -1676,6 +1782,27 @@ def ai_detect_project(target_dir, job):
 
 def cmd_display(cmd):
     return cmd if isinstance(cmd, str) else " ".join(cmd)
+
+
+# Env vars holding this tool's own credentials. The auto-build feature runs
+# build/start commands that come from the scanned project itself (npm
+# postinstall hooks, Dockerfiles, arbitrary start scripts), so that code is
+# untrusted - handing it the server's full environment would leak the user's
+# GitHub token and LLM API key to any repo they scan.
+_SECRET_ENV_KEYS = {
+    "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "GITHUB_TOKEN",
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN",
+}
+
+
+def _sanitized_child_env():
+    """A copy of the environment with this tool's own secrets removed, for
+    subprocesses whose command line originates from scanned/untrusted code."""
+    env = os.environ.copy()
+    for key in list(env):
+        if key in _SECRET_ENV_KEYS or key.endswith(("_API_KEY", "_TOKEN", "_SECRET")):
+            env.pop(key, None)
+    return env
 
 
 def stream_subprocess(cmd, cwd, env, shell, job, prefix="", timeout=None):
@@ -2043,7 +2170,7 @@ def build_and_start_project(target_dir, job):
         det = _ensure_install_step(det, target_dir, job)
         run_cwd = Path(det.get("cwd") or target_dir)
         job["log"].append(f"Trying: {det['name']}" + (f" (from {run_cwd.name}/)" if run_cwd != Path(target_dir) else ""))
-        run_env = os.environ.copy()
+        run_env = _sanitized_child_env()
         run_env.update(det.get("env", {}))
         run_env["PYTHONIOENCODING"] = "utf-8"
 
@@ -2287,15 +2414,30 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             job["log"].append(f"Scanning folder in place (no upload): {target_dir}")
         elif files:
             upload_dir = Path(tempfile.mkdtemp())
+            upload_root = upload_dir.resolve()
+            rejected = 0
             for f in files:
                 rel_path = f.get("path", "").lstrip("/\\")
                 if not rel_path:
                     continue
                 dest = upload_dir / rel_path
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(f.get("content", ""), encoding="utf-8", errors="replace")
+                # Path traversal guard: the client controls these paths, and
+                # neither lstrip() nor pathlib stops "../.." from climbing out
+                # of the temp dir (on Windows an absolute "C:/..." entry even
+                # replaces the base entirely). Resolve and confirm the result
+                # is still inside the upload dir before writing anything.
+                try:
+                    resolved = dest.resolve()
+                    resolved.relative_to(upload_root)
+                except (ValueError, OSError):
+                    rejected += 1
+                    continue
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                resolved.write_text(f.get("content", ""), encoding="utf-8", errors="replace")
             target_dir = upload_dir
-            job["log"].append(f"Uploaded {len(files)} file(s) to scan: {target_dir}")
+            job["log"].append(f"Uploaded {len(files) - rejected} file(s) to scan: {target_dir}")
+            if rejected:
+                job["log"].append(f"Ignored {rejected} upload path(s) that pointed outside the scan folder.")
             _warn_missing_manifests(target_dir, job, auto_build and "web" in scan_types)
         else:
             job["log"].append(f"Cloning {repo}...")
@@ -2361,7 +2503,20 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             with open(json_out, "r", encoding="utf-8") as f:
                 report = json.load(f)
 
-            for finding in report.get("findings") or []:
+            # Drop detections inside this tool's own artifacts and editor/agent
+            # config. The external scanner has no reason to know about those,
+            # but they are pure noise: scan_history.json stores past findings'
+            # evidence verbatim, so scanning it re-reports every risky-looking
+            # line the tool has ever seen.
+            raw_findings = report.get("findings") or []
+            kept = [f for f in raw_findings if not _is_self_artifact(f.get("file"))]
+            if len(kept) != len(raw_findings):
+                job["log"].append(
+                    f"Ignored {len(raw_findings) - len(kept)} detection(s) inside this tool's own "
+                    "output or editor config (not application code).")
+            report["findings"] = kept
+
+            for finding in report["findings"]:
                 finding.setdefault("scan_type", classify_scan_type(finding))
 
             if use_ai:
@@ -2795,7 +2950,15 @@ def count_findings_by_severity(findings):
 
 
 DETAIL_BATCH_SIZE = 5      # findings per LLM call - small enough to stay specific
-DETAIL_MAX_FINDINGS = 250  # ceiling, so a pathological scan can't run forever
+DETAIL_MAX_FINDINGS = 0    # 0 = no cap: EVERY finding gets a write-up. Batches
+                           # run in parallel, so covering them all costs roughly
+                           # (batches / DETAIL_PARALLEL) rounds rather than the
+                           # sum of every call.
+DETAIL_PARALLEL = 8        # batches in flight at once. The batches are fully
+                           # independent, so running them sequentially made a
+                           # large report take the SUM of every call instead of
+                           # roughly the slowest one. Capped to stay polite to
+                           # the LLM endpoint's rate limits.
 DETAIL_RETRIES = 2         # a dropped batch means findings silently lose their write-up
 
 
@@ -2817,11 +2980,19 @@ def enrich_findings_with_detail(findings, log=None):
         return {}, ""
 
     order = {s: i for i, s in enumerate(SEVERITY_ORDER)}
+    # Detections the AI already judged false positives go to an appendix as a
+    # one-line row, so writing a six-paragraph analysis of each is pure waste -
+    # on the last dashboard scan that was 100+ of 178 findings, and it made the
+    # report both slower to produce and far harder to read.
+    candidates = [i for i in range(len(findings)) if not _is_dismissed(findings[i])]
     ranked = sorted(
-        range(len(findings)),
+        candidates,
         key=lambda i: order.get((findings[i].get("severity") or "").lower(), len(SEVERITY_ORDER)),
     )
-    selected = ranked[:DETAIL_MAX_FINDINGS]
+    # DETAIL_MAX_FINDINGS = 0 means no cap - every finding gets expanded.
+    # Ordering by severity still matters: it decides which write-ups land
+    # first, so the important ones are done even if a later batch fails.
+    selected = ranked if DETAIL_MAX_FINDINGS <= 0 else ranked[:DETAIL_MAX_FINDINGS]
 
     def payload_for(idx_list):
         out = []
@@ -2841,6 +3012,29 @@ def enrich_findings_with_detail(findings, log=None):
             })
         return out
 
+    def run_batch(chunk):
+        """Returns {finding_index: detail} for one batch. Kept free of shared
+        state so batches can run concurrently without locking."""
+        out = {}
+        raw = call_llm(client, model,
+                       json.dumps(payload_for(chunk), indent=2)[:REPORT_MAX_CHARS],
+                       system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
+        parsed = parse_json_response(raw)
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        for item in parsed or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                idx = int(str(item.get("id")))
+            except (TypeError, ValueError):
+                continue
+            # Only accept ids we actually asked about in this batch.
+            if idx in chunk and any((item.get(k) or "").strip()
+                                    for k in ("what", "why", "attack", "fix")):
+                out[idx] = item
+        return out
+
     details = {}
     pending = list(selected)
     for attempt in range(1, DETAIL_RETRIES + 2):
@@ -2849,33 +3043,26 @@ def enrich_findings_with_detail(findings, log=None):
         if attempt > 1 and log is not None:
             log(f"Retrying detailed analysis for {len(pending)} finding(s) that came back empty...")
         batches = [pending[i:i + DETAIL_BATCH_SIZE] for i in range(0, len(pending), DETAIL_BATCH_SIZE)]
-        for b, chunk in enumerate(batches, 1):
-            if log is not None and attempt == 1:
-                log(f"Writing detailed analysis: batch {b}/{len(batches)} ({len(chunk)} finding(s))...")
-            try:
-                raw = call_llm(client, model,
-                               json.dumps(payload_for(chunk), indent=2)[:REPORT_MAX_CHARS],
-                               system_prompt=VULN_DETAIL_SYSTEM_PROMPT)
-                parsed = parse_json_response(raw)
-                if isinstance(parsed, dict):
-                    parsed = [parsed]
-                for item in parsed or []:
-                    if not isinstance(item, dict):
-                        continue
-                    try:
-                        idx = int(str(item.get("id")))
-                    except (TypeError, ValueError):
-                        continue
-                    # Only accept ids we actually asked about in this batch.
-                    if idx in chunk and any((item.get(k) or "").strip()
-                                            for k in ("what", "why", "attack", "fix")):
-                        details[idx] = item
-            except Exception as e:
-                if log is not None:
-                    log(f"  detailed analysis failed for batch {b}: {e}")
+        if log is not None and attempt == 1:
+            log(f"Writing detailed analysis: {len(batches)} batch(es), "
+                f"up to {DETAIL_PARALLEL} at a time...")
+        done = 0
+        with ThreadPoolExecutor(max_workers=DETAIL_PARALLEL) as ex:
+            futures = {ex.submit(run_batch, chunk): chunk for chunk in batches}
+            for fut in as_completed(futures):
+                done += 1
+                try:
+                    details.update(fut.result())
+                except Exception as e:
+                    if log is not None:
+                        log(f"  detailed analysis failed for a batch: {e}")
+                if log is not None and attempt == 1:
+                    log(f"  detailed analysis: {done}/{len(batches)} batch(es) done")
         pending = [i for i in selected if i not in details]
 
-    skipped = len(findings) - len(selected)
+    # Dismissed detections are intentionally not expanded, so they must not be
+    # reported as a coverage gap - only a real cap counts as "skipped".
+    skipped = len(candidates) - len(selected)
     note = ""
     if pending or skipped:
         bits = []
@@ -2888,8 +3075,27 @@ def enrich_findings_with_detail(findings, log=None):
                         f"caps detailed write-ups at {DETAIL_MAX_FINDINGS}")
         note = "; ".join(bits) + "."
     if log is not None:
-        log(f"Detailed analysis written for {len(details)}/{len(selected)} selected finding(s).")
+        log(f"Detailed analysis written for {len(details)}/{len(selected)} finding(s).")
     return details, note
+
+
+def _flatten_detail_value(val):
+    """Collapses a detail field to a single clean line.
+
+    The model sometimes returns a fenced code block despite being told not
+    to. Fences don't survive this report's line-based markdown parser: the
+    ``` markers leaked onto the page as stray backticks and the code lost
+    its formatting anyway. Unwrapping them to inline code keeps the content
+    without the broken rendering.
+    """
+    text = str(val or "").strip()
+    if not text:
+        return ""
+    # ```lang\ncode\n``` -> `code`
+    text = re.sub(r"```[a-zA-Z0-9_+-]*\s*\n?(.*?)```", lambda m: "`" + " ".join(m.group(1).split()) + "`",
+                  text, flags=re.DOTALL)
+    text = text.replace("```", "")
+    return " ".join(text.split())
 
 
 def _detail_section(detail):
@@ -2897,14 +3103,32 @@ def _detail_section(detail):
     if not detail:
         return []
     out = []
-    for key, label in (("what", "What this is"), ("why", "Why it matters here"),
-                       ("attack", "How it could be exploited"), ("fix", "How to fix it"),
-                       ("verify", "How to verify the fix"),
-                       ("severity_note", "On the severity rating")):
-        val = (detail.get(key) or "").strip()
+    # Deliberately short: what / why / how to fix. "verify" and the severity
+    # commentary were dropped - with every finding expanded they roughly
+    # doubled the length of each entry without changing what a developer
+    # actually does about it. severity_note still surfaces below, but only
+    # when the model flags the rating as wrong.
+    for key, label in (("what", "What this is"), ("why", "Why it matters"),
+                       ("attack", "How it's exploited"), ("fix", "Fix")):
+        val = _flatten_detail_value(detail.get(key))
         if val:
             out.append(f"- **{label}:** {val}")
+    note = _flatten_detail_value(detail.get("severity_note"))
+    if note:
+        out.append(f"- **Severity note:** {note}")
     return out
+
+
+def _is_dismissed(f):
+    """True when the AI review judged this finding not to be a real issue, or
+    it was matched inside an obvious test fixture.
+
+    Deliberately conservative: only an explicit false-positive verdict counts.
+    An unreviewed finding, or one the AI confirmed, stays in the main report."""
+    verdict = str(f.get("ai_verdict") or "").strip().lower()
+    if verdict in ("false_positive", "false-positive", "falsepositive", "not_a_finding", "dismissed"):
+        return True
+    return bool(f.get("likely_test_fixture"))
 
 
 def build_findings_markdown(result, details=None, detail_note=""):
@@ -2915,7 +3139,17 @@ def build_findings_markdown(result, details=None, detail_note=""):
     grouped by severity (critical first) with a clear subsection per
     severity, so the document reads as an organized triage list rather
     than a flat dump."""
-    findings = result.get("findings", [])
+    all_findings = result.get("findings", [])
+
+    # Split off what the AI review already judged not to be a real problem.
+    # Mixing these in with genuine findings is what made a scan of 27 files
+    # produce a 64-page report whose first three "critical" entries were all
+    # test fixtures. They still belong in the document - a dismissal is a
+    # judgement call, not proof - but as a separate, compact appendix rather
+    # than at the top competing with real work.
+    findings = [f for f in all_findings if not _is_dismissed(f)]
+    dismissed = [f for f in all_findings if _is_dismissed(f)]
+
     counts = count_findings_by_severity(findings)
 
     category_counts = {}
@@ -2980,11 +3214,15 @@ def build_findings_markdown(result, details=None, detail_note=""):
     lines.append("|---|---|")
     lines.append(f"| Files scanned | {result.get('files_scanned', 'n/a')} |")
     lines.append(f"| Files with findings | {len(affected_files)} |")
-    lines.append(f"| Total findings | {total} |")
+    lines.append(f"| Raw detections | {len(all_findings)} |")
+    lines.append(f"| **Findings needing review** | **{total}** |")
+    if dismissed:
+        lines.append(f"| Dismissed as likely false positives | {len(dismissed)} "
+                     "(see appendix) |")
     if scan_types:
         lines.append(f"| Scan types | {', '.join(scan_types)} |")
     if ai_found:
-        lines.append(f"| Found by AI review | {ai_found} of {total} |")
+        lines.append(f"| Found by AI review | {ai_found} of {len(all_findings)} |")
     if result.get("exit_code") is not None:
         lines.append(f"| Scanner exit code | {result.get('exit_code')} |")
     lines.append("")
@@ -3080,23 +3318,9 @@ def build_findings_markdown(result, details=None, detail_note=""):
     # Contents: an index of every finding by number, so a 20-page report can be
     # navigated without scrolling through it. Built from the same ordering the
     # detail sections use, so the numbers line up exactly.
-    lines.append("## Contents")
-    lines.append("")
-    toc_n = 0
-    for sev in SEVERITY_ORDER + (["other"] if other else []):
-        group = other if sev == "other" else grouped[sev]
-        if not group:
-            continue
-        label = "Other" if sev == "other" else sev.capitalize()
-        lines.append(f"**{label} severity** ({len(group)})")
-        lines.append("")
-        for f in group:
-            toc_n += 1
-            cat = f.get("category") or f.get("rule") or "finding"
-            loc = loc_of(f)
-            lines.append(f"- **#{toc_n}** {cat} — {loc}")
-        lines.append("")
-
+    # No "Contents" index: it restated every finding a second time (about ten
+    # pages on a real scan) while the severity/category/hotspot tables above
+    # already give the overview, and each finding is numbered where it appears.
     lines.append("## Detailed Findings")
     lines.append("")
 
@@ -3146,6 +3370,53 @@ def build_findings_markdown(result, details=None, detail_note=""):
                 lines.append(verdict_line)
             if f.get("likely_test_fixture"):
                 lines.append("- _Likely a test fixture, not production code._")
+            lines.append("")
+
+    # --- Appendix: dismissed detections ----------------------------------
+    # Listed compactly, one row each. These were judged not to be real issues,
+    # so a full write-up per entry would bury the report in exactly the noise
+    # this section exists to move out of the way - but they stay visible,
+    # because a dismissal is a judgement call and can be wrong.
+    if dismissed:
+        lines.append("## Appendix — Possible False Positives")
+        lines.append("")
+        lines.append(f"{len(dismissed)} detection(s) were dismissed by AI review or matched "
+                     "inside test fixtures, and are excluded from the counts above. They are "
+                     "listed here rather than dropped: this is a best guess, not proof, so "
+                     "scan the list before trusting it.")
+        lines.append("")
+
+        by_file = {}
+        for f in dismissed:
+            by_file.setdefault(f.get("file") or "unknown", []).append(f)
+
+        def worst_rank(group):
+            return min(
+                (SEVERITY_ORDER.index((g.get("severity") or "").lower())
+                 if (g.get("severity") or "").lower() in SEVERITY_ORDER else len(SEVERITY_ORDER))
+                for g in group
+            )
+
+        for fname, group in sorted(by_file.items(), key=lambda kv: (worst_rank(kv[1]), -len(kv[1]))):
+            group = sorted(
+                group,
+                key=lambda g: SEVERITY_ORDER.index((g.get("severity") or "").lower())
+                if (g.get("severity") or "").lower() in SEVERITY_ORDER else len(SEVERITY_ORDER),
+            )
+            lines.append(f"### {fname} ({len(group)} dismissed)")
+            lines.append("")
+            lines.append("| Line | Severity | Category | Why it was dismissed |")
+            lines.append("|---|---|---|---|")
+            for f in group:
+                line_no = f.get("line")
+                reason = (f.get("ai_reason") or
+                          ("Matched inside a test fixture" if f.get("likely_test_fixture")
+                           else "Dismissed by AI review"))
+                reason = str(reason).replace("|", "\\|")
+                cat = (f.get("category") or f.get("rule") or "uncategorized").replace("|", "\\|")
+                lines.append(f"| {line_no if line_no not in (None, '') else '—'} "
+                             f"| {(f.get('severity') or 'unknown').capitalize()} "
+                             f"| {cat} | {reason} |")
             lines.append("")
 
     return "\n".join(lines)
@@ -3198,8 +3469,14 @@ def parse_markdown_blocks(md_text):
     return blocks
 
 
+# Single-asterisk emphasis, matched only when it isn't part of a ** pair.
+# Applied after bold so "**x**" is already consumed by then.
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)")
+
+
 def strip_md_inline(text):
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = _MD_ITALIC_RE.sub(r"\1", text)
     text = re.sub(r"`(.+?)`", r"\1", text)
     return text
 
@@ -3491,8 +3768,14 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         c.line(0.75 * inch, 0.54 * inch, W - 0.75 * inch, 0.54 * inch)
         c.setFillColor(C_MUTED)
         c.setFont(F_REG, 7.5)
+        # The full subtitle carries an absolute path plus counts plus a
+        # timestamp - repeating all of it on every page is noise. The cover
+        # already states it in full, so the footer keeps just the target.
         sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
-        c.drawString(0.75 * inch, 0.36 * inch, sub)
+        short_sub = sub.split(" - ")[0].strip()
+        if len(short_sub) > 70:
+            short_sub = "..." + short_sub[-67:]
+        c.drawString(0.75 * inch, 0.36 * inch, short_sub)
         c.drawRightString(W - 0.75 * inch, 0.36 * inch, f"Page {doc.page}")
         c.restoreState()
 
@@ -3539,6 +3822,9 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         source text can inject reportlab markup."""
         out = xml_escape(_ascii_fallback(_html.unescape(text or ""), ASCII_ONLY))
         out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
+        # Without this, the model's *emphasis* reached the page as literal
+        # asterisks ("*Why it matters:*").
+        out = _MD_ITALIC_RE.sub(r"<i>\1</i>", out)
         out = re.sub(r"`(.+?)`", rf'<font face="{F_MONO}" size="8.5">\1</font>', out)
         return out
 
@@ -3554,9 +3840,18 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         rows = [list(r) + [""] * (ncols - len(r)) for r in rows]
         has_header = any(c.strip() for c in rows[0]) and len(rows) > 1
 
-        first_w = min(2.9 * inch, CNTW * 0.42)
-        rest_w = (CNTW - first_w) / max(1, ncols - 1) if ncols > 1 else 0
-        col_widths = [first_w] + [rest_w] * (ncols - 1)
+        # A key/value table wants a narrow label column, but a two-column
+        # index of findings wants even halves - decide from how much text the
+        # first column actually carries rather than assuming it's a label.
+        body_rows = rows[1:] if has_header else rows
+        avg_first = (sum(len(r[0]) for r in body_rows) / len(body_rows)) if body_rows else 0
+        if avg_first > 25:
+            col_widths = [CNTW / ncols] * ncols
+            rest_w = CNTW / ncols
+        else:
+            first_w = min(2.9 * inch, CNTW * 0.42)
+            rest_w = (CNTW - first_w) / max(1, ncols - 1) if ncols > 1 else 0
+            col_widths = [first_w] + [rest_w] * (ncols - 1)
 
         def _bar(units):
             """A run of block characters is a text bar chart in the source; in
@@ -3653,23 +3948,59 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
             ("RIGHTPADDING",  (1, 0), (1,  -1), 8),
         ]))
 
+        # A Paragraph inside a table cell cannot be split by reportlab, so a
+        # single very long value (a verbose AI write-up, a huge minified
+        # evidence line) would be an unsplittable flowable taller than the
+        # page and abort the whole document. Splitting the RAW text into
+        # page-sized chunks first keeps every row small enough to lay out.
+        CHUNK = 1400
+
+        def _chunk_raw(raw):
+            raw = raw or ""
+            if len(raw) <= CHUNK:
+                return [raw]
+            out, rest = [], raw
+            while len(rest) > CHUNK:
+                cut = rest.rfind(" ", 0, CHUNK)
+                if cut <= 0:
+                    cut = CHUNK
+                out.append(rest[:cut])
+                rest = rest[cut:].lstrip()
+            if rest:
+                out.append(rest)
+            return out
+
         body_paras = []
         for bkind, btext in card_blocks:
+            # A pipe-table can land inside a card when AI-written prose happens
+            # to contain "|" characters. btext is then a list of rows, so it
+            # must be flattened before any string handling below.
+            if bkind == "table" or not isinstance(btext, str):
+                for row in (btext if isinstance(btext, list) else []):
+                    cells = [c for c in row if str(c).strip()]
+                    if cells:
+                        body_paras.append(Paragraph(_rich(" | ".join(str(c) for c in cells)), S_FBOD))
+                continue
             lbl_m = re.match(r"^\*\*(.+?):\*\*\s*(.*)", btext)
             if lbl_m and bkind == "bullet":
                 lbl = xml_escape(lbl_m.group(1))
-                val = _rich(lbl_m.group(2))
                 # Evidence / code lines get monospace treatment
                 if lbl_m.group(1).lower() in ("evidence", "code"):
                     body_paras.append(Paragraph(f'<b>{lbl}:</b>', S_FBOD))
-                    body_paras.append(Paragraph(
-                        xml_escape(_ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY)),
-                        S_FCOD))
+                    raw_code = _ascii_fallback(_html.unescape(strip_md_inline(lbl_m.group(2))), ASCII_ONLY)
+                    for piece in _chunk_raw(raw_code):
+                        body_paras.append(Paragraph(xml_escape(piece), S_FCOD))
                 else:
-                    body_paras.append(Paragraph(f'<b>{lbl}:</b>  {val}', S_FBOD))
+                    pieces = _chunk_raw(lbl_m.group(2))
+                    body_paras.append(Paragraph(f'<b>{lbl}:</b>  {_rich(pieces[0])}', S_FBOD))
+                    for piece in pieces[1:]:
+                        body_paras.append(Paragraph(_rich(piece), S_FBOD))
             else:
                 prefix = "• " if bkind == "bullet" else ""
-                body_paras.append(Paragraph(prefix + _rich(btext), S_FBOD))
+                pieces = _chunk_raw(btext)
+                body_paras.append(Paragraph(prefix + _rich(pieces[0]), S_FBOD))
+                for piece in pieces[1:]:
+                    body_paras.append(Paragraph(_rich(piece), S_FBOD))
 
         # The card's border is drawn per-section rather than by wrapping the
         # whole thing in an outer Table. A KeepTogether nested inside a table
@@ -3683,13 +4014,19 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
 
         elements = [hdr]
         if body_paras:
-            body_tbl = Table([[body_paras]], colWidths=[CNTW])
+            # One row PER paragraph, not one cell holding them all. reportlab
+            # can only split a table between rows - a single row taller than
+            # the page raises LayoutError and kills the whole document, which
+            # is exactly what a long AI write-up produces.
+            body_tbl = Table([[p] for p in body_paras], colWidths=[CNTW], repeatRows=0)
             body_tbl.setStyle(TableStyle([
                 ("BACKGROUND",    (0, 0), (-1, -1), bg),
                 ("LEFTPADDING",   (0, 0), (-1, -1), 10),
                 ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
-                ("TOPPADDING",    (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING",    (0, 0), (0, 0), 8),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 8),
+                ("TOPPADDING",    (0, 1), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -2), 1),
                 ("VALIGN",        (0, 0), (-1, -1), "TOP"),
                 ("LINEBEFORE",    (0, 0), (0, -1), 1, fg),
                 ("LINEAFTER",     (-1, 0), (-1, -1), 1, fg),
@@ -3699,8 +4036,12 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         else:
             hdr.setStyle(TableStyle([("LINEBELOW", (0, -1), (-1, -1), 1, fg)]))
 
-        # KeepTogether at the top level is fine - it only breaks inside a cell.
-        return [Spacer(1, 6), KeepTogether(elements)]
+        # Only keep the card intact when it's short enough to actually fit on
+        # one page; forcing KeepTogether on a long card re-creates the same
+        # unsplittable-flowable crash it's meant to avoid.
+        if len(body_paras) <= 6:
+            return [Spacer(1, 6), KeepTogether(elements)]
+        return [Spacer(1, 6)] + elements
 
     # ── Pre-group blocks: flatten h4 + following bullets into finding cards ─
     raw_blocks = parse_markdown_blocks(md_text)
@@ -3846,7 +4187,7 @@ def _report_filename(label, timestamp, ext):
     try:
         stamp = datetime.fromtimestamp(float(timestamp)).strftime("%Y-%m-%d_%H%M")
     except (TypeError, ValueError, OSError):
-        stamp = datetime.utcnow().strftime("%Y-%m-%d_%H%M")
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
 
     return f"{slug}_{stamp}_vuln-report.{ext}"
 
@@ -3909,12 +4250,22 @@ def vuln_scan_report():
     if not client:
         return jsonify({"error": "LLM_API_KEY is not configured on the server."}), 500
 
-    counts = count_findings_by_severity(findings)
+    # Everything below describes findings that still need review. Dismissed
+    # detections are summarised in an appendix, and must not drive the cover
+    # page, the subtitle, or the AI narrative - feeding the model 139 known
+    # false positives is what made it open a remediation plan with "replace
+    # eval() at scan_history.json:89", a line inside its own saved scan data.
+    review_findings = [f for f in findings if not _is_dismissed(f)]
+    dismissed_count = len(findings) - len(review_findings)
+    counts = count_findings_by_severity(review_findings)
+
     summary_payload = {
         "files_scanned": result.get("files_scanned"),
         "exit_code": result.get("exit_code"),
         "counts": counts,
-        "findings": findings,
+        "total_raw_detections": len(findings),
+        "dismissed_as_false_positive": dismissed_count,
+        "findings": review_findings,
     }
     findings_json = json.dumps(summary_payload, indent=2)[:REPORT_MAX_CHARS]
     try:
@@ -3937,9 +4288,11 @@ def vuln_scan_report():
     # Name the target in the subtitle too, so an open report identifies itself
     # without needing the filename.
     target_bit = f"{scan_label} &middot; " if scan_label else ""
+    dismissed_bit = f" ({dismissed_count} dismissed)" if dismissed_count else ""
     subtitle = (
-        f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned &middot; {len(findings)} findings "
-        f"&middot; generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+        f"{target_bit}{result.get('files_scanned', 'n/a')} files scanned "
+        f"&middot; {len(review_findings)} findings to review{dismissed_bit} "
+        f"&middot; generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     subtitle_plain = subtitle.replace("&middot;", "-")
 

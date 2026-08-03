@@ -17,232 +17,491 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
 
+  /* ==========================================================================
+     Design system.
+
+     Before this existed the stylesheet carried 13 distinct font sizes, 10
+     border radii, 6 font weights and 33 padding values, with another 11 font
+     sizes set inline. Values that close together aren't decisions, they're
+     drift - and drift is what makes an interface look unconsidered no matter
+     how good the individual screens are.
+
+     Everything below picks from these scales. If a value isn't on a scale,
+     that's a bug, not a special case.
+     ====================================================================== */
   :root {
-    --bg: #f4f5fb;
-    --bg-dot: rgba(79,70,229,0.09);
+    /* Type: 7 steps. --step-base is body copy; everything else earns its size. */
+    --text-2xs: 10px;   /* uppercase micro-labels only */
+    --text-xs:  11px;
+    --text-sm:  12px;
+    --text-base:13px;   /* default UI text */
+    --text-md:  14px;
+    --text-lg:  16px;   /* card and section titles */
+    --text-xl:  20px;
+    --text-2xl: 24px;   /* metric figures */
+
+    /* Weight: 4 steps. 550/650/800 were invisible half-steps. */
+    --weight-normal:   400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+
+    /* Space: a 4px base, doubling. Every gap and padding snaps to this. */
+    --space-1: 2px;
+    --space-2: 4px;
+    --space-3: 8px;
+    --space-4: 12px;
+    --space-5: 16px;
+    --space-6: 24px;
+    --space-7: 32px;
+    --space-8: 48px;
+
+    /* Radius: 4 steps, plus a pill. */
+    --radius-sm:  4px;
+    --radius-md:  6px;
+    --radius-lg:  8px;
+    --radius-xl: 12px;
+    --radius-pill: 999px;
+
+    /* Line height */
+    --leading-tight:  1.25;
+    --leading-normal: 1.5;
+    --leading-relaxed:1.65;
+  }
+
+  /* Palette: a neutral slate base with one accent, used sparingly. A security
+     dashboard is read for a long time and often shown to other people, so the
+     surface stays quiet and colour is reserved for meaning - severity, state,
+     the single primary action. */
+  :root {
+    /* Neutrals carry a slight blue cast rather than being pure grey - it
+       reads as deliberate rather than unfinished, and makes the accent sit
+       in the same family instead of looking bolted on. */
+    --bg: #eef1f7;
+    --bg-dot: transparent;
     --surface: #ffffff;
-    --surface-alt: #f8f7ff;
-    --border: #e5e5e5;
-    --border-soft: #e5e5ef;
-    --text-primary: #1a1a1a;
-    --text-secondary: #4b5563;
-    --text-tertiary: #333333;
-    --text-muted: #9ca3af;
-    --text-faint: #888888;
+    --surface-alt: #f1f4f9;
+    --border: #d5dded;
+    --border-soft: #dfe6f2;
+    --text-primary: #0f1729;
+    --text-secondary: #4d586b;
+    --text-tertiary: #27324a;
+    /* Kept at >=4.5:1 on white. These carry real content - hints, metric
+       labels, timestamps - so they can't drop to decorative grey. */
+    --text-muted: #64708a;
+    --text-faint: #64708a;
     --input-bg: #ffffff;
-    --input-border: #d0d0e0;
-    --code-bg: #f3f4f6;
-    --shadow-soft: rgba(20,20,50,0.04);
-    --shadow-card: rgba(0,0,0,0.07);
-    --divider: #f0f0f0;
-    --segmented-bg: #eef0f7;
-    --accent-text: #3730a3;
-    --sidebar-gradient: linear-gradient(180deg,#1e1b4b,#312e81);
-    --header-gradient:
-      radial-gradient(circle at 18% -20%, rgba(255,255,255,0.28), transparent 45%),
-      radial-gradient(circle at 92% 0%, rgba(217,70,239,0.55), transparent 45%),
-      radial-gradient(circle at 60% 120%, rgba(56,189,248,0.35), transparent 50%),
-      linear-gradient(135deg,#4338ca,#6d28d9 55%,#a21caf 100%);
-    --header-shadow: rgba(67,56,202,0.28);
-    --hero-gradient: linear-gradient(135deg,#4f46e5,#7c3aed);
+    --input-border: #cfd7e5;
+    --code-bg: #eff2f8;
+    /* Two-layer elevation: a tight contact shadow plus a wider ambient one.
+       A single flat shadow is what makes cards look pasted on. */
+    --shadow-soft: rgba(15,23,41,0.05);
+    --shadow-card: rgba(15,23,41,0.07);
+    --elev-1: 0 1px 2px rgba(15,23,41,0.07), 0 1px 3px rgba(15,23,41,0.05);
+    --elev-2: 0 2px 4px rgba(15,23,41,0.07), 0 6px 16px rgba(15,23,41,0.10);
+    --elev-3: 0 10px 30px rgba(15,23,41,0.13), 0 2px 6px rgba(15,23,41,0.08);
+    --divider: #e2e8f3;
+    --segmented-bg: #e9eef7;
+    --accent: #0284c7;
+    --accent-hover: #0369a1;
+    --accent-soft: #e6f3fc;
+    --accent-text: #0369a1;
+    --accent-glow: rgba(2,132,199,0.22);
+    --accent-gradient: linear-gradient(135deg, #0284c7, #0ea5e9);
+    /* Slate-blue rail. Text, hover, active and the brand mark all derive
+       from it, so changing --sidebar-bg alone restyles the whole rail. */
+    --sidebar-bg: linear-gradient(170deg, #334155 0%, #1e293b 100%);
+    --sidebar-border: rgba(255,255,255,0.14);
+    --sidebar-fg: #ffffff;
+    --sidebar-fg-active: #ffffff;
+    --sidebar-fg-muted: rgba(255,255,255,0.70);
+    --sidebar-item-hover: rgba(255,255,255,0.10);
+    --sidebar-item-active: rgba(56,189,248,0.24);
+    --sidebar-shadow: 2px 0 14px rgba(30,41,59,0.20);
+    --sidebar-mark-bg: #38bdf8;
+    --sidebar-mark-fg: #0f172a;
+    --header-bg: #ffffff;
+    --header-shadow: rgba(15,23,41,0.06);
+    --hero-bg: linear-gradient(135deg, #eef1fb 0%, #f5f7fb 60%);
+    --hero-text: #0f1729;
+    /* Light theme keeps a LIGHT header. A dark slab across the top of an
+       otherwise white page dominated it and left the content looking washed
+       out; the tint carries the accent without taking over. */
+    --header-surface: linear-gradient(135deg, #e9f2fb 0%, #f4f8fd 55%, #ffffff 100%);
+    --header-border: #d5e2f0;
+    --header-grid: rgba(15,23,41,0.035);
+    --header-aurora-1: rgba(14,165,233,0.22);
+    --header-aurora-2: rgba(2,132,199,0.16);
+    --header-aurora-3: rgba(99,102,241,0.14);
+    --header-fg: #0f1729;
+    --header-fg-muted: #56617a;
+    --header-fg-faint: #8792a8;
+    --header-eyebrow: #0369a1;
+    --header-field-bg: rgba(255,255,255,0.85);
+    --header-field-bg-hover: #ffffff;
+    --header-field-border: #d2e0ee;
+    --sev-critical-fg: #b42318;
+    --sev-high-fg: #b54708;
     color-scheme: light;
   }
   :root[data-theme="dark"] {
-    --bg: #0f1117;
-    --bg-dot: rgba(129,140,248,0.10);
-    --surface: #1a1c26;
-    --surface-alt: #21232f;
-    --border: #2c2f3d;
-    --border-soft: #2c2f3d;
-    --text-primary: #f1f2f6;
-    --text-secondary: #c3c6d4;
-    --text-tertiary: #d2d4e0;
-    --text-muted: #8b8fa3;
-    --text-faint: #8b8fa3;
-    --input-bg: #21232f;
-    --input-border: #383b4d;
-    --code-bg: #262835;
-    --shadow-soft: rgba(0,0,0,0.25);
-    --shadow-card: rgba(0,0,0,0.4);
-    --divider: #2c2f3d;
-    --segmented-bg: #21232f;
-    --accent-text: #b4b0f8;
-    --sidebar-gradient: linear-gradient(180deg,#0a0a14,#161329);
-    --header-gradient:
-      radial-gradient(circle at 18% -20%, rgba(255,255,255,0.10), transparent 45%),
-      radial-gradient(circle at 92% 0%, rgba(190,60,220,0.28), transparent 45%),
-      radial-gradient(circle at 60% 120%, rgba(56,120,189,0.20), transparent 50%),
-      linear-gradient(135deg,#221c4a,#3b1e63 55%,#551a52 100%);
+    /* Same blue-cast neutrals as light, pushed dark. Pure #000-family greys
+       go muddy under a saturated accent. */
+    --bg: #090d16;
+    --bg-dot: transparent;
+    --surface: #131a28;
+    --surface-alt: #19212f;
+    --border: #263047;
+    --border-soft: #212a3d;
+    --text-primary: #e8ecf5;
+    --text-secondary: #a2adc2;
+    --text-tertiary: #c4cddd;
+    --text-muted: #8592aa;
+    --text-faint: #8592aa;
+    --input-bg: #19212f;
+    --input-border: #313c55;
+    --code-bg: #19212f;
+    --shadow-soft: rgba(0,0,0,0.35);
+    --shadow-card: rgba(0,0,0,0.5);
+    --elev-1: 0 1px 2px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3);
+    --elev-2: 0 2px 4px rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.45);
+    --elev-3: 0 8px 24px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.4);
+    --divider: #222b3d;
+    --segmented-bg: #19212f;
+    --accent: #38bdf8;
+    --accent-hover: #7dd3fc;
+    --accent-soft: #0c2436;
+    --accent-text: #7dd3fc;
+    --accent-glow: rgba(56,189,248,0.26);
+    --accent-gradient: linear-gradient(135deg, #0284c7, #38bdf8);
+    --sidebar-bg: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    --sidebar-border: #2b3a4f;
+    --sidebar-shadow: none;
+    --sidebar-mark-bg: #38bdf8;
+    --sidebar-mark-fg: #0f172a;
+    --sidebar-fg: #ffffff;
+    --sidebar-fg-active: #ffffff;
+    --sidebar-fg-muted: rgba(255,255,255,0.55);
+    --sidebar-item-hover: rgba(255,255,255,0.05);
+    --sidebar-item-active: rgba(255,255,255,0.07);
+    --header-bg: #131a28;
     --header-shadow: rgba(0,0,0,0.45);
-    --hero-gradient: linear-gradient(135deg,#2e2a6b,#4c2f82);
+    --hero-bg: linear-gradient(135deg, #161f33 0%, #111828 60%);
+    --hero-text: #e8ecf5;
+    --header-surface: linear-gradient(135deg, #1e293b 0%, #172032 45%, #0f172a 100%);
+    --header-border: rgba(255,255,255,0.08);
+    --header-grid: rgba(255,255,255,0.05);
+    --header-aurora-1: rgba(56,189,248,0.48);
+    --header-aurora-2: rgba(2,132,199,0.36);
+    --header-aurora-3: rgba(99,102,241,0.28);
+    --header-fg: #ffffff;
+    --header-fg-muted: rgba(226,232,255,0.72);
+    --header-fg-faint: rgba(226,232,255,0.55);
+    --header-eyebrow: #7dd3fc;
+    --header-field-bg: rgba(255,255,255,0.10);
+    --header-field-bg-hover: rgba(255,255,255,0.16);
+    --header-field-border: rgba(255,255,255,0.18);
+    --sev-critical-fg: #ff8f8f;
+    --sev-high-fg: #ffc078;
     color-scheme: dark;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #0f1117;
-      --bg-dot: rgba(129,140,248,0.10);
-      --surface: #1a1c26;
-      --surface-alt: #21232f;
-      --border: #2c2f3d;
-      --border-soft: #2c2f3d;
-      --text-primary: #f1f2f6;
-      --text-secondary: #c3c6d4;
-      --text-tertiary: #d2d4e0;
-      --text-muted: #8b8fa3;
-      --text-faint: #8b8fa3;
-      --input-bg: #21232f;
-      --input-border: #383b4d;
-      --code-bg: #262835;
-      --shadow-soft: rgba(0,0,0,0.25);
-      --shadow-card: rgba(0,0,0,0.4);
-      --divider: #2c2f3d;
-      --segmented-bg: #21232f;
-      --accent-text: #b4b0f8;
-      --sidebar-gradient: linear-gradient(180deg,#0a0a14,#161329);
-      --header-gradient:
-        radial-gradient(circle at 18% -20%, rgba(255,255,255,0.10), transparent 45%),
-        radial-gradient(circle at 92% 0%, rgba(190,60,220,0.28), transparent 45%),
-        radial-gradient(circle at 60% 120%, rgba(56,120,189,0.20), transparent 50%),
-        linear-gradient(135deg,#221c4a,#3b1e63 55%,#551a52 100%);
+      /* Mirrors :root[data-theme="dark"] exactly - if these drift, the OS
+         dark-mode fallback silently renders a different palette. */
+      --bg: #090d16;
+      --bg-dot: transparent;
+      --surface: #131a28;
+      --surface-alt: #19212f;
+      --border: #263047;
+      --border-soft: #212a3d;
+      --text-primary: #e8ecf5;
+      --text-secondary: #a2adc2;
+      --text-tertiary: #c4cddd;
+      --text-muted: #8592aa;
+      --text-faint: #8592aa;
+      --input-bg: #19212f;
+      --input-border: #313c55;
+      --code-bg: #19212f;
+      --shadow-soft: rgba(0,0,0,0.35);
+      --shadow-card: rgba(0,0,0,0.5);
+      --elev-1: 0 1px 2px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3);
+      --elev-2: 0 2px 4px rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.45);
+      --elev-3: 0 8px 24px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.4);
+      --divider: #222b3d;
+      --segmented-bg: #19212f;
+      --accent: #38bdf8;
+      --accent-hover: #7dd3fc;
+      --accent-soft: #0c2436;
+      --accent-text: #7dd3fc;
+      --accent-glow: rgba(56,189,248,0.26);
+      --accent-gradient: linear-gradient(135deg, #0284c7, #38bdf8);
+      --sidebar-bg: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+      --sidebar-border: #2b3a4f;
+      --sidebar-shadow: none;
+      --sidebar-mark-bg: #38bdf8;
+      --sidebar-mark-fg: #0f172a;
+    --sidebar-mark-bg: #38bdf8;
+    --sidebar-mark-fg: #0f172a;
+      --sidebar-fg: #ffffff;
+      --sidebar-fg-active: #ffffff;
+      --sidebar-fg-muted: rgba(255,255,255,0.55);
+      --sidebar-item-hover: rgba(255,255,255,0.05);
+      --sidebar-item-active: rgba(255,255,255,0.07);
+      --header-bg: #131a28;
       --header-shadow: rgba(0,0,0,0.45);
-      --hero-gradient: linear-gradient(135deg,#2e2a6b,#4c2f82);
+      --hero-bg: linear-gradient(135deg, #161f33 0%, #111828 60%);
+      --hero-text: #e8ecf5;
+      --header-surface: linear-gradient(135deg, #1e293b 0%, #172032 45%, #0f172a 100%);
+      --header-border: rgba(255,255,255,0.08);
+      --header-grid: rgba(255,255,255,0.05);
+      --header-aurora-1: rgba(56,189,248,0.48);
+      --header-aurora-2: rgba(2,132,199,0.36);
+      --header-aurora-3: rgba(99,102,241,0.28);
+      --header-fg: #ffffff;
+      --header-fg-muted: rgba(226,232,255,0.72);
+      --header-fg-faint: rgba(226,232,255,0.55);
+      --header-eyebrow: #7dd3fc;
+      --header-field-bg: rgba(255,255,255,0.10);
+      --header-field-bg-hover: rgba(255,255,255,0.16);
+      --header-field-border: rgba(255,255,255,0.18);
+      --sev-critical-fg: #ff8f8f;
+      --sev-high-fg: #ffc078;
       color-scheme: dark;
     }
   }
 
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: var(--text-primary);
+    /* Flat background. The decorative gradient wash and dot grid competed with
+       the data sitting on top of them. */
     background-color: var(--bg);
-    background-image:
-      radial-gradient(circle at 12% 0%, rgba(124,58,237,0.08), transparent 42%),
-      radial-gradient(circle at 88% 8%, rgba(79,70,229,0.07), transparent 38%),
-      radial-gradient(circle at 50% 100%, rgba(168,85,247,0.05), transparent 45%),
-      radial-gradient(var(--bg-dot) 1px, transparent 1.4px);
-    background-size: auto, auto, auto, 26px 26px;
-    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   .app-shell { display: flex; align-items: stretch; min-height: 100vh; }
-  .sidebar { width: 72px; flex-shrink: 0; background: var(--sidebar-gradient); display: flex; flex-direction: column; padding: 1.4rem 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease, background 0.2s ease; z-index: 30; }
-  .sidebar:hover, .sidebar:focus-within { width: 226px; overflow: visible; }
-  .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 22px 1.5rem; white-space: nowrap; }
-  .sidebar-brand-mark { width: 34px; height: 34px; border-radius: 9px; background: #fff; color: #4f46e5; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex-shrink: 0; }
-  .sidebar-brand-text { color: #fff; font-weight: 700; font-size: 14px; opacity: 0; transition: opacity 0.15s ease; }
-  .sidebar:hover .sidebar-brand-text { opacity: 1; }
-  .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
-  .nav-item { display: flex; align-items: center; gap: 14px; padding: 12px 22px; color: rgba(255,255,255,0.62); cursor: pointer; white-space: nowrap; position: relative; font-size: 14px; font-weight: 600; transition: background 0.15s ease, color 0.15s ease; }
-  .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
-  .nav-item.active { color: #fff; background: rgba(255,255,255,0.12); }
-  .nav-item.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; background: #a855f7; border-radius: 0 4px 4px 0; }
+  .sidebar { width: 72px; flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); box-shadow: var(--sidebar-shadow); display: flex; flex-direction: column; padding: var(--space-6) 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; transition: width 0.18s ease, background 0.2s ease; z-index: 30; }
+  /* Expand on hover, or on KEYBOARD focus only. Plain :focus-within meant
+     clicking anything focusable in here (the theme toggle is a real button)
+     left the rail pinned open until you clicked elsewhere - the "stuck"
+     sidebar. :focus-visible doesn't latch on mouse clicks. */
+  .sidebar:hover, .sidebar.kbd-open { width: 226px; overflow: visible; }
+  .sidebar-brand { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-6) var(--space-6); white-space: nowrap; }
+  .sidebar-brand-mark { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--sidebar-mark-bg); color: var(--sidebar-mark-fg); display: flex; align-items: center; justify-content: center; font-weight: var(--weight-bold); font-size: var(--text-sm); flex-shrink: 0; letter-spacing: 0.02em; }
+  .sidebar-brand-text { color: var(--sidebar-fg); font-weight: var(--weight-bold); font-size: var(--text-md); opacity: 0; transition: opacity 0.15s ease; }
+  .sidebar:hover .sidebar-brand-text,
+  .sidebar.kbd-open .sidebar-brand-text { opacity: 1; }
+  .sidebar-nav { display: flex; flex-direction: column; gap: var(--space-1); }
+  .nav-item { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: var(--sidebar-fg-muted); cursor: pointer; white-space: nowrap; position: relative; font-size: var(--text-md); font-weight: var(--weight-medium); transition: background 0.15s ease, color 0.15s ease; }
+  .nav-item:hover { background: var(--sidebar-item-hover); color: var(--sidebar-fg); }
+  .nav-item.active { color: var(--sidebar-fg-active); background: var(--sidebar-item-active); font-weight: var(--weight-semibold); }
+  .nav-item.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; background: var(--accent); border-radius: 0 3px 3px 0; }
   .nav-icon { width: 20px; height: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
   .nav-icon svg { width: 20px; height: 20px; }
   .nav-label { opacity: 0; transform: translateX(-6px); transition: opacity 0.15s ease, transform 0.15s ease; }
-  .sidebar:hover .nav-label { opacity: 1; transform: translateX(0); }
+  .sidebar:hover .nav-label,
+  .sidebar.kbd-open .nav-label { opacity: 1; transform: translateX(0); }
 
-  .main-content { flex: 1; min-width: 0; max-width: 1300px; padding: 0 2rem 4rem; }
+  .main-content { flex: 1; min-width: 0; max-width: 1300px; padding: 0 var(--space-6) var(--space-8); }
 
   .username-field { position: relative; }
-  .username-suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 240px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 10px; box-shadow: 0 10px 24px rgba(20,20,50,0.12); z-index: 40; overflow: hidden; }
+  .username-suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 240px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); box-shadow: 0 10px 24px rgba(20,20,50,0.12); z-index: 40; overflow: hidden; }
   .username-suggestions.open { display: block; }
-  .username-suggestion { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  .username-suggestion { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); cursor: pointer; font-size: var(--text-base); color: var(--text-secondary); }
   .username-suggestion:hover, .username-suggestion.highlighted { background: var(--surface-alt); color: #3730a3; }
   .username-suggestion img { width: 22px; height: 22px; border-radius: 50%; }
 
-  .repo-toolbar { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 12px; padding: 0.9rem 1.1rem; box-shadow: 0 1px 4px var(--shadow-soft); }
+  .repo-toolbar { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-xl); padding: var(--space-4) var(--space-5); box-shadow: 0 1px 4px var(--shadow-soft); }
 
-  .hero-block { background: var(--hero-gradient); border-radius: 14px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; color: #fff; transition: background 0.2s ease; }
-  .hero-block-title { font-size: 16px; font-weight: 700; }
-  .hero-block-desc { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+  .hero-block { background: none; border: none; border-left: 2px solid var(--accent); border-radius: 0; padding: 0 0 0 var(--space-4); margin-bottom: 1.25rem; color: var(--hero-text); }
+  .hero-block-title { font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: -0.01em; }
+  .hero-block-desc { font-size: var(--text-sm); color: var(--text-muted); margin-top: 2px; }
 
-  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d1d5db; border-top-color: #4f46e5; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 7px; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d1d5db; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 7px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .simple-steps { display: flex; flex-direction: column; gap: 9px; }
-  .simple-step { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text-secondary); }
+  .simple-steps { display: flex; flex-direction: column; gap: var(--space-3); }
+  .simple-step { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-md); color: var(--text-secondary); }
   .simple-step-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .simple-step-dot-done { background: #22c55e; }
-  .simple-step-dot-active { background: #4f46e5; box-shadow: 0 0 0 4px rgba(79,70,229,0.18); animation: pulse-dot 1.2s ease-in-out infinite; }
+  .simple-step-dot-active { background: var(--accent); box-shadow: 0 0 0 4px rgba(79,70,229,0.18); animation: pulse-dot 1.2s ease-in-out infinite; }
   .simple-step-dot-warn { background: #f59e0b; }
   @keyframes pulse-dot { 0%, 100% { box-shadow: 0 0 0 4px rgba(79,70,229,0.18); } 50% { box-shadow: 0 0 0 7px rgba(79,70,229,0.1); } }
 
-  .empty-state { text-align: center; padding: 3.5rem 2rem; border: 1.5px dashed var(--border-soft); border-radius: 16px; background: var(--surface-alt); }
+  .empty-state { text-align: center; padding: var(--space-7) var(--space-6); border: 1.5px dashed var(--border-soft); border-radius: var(--radius-xl); background: var(--surface-alt); }
   .empty-state-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%; background: var(--surface-alt); color: #a78bfa; display: flex; align-items: center; justify-content: center; }
   .empty-state-icon svg { width: 26px; height: 26px; }
-  .empty-state-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
-  .empty-state-desc { font-size: 13px; color: var(--text-muted); max-width: 380px; margin: 0 auto; line-height: 1.6; }
+  .empty-state-title { font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--text-primary); margin-bottom: 6px; }
+  .empty-state-desc { font-size: var(--text-base); color: var(--text-muted); max-width: 380px; margin: 0 auto; line-height: 1.6; }
 
-  .profile-card { display: flex; gap: 22px; align-items: center; background: var(--surface-alt); border: 1px solid var(--border-soft); border-radius: 16px; padding: 1.5rem 1.75rem; margin-bottom: 1.5rem; }
+  .profile-card { display: flex; gap: var(--space-6); align-items: center; background: var(--surface-alt); border: 1px solid var(--border-soft); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-6); margin-bottom: 1.5rem; }
   .profile-avatar { width: 84px; height: 84px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 4px 14px rgba(79,70,229,0.25); flex-shrink: 0; }
   .profile-info { flex: 1; min-width: 0; }
-  .profile-name { font-size: 19px; font-weight: 800; color: var(--text-primary); }
-  .profile-login { font-size: 14px; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
-  .profile-bio { font-size: 13.5px; color: var(--text-secondary); margin-top: 4px; }
-  .profile-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin-top: 10px; }
-  .profile-meta a { color: #4f46e5; text-decoration: none; font-weight: 600; }
+  .profile-name { font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--text-primary); }
+  .profile-login { font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--text-muted); margin-left: 4px; }
+  .profile-bio { font-size: var(--text-md); color: var(--text-secondary); margin-top: 4px; }
+  .profile-meta { display: flex; gap: var(--space-5); flex-wrap: wrap; font-size: var(--text-sm); color: var(--text-secondary); margin-top: 10px; }
+  .profile-meta a { color: var(--accent); text-decoration: none; font-weight: var(--weight-semibold); }
   .profile-meta a:hover { text-decoration: underline; }
+  /* A product header, not a landing-page hero: it identifies the tool and
+     holds the search, then gets out of the way of the data below. */
   header {
-    position: relative; overflow: hidden;
-    padding: 2.5rem 2rem 4.5rem; margin: 0 -2rem 0;
-    background: var(--header-gradient);
-    border-radius: 0 0 28px 28px;
-    box-shadow: 0 14px 34px var(--header-shadow);
-    transition: background 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    display: flex; align-items: center; gap: var(--space-6); flex-wrap: wrap;
+    /* Bleeds to the container edge, so the negative margin has to track
+       .main-content's padding exactly - a hardcoded -2rem against 24px of
+       padding overhung by 8px and put a horizontal scrollbar on every page. */
+    padding: var(--space-8) var(--space-7);
+    margin: 0 calc(-1 * var(--space-6)) var(--space-6);
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+    background: var(--header-surface);
+    border-bottom: 1px solid var(--header-border);
+    box-shadow: var(--elev-2);
+    isolation: isolate;
   }
-  header::before {
+  /* Slow-drifting aurora. Two blurred colour blooms on a long loop - the
+     movement is barely perceptible frame to frame, which keeps it premium
+     rather than distracting for something you stare at all day. */
+  .header-fx {
+    position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    overflow: hidden; border-radius: inherit;
+  }
+  .header-fx::before {
+    content: ''; position: absolute; inset: -40% -20%; pointer-events: none;
+    background:
+      radial-gradient(closest-side, var(--header-aurora-1), transparent 70%) 8% 18% / 46% 62% no-repeat,
+      radial-gradient(closest-side, var(--header-aurora-2), transparent 70%) 78% 88% / 44% 60% no-repeat,
+      radial-gradient(closest-side, var(--header-aurora-3), transparent 70%) 52% 8% / 38% 54% no-repeat;
+    filter: blur(28px);
+    animation: header-aurora 26s ease-in-out infinite alternate;
+  }
+  @keyframes header-aurora {
+    0%   { transform: translate3d(0,0,0) scale(1); }
+    50%  { transform: translate3d(3%,-2%,0) scale(1.08); }
+    100% { transform: translate3d(-3%,2%,0) scale(1.04); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .header-fx::before { animation: none; }
+  }
+  /* Fine grid, masked out toward the bottom - gives the panel depth without
+     competing with the text sitting on it. */
+  .header-fx::after {
     content: ''; position: absolute; inset: 0; pointer-events: none;
     background-image:
-      linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.07) 1px, transparent 1px);
-    background-size: 30px 30px;
-    mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), transparent 85%);
+      linear-gradient(var(--header-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--header-grid) 1px, transparent 1px);
+    background-size: 34px 34px;
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.8), transparent 78%);
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.8), transparent 78%);
   }
   header > * { position: relative; z-index: 1; }
-  h1 { font-size: 27px; font-weight: 800; margin: 0 0 4px; color: #fff; letter-spacing: -0.02em; }
-  .subtitle { font-size: 13px; color: rgba(255,255,255,0.88); }
 
-  .hero-search { position: relative; z-index: 2; margin: -2.75rem 0 1.5rem; }
-  .hero-search .username-field { max-width: 420px; background: rgba(255,255,255,0.14); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); border: 1px solid rgba(255,255,255,0.35); border-radius: 14px; padding: 6px; box-shadow: 0 16px 34px rgba(30,20,80,0.22); }
-  .hero-search .username-field input { width: 100%; background: rgba(255,255,255,0.95); border: none; padding: 11px 14px 11px 40px; font-size: 14px; border-radius: 9px; }
-  .hero-search .username-field input:focus { box-shadow: 0 0 0 3px rgba(255,255,255,0.35); }
+  .header-titles { min-width: 0; }
+  .header-eyebrow {
+    display: inline-flex; align-items: center; gap: var(--space-3);
+    font-size: var(--text-2xs); font-weight: var(--weight-semibold);
+    letter-spacing: 0.10em; text-transform: uppercase;
+    color: var(--header-eyebrow); margin-bottom: var(--space-3);
+  }
+  .header-dot {
+    width: 6px; height: 6px; border-radius: var(--radius-pill);
+    background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,0.18);
+  }
+  h1 {
+    font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0;
+    color: var(--header-fg); letter-spacing: -0.02em; line-height: var(--leading-tight);
+  }
+  .subtitle { font-size: var(--text-sm); color: var(--header-fg-muted); margin-top: var(--space-2); }
+
+  .hero-search { position: relative; z-index: 2; margin-left: auto; flex: 0 1 340px; min-width: 220px; }
+  .hero-search .username-field { background: none; border: none; padding: 0; box-shadow: none; }
+  /* The header is dark now, so the search sits on it as frosted glass rather
+     than a white box punched into the gradient. */
+  .hero-search .username-field input {
+    width: 100%;
+    background: var(--header-field-bg);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border: 1px solid var(--header-field-border);
+    padding: var(--space-3) var(--space-4) var(--space-3) var(--space-7);
+    font-size: var(--text-base); border-radius: var(--radius-lg);
+    color: var(--header-fg);
+    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .hero-search .username-field input::placeholder { color: var(--header-fg-faint); }
+  .hero-search .username-field input:hover { background: var(--header-field-bg-hover); }
+  .hero-search .username-field input:focus {
+    outline: none; background: var(--header-field-bg-hover);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(129,140,248,0.28);
+  }
+  .hero-search .username-icon { left: 11px; color: var(--header-fg-muted); }
+
+  /* Populated once a scan or profile loads, so the header carries live state
+     instead of being purely decorative. Hidden until it has something to say. */
+  .header-stats { display: flex; gap: var(--space-3); margin-top: var(--space-4); flex-wrap: wrap; justify-content: flex-end; }
+  .header-stats:empty { display: none; }
+  .header-stat {
+    display: inline-flex; align-items: baseline; gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    background: var(--header-field-bg);
+    border: 1px solid var(--header-field-border);
+    border-radius: var(--radius-pill);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .header-stat b { font-size: var(--text-base); font-weight: var(--weight-bold); color: var(--header-fg); letter-spacing: -0.01em; }
+  .header-stat span { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.07em; color: var(--header-fg-muted); }
+  .header-stat.is-critical b { color: var(--sev-critical-fg); }
+  .header-stat.is-high b { color: var(--sev-high-fg); }
   .username-icon { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #9ca3af; pointer-events: none; display: flex; }
   .username-icon svg { width: 16px; height: 16px; }
-  .suggestions-heading { font-size: 10.5px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px 4px; }
-  .username-suggestion-icon { color: #a1a1cc; font-size: 14px; width: 22px; display: inline-flex; justify-content: center; }
-  .row { display: flex; gap: 8px; align-items: center; margin: 1.25rem 0; flex-wrap: wrap; }
-  input, select { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 8px; font-size: 14px; background: var(--input-bg); color: var(--text-primary); transition: all 0.15s ease; }
-  input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
-  select { cursor: pointer; font-weight: 500; }
-  button { padding: 9px 16px; border: none; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.15s ease; }
-  button:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(79,70,229,0.3); }
-  button:active { transform: translateY(0); }
-  button:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; transform: none; box-shadow: none; }
+  .suggestions-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); font-size: var(--text-xs); font-weight: var(--weight-bold); color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--space-3) var(--space-4) var(--space-2); }
+  .recent-clear-all { background: none; border: none; padding: var(--space-1) var(--space-2); margin: 0; font: inherit; font-size: var(--text-2xs); color: #9ca3af; cursor: pointer; text-transform: none; letter-spacing: normal; }
+  .recent-clear-all:hover { color: #dc2626; background: none; box-shadow: none; transform: none; text-decoration: underline; }
+  .username-suggestion-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Kept invisible until the row is hovered/focused so the list stays clean,
+     but always reachable by keyboard. */
+  .recent-remove { background: none; border: none; padding: 0 var(--space-1); margin: 0; font-size: var(--text-lg); line-height: 1; color: #9ca3af; cursor: pointer; opacity: 0; transition: opacity 0.12s ease, color 0.12s ease; }
+  .username-suggestion:hover .recent-remove, .recent-remove:focus-visible { opacity: 1; }
+  .recent-remove:hover { color: #dc2626; background: none; box-shadow: none; transform: none; }
+  .username-suggestion-icon { color: #a1a1cc; font-size: var(--text-md); width: 22px; display: inline-flex; justify-content: center; }
+  .row { display: flex; gap: var(--space-3); align-items: center; margin: var(--space-5) 0; flex-wrap: wrap; }
+  input, select { padding: var(--space-3) var(--space-4); border: 1px solid var(--input-border); border-radius: var(--radius-lg); font-size: var(--text-md); background: var(--input-bg); color: var(--text-primary); transition: all 0.15s ease; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
+  select { cursor: pointer; font-weight: var(--weight-medium); }
+  button { padding: var(--space-3) var(--space-5); border: 1px solid transparent; border-radius: var(--radius-md); background: var(--accent-gradient); color: #fff; cursor: pointer; font-size: var(--text-base); font-weight: var(--weight-medium); box-shadow: 0 1px 2px var(--shadow-soft), 0 2px 8px var(--accent-glow); transition: filter 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease; }
+  button:hover { filter: brightness(1.08); box-shadow: 0 2px 4px var(--shadow-soft), 0 6px 18px var(--accent-glow); }
+  button:active { transform: translateY(1px); box-shadow: 0 1px 2px var(--shadow-soft); }
+  button:disabled { background: var(--surface-alt); color: var(--text-muted); box-shadow: none; cursor: not-allowed; filter: none; transform: none; }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  button:disabled { background: var(--surface-alt); color: var(--text-muted); border-color: var(--border); cursor: not-allowed; }
   #load-repos-btn, #load-branches-btn { background: #0891b2; }
   #load-repos-btn:hover, #load-branches-btn:hover { background: #0e7490; box-shadow: 0 4px 10px rgba(8,145,178,0.3); }
-  .status { font-size: 13px; color: var(--text-faint); margin-bottom: 1rem; }
+  .status { font-size: var(--text-base); color: var(--text-faint); margin-bottom: 1rem; }
 
   /* Pill-style checkbox/radio labels used throughout the tool panels */
   .row label:has(> input[type="checkbox"]), .row label:has(> input[type="radio"]) {
-    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 8px 14px;
-    border: 1px solid var(--border-soft); border-radius: 999px; background: var(--surface); cursor: pointer;
+    display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-base); padding: var(--space-3) var(--space-5);
+    border: 1px solid var(--border-soft); border-radius: var(--radius-pill); background: var(--surface); cursor: pointer;
     color: var(--text-secondary); transition: all 0.15s ease; user-select: none;
   }
   .row label:has(> input[type="checkbox"]):hover, .row label:has(> input[type="radio"]):hover {
     border-color: #c7c7f5; background: var(--surface-alt);
   }
-  .row label:has(> input:checked) { background: var(--surface-alt); border-color: #4f46e5; color: var(--accent-text); font-weight: 600; }
+  .row label:has(> input:checked) { background: var(--surface-alt); border-color: var(--accent); color: var(--accent-text); font-weight: var(--weight-semibold); }
   .row label:has(> input:disabled) { opacity: 0.55; cursor: not-allowed; }
-  .row label > input[type="checkbox"], .row label > input[type="radio"] { accent-color: #4f46e5; margin: 0; }
+  .row label > input[type="checkbox"], .row label > input[type="radio"] { accent-color: var(--accent); margin: 0; }
 
-  .field-group { display: flex; flex-direction: column; gap: 4px; }
-  .field-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  .hint-text { font-size: 12px; color: var(--text-muted); }
+  .field-group { display: flex; flex-direction: column; gap: var(--space-2); }
+  .field-label { font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .hint-text { font-size: var(--text-sm); color: var(--text-muted); }
 
-  .panel-card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 14px; padding: 1.25rem 1.4rem; margin-bottom: 1rem; box-shadow: 0 1px 4px var(--shadow-soft); }
+  .panel-card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-xl); padding: var(--space-5) var(--space-5); margin-bottom: 0.85rem; box-shadow: var(--elev-1); }
   .panel-card .row:first-child { margin-top: 0; }
   .panel-card .row:last-child { margin-bottom: 0; }
-  .panel-card-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
-  .panel-card-desc { font-size: 12.5px; color: var(--text-muted); margin-bottom: 4px; }
+  .panel-card-title { font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--text-primary); margin-bottom: 2px; }
+  .panel-card-desc { font-size: var(--text-sm); color: var(--text-muted); margin-bottom: 4px; }
   .report-card { background: var(--surface-alt); border: 1px solid #7c5ce633; }
 
   .risk-critical { background: #4c0519; color: #fff; }
@@ -261,36 +520,36 @@
   .finding-card.sev-medium { border-left-color: #f59e0b; }
   .finding-card.sev-low { border-left-color: #22c55e; }
 
-  .label-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .label-chip { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid; }
+  .label-chips { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: 6px; }
+  .label-chip { font-size: var(--text-xs); font-weight: var(--weight-semibold); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); border: 1px solid; }
   .pr-avatar { width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
-  .generate-summary-btn { background: var(--surface-alt); color: var(--accent-text); font-size: 12.5px; padding: 6px 12px; }
+  .generate-summary-btn { background: var(--surface-alt); color: var(--accent-text); font-size: var(--text-sm); padding: var(--space-3) var(--space-4); }
   .generate-summary-btn:hover { background: var(--border-soft); box-shadow: none; transform: none; }
 
-  .segmented { display: inline-flex; background: var(--segmented-bg); border-radius: 10px; padding: 3px; gap: 2px; }
-  .segmented-option { padding: 7px 16px; font-size: 13px; font-weight: 600; color: var(--text-secondary); border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
-  .segmented-option:hover { color: #4f46e5; }
-  .segmented-option.active { background: var(--surface); color: #4f46e5; box-shadow: 0 1px 4px var(--shadow-soft); }
+  .segmented { display: inline-flex; background: var(--segmented-bg); border-radius: var(--radius-md); padding: var(--space-1); gap: var(--space-1); }
+  .segmented-option { padding: var(--space-3) var(--space-4); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; transition: background 0.12s ease, color 0.12s ease; }
+  .segmented-option:hover { color: var(--text-primary); }
+  .segmented-option.active { background: var(--surface); color: var(--text-primary); font-weight: var(--weight-semibold); box-shadow: 0 1px 2px var(--shadow-soft); }
 
   .panel { display: none; animation: fadeIn 0.25s ease; }
   .panel.active { display: block; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 1.5rem; }
-  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.15rem; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .metric:hover { transform: translateY(-2px); box-shadow: 0 6px 16px var(--shadow-card); }
-  .metric-label { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
-  .metric-value { font-size: 28px; font-weight: 700; margin-top: 6px; color: var(--text-primary); }
-  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; }
-  .chart-wrap { position: relative; width: 100%; height: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem; margin-bottom: 0; box-shadow: 0 1px 4px var(--shadow-soft); transition: box-shadow 0.2s ease; }
-  .chart-wrap:hover { box-shadow: 0 6px 20px var(--shadow-card); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: var(--space-4); margin-bottom: 1.15rem; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: var(--space-4) var(--space-4); box-shadow: var(--elev-1); transition: box-shadow 0.14s ease, transform 0.14s ease; }
+  .metric:hover { box-shadow: var(--elev-2); transform: translateY(-1px); }
+  .metric-label { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric-value { font-size: var(--text-2xl); font-weight: var(--weight-semibold); margin-top: 3px; color: var(--text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: var(--space-5); }
+  .chart-wrap { position: relative; width: 100%; height: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); margin-bottom: 0; box-shadow: none; }
 
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .card:hover { box-shadow: 0 6px 16px var(--shadow-card); }
-  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  .card a.title { font-size: 15px; font-weight: 600; color: var(--text-primary); text-decoration: none; }
-  .card a.title:hover { color: #4f46e5; }
-  .badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); margin-bottom: 8px; box-shadow: var(--elev-1); transition: border-color 0.12s ease, box-shadow 0.14s ease; }
+  .card:hover { box-shadow: var(--elev-2); }
+  .card:hover { border-color: var(--text-muted); }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-4); }
+  .card a.title { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--text-primary); text-decoration: none; }
+  .card a.title:hover { color: var(--accent-text); }
+  .badge { font-size: var(--text-xs); font-weight: var(--weight-semibold); padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
   .state-open { background: #e6f4ea; color: #1e7e34; }
   .state-closed { background: #fde8e8; color: #a12525; }
   .state-merged { background: #eee5fb; color: #6a3fc7; }
@@ -298,33 +557,122 @@
   .risk-medium { background: #fdf3d8; color: #966917; }
   .risk-low { background: #e6f4ea; color: #1e7e34; }
 
-  .section-label { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; margin: 12px 0 4px; }
-  .section-body { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
-  .section-body ul { margin: 4px 0; padding-left: 18px; }
-  .meta-row { font-size: 12px; color: var(--text-muted); margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+  .section-label { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: var(--space-5) 0 var(--space-3); }
+  .section-body { font-size: var(--text-base); color: var(--text-tertiary); line-height: 1.6; }
+  .section-body ul { margin: var(--space-2) 0; padding-left: 18px; }
+  .meta-row { font-size: var(--text-sm); color: var(--text-muted); margin-top: 8px; display: flex; gap: var(--space-4); align-items: center; }
 
-  .commit-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; transition: box-shadow 0.15s ease; }
+  .commit-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: var(--space-5) var(--space-5); margin-bottom: 10px; transition: box-shadow 0.15s ease; }
   .commit-card:hover { box-shadow: 0 6px 16px var(--shadow-card); }
-  .commit-head { display: flex; gap: 10px; align-items: flex-start; }
+  .commit-head { display: flex; gap: var(--space-4); align-items: flex-start; }
   .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
-  .commit-msg { font-size: 14px; font-weight: 600; color: var(--text-primary); text-decoration: none; }
-  .commit-msg:hover { color: #4f46e5; }
-  .commit-body { font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 4px; }
-  .commit-meta { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
-  .commit-files-btn { font-size: 12px; color: #4f46e5; background: none; border: none; padding: 8px 0 0; cursor: pointer; font-weight: 500; }
+  .commit-msg { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--text-primary); text-decoration: none; }
+  .commit-msg:hover { color: var(--accent); }
+  .commit-body { font-size: var(--text-base); color: var(--text-secondary); white-space: pre-wrap; margin-top: 4px; }
+  .commit-meta { font-size: var(--text-sm); color: var(--text-muted); margin-top: 6px; }
+  .commit-files-btn { font-size: var(--text-sm); color: var(--accent); background: none; border: none; padding: var(--space-3) 0 0; cursor: pointer; font-weight: var(--weight-medium); }
   .commit-files-btn:hover { text-decoration: underline; background: none; box-shadow: none; transform: none; }
   .file-list { margin-top: 6px; }
-  .file-row { font-size: 12px; color: var(--text-secondary); padding: 3px 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid var(--divider); padding-top: 5px; }
-  .file-add { color: #22c55e; font-weight: 600; }
-  .file-del { color: #ef4444; font-weight: 600; }
-  .file-status { font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-right: 6px; }
+  .file-row { font-size: var(--text-sm); color: var(--text-secondary); padding: var(--space-2) 0; font-family: 'SF Mono', Consolas, monospace; display: flex; justify-content: space-between; border-top: 1px solid var(--divider); padding-top: 5px; }
+  .file-add { color: #22c55e; font-weight: var(--weight-semibold); }
+  .file-del { color: #ef4444; font-weight: var(--weight-semibold); }
+  .file-status { font-size: var(--text-2xs); text-transform: uppercase; color: var(--text-muted); margin-right: 6px; }
 
-  .theme-toggle { display: flex; align-items: center; gap: 14px; padding: 12px 22px; color: rgba(255,255,255,0.62); cursor: pointer; white-space: nowrap; background: none; border: none; font-family: inherit; font-size: 14px; font-weight: 600; width: 100%; text-align: left; margin-top: auto; }
-  .theme-toggle:hover { background: rgba(255,255,255,0.08); color: #fff; box-shadow: none; transform: none; }
+  .theme-toggle { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-6); color: var(--sidebar-fg-muted); cursor: pointer; white-space: nowrap; background: none; border: none; font-family: inherit; font-size: var(--text-md); font-weight: var(--weight-semibold); width: 100%; text-align: left; margin-top: auto; }
+  .theme-toggle:hover { background: var(--sidebar-item-hover); color: var(--sidebar-fg); box-shadow: none; transform: none; }
   .theme-toggle .nav-icon svg { width: 20px; height: 20px; }
+  /* ---- Command palette ------------------------------------------------ */
+  .cmdk-overlay { position: fixed; inset: 0; background: rgba(10,12,16,0.45); backdrop-filter: blur(2px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+  .cmdk-overlay.open { display: flex; }
+  .cmdk { width: min(560px, calc(100vw - 2rem)); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 20px 60px rgba(0,0,0,0.28); overflow: hidden; }
+  .cmdk-input { width: 100%; box-sizing: border-box; border: none; border-bottom: 1px solid var(--border-soft); background: none; padding: var(--space-5) var(--space-5); font-size: var(--text-lg); color: var(--text-primary); outline: none; font-family: inherit; }
+  .cmdk-input::placeholder { color: var(--text-muted); }
+  .cmdk-list { max-height: 320px; overflow-y: auto; padding: var(--space-3); }
+  .cmdk-group { font-size: var(--text-2xs); font-weight: var(--weight-semibold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; padding: var(--space-3) var(--space-4) var(--space-2); }
+  .cmdk-item { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-md); color: var(--text-secondary); }
+  .cmdk-item .cmdk-hint { margin-left: auto; font-size: var(--text-xs); color: var(--text-muted); }
+  .cmdk-item.sel { background: var(--accent-soft); color: var(--text-primary); }
+  .cmdk-empty { padding: var(--space-5) var(--space-4); font-size: var(--text-base); color: var(--text-muted); text-align: center; }
+  kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-xs); background: var(--surface-alt); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); color: var(--text-secondary); }
+
+  /* ---- Toasts --------------------------------------------------------- */
+  .toast-stack { position: fixed; right: 18px; bottom: 18px; z-index: 300; display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-end; }
+  .toast { display: flex; align-items: flex-start; gap: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-md); padding: var(--space-4) var(--space-4); font-size: var(--text-base); color: var(--text-primary); box-shadow: 0 8px 26px var(--shadow-card); max-width: 380px; animation: toast-in 0.16s ease-out; }
+  .toast.err { border-left-color: #dc2626; }
+  .toast.ok  { border-left-color: #16a34a; }
+  .toast-close { margin-left: 6px; cursor: pointer; color: var(--text-muted); font-size: var(--text-lg); line-height: 1; background: none; border: none; padding: 0; }
+  .toast-close:hover { color: var(--text-primary); background: none; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---- Findings quick filter ------------------------------------------ */
+  .finding-filter { position: relative; flex: 1; min-width: 190px; max-width: 340px; }
+  .finding-filter input { width: 100%; box-sizing: border-box; padding: var(--space-3) var(--space-6) var(--space-3) var(--space-7); font-size: var(--text-sm); border: 1px solid var(--input-border); border-radius: var(--radius-md); background: var(--input-bg); color: var(--text-primary); }
+  .finding-filter input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .finding-filter .ff-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-muted); pointer-events: none; }
+  .finding-filter .ff-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: var(--text-md); padding: var(--space-1) var(--space-2); display: none; }
+  .finding-filter .ff-clear:hover { color: var(--text-primary); background: none; }
+  .finding-filter.has-value .ff-clear { display: block; }
+  mark.ff-hit { background: rgba(245,197,24,0.32); color: inherit; border-radius: var(--radius-sm); padding: 0 var(--space-1); }
+
+  /* Keyboard focus ring for the finding list */
+  .finding-card.kb-focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .finding-cat { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-xs); color: var(--text-secondary); background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-3); white-space: nowrap; }
+
+  /* ---- Findings master/detail ------------------------------------------
+     A long scan produces hundreds of findings. Stacked full cards meant
+     scrolling past everything you'd already triaged to reach the next one;
+     the list stays scannable and the detail sits beside it instead. */
+  .vuln-split { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: var(--space-5); align-items: start; }
+  .vuln-list { min-width: 0; max-height: calc(100vh - 190px); overflow-y: auto; padding-right: 2px; scrollbar-width: thin; }
+  .vuln-detail { position: sticky; top: 16px; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5) var(--space-5); max-height: calc(100vh - 190px); overflow-y: auto; }
+  .vuln-detail-empty { color: var(--text-muted); font-size: var(--text-base); text-align: center; padding: var(--space-7) var(--space-5); }
+
+  /* Compact row in the list column */
+  .finding-row { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--sev, var(--border)); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: 6px; cursor: pointer; font: inherit; color: inherit; transition: border-color 0.12s ease, background 0.12s ease; }
+  .finding-row:hover { background: var(--surface-alt); }
+  .finding-row.sel { background: var(--accent-soft); border-color: var(--accent); }
+  .finding-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  .finding-row-top { display: flex; align-items: center; gap: var(--space-3); }
+  .finding-row-loc { font-size: var(--text-sm); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+  .finding-row-desc { font-size: var(--text-sm); color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sev-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--sev); }
+
+  .detail-head { display: flex; align-items: flex-start; gap: var(--space-4); flex-wrap: wrap; margin-bottom: 4px; }
+  .detail-loc { font-size: var(--text-lg); font-weight: var(--weight-semibold); word-break: break-all; min-width: 0; flex: 1; }
+  .detail-section { margin-top: 14px; }
+  .detail-section h4 { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 var(--space-2); }
+  .detail-section p { margin: 0; font-size: var(--text-base); color: var(--text-secondary); line-height: 1.55; }
+  .detail-evidence { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-sm); background: var(--code-bg); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); overflow-x: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-tertiary); }
+  .copy-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-3); font-size: var(--text-xs); cursor: pointer; }
+  .copy-btn:hover { background: var(--surface-alt); color: var(--text-primary); border-color: var(--text-muted); }
+
+  @media (max-width: 1080px) {
+    .vuln-split { grid-template-columns: 1fr; }
+    .vuln-list { max-height: none; overflow: visible; }
+    .vuln-detail { position: static; max-height: none; }
+  }
+
+  /* ---- Loading skeletons ---------------------------------------------- */
+  .skeleton { background: linear-gradient(90deg, var(--surface-alt) 25%, var(--divider) 37%, var(--surface-alt) 63%); background-size: 400% 100%; animation: skel 1.3s ease-in-out infinite; border-radius: var(--radius-sm); }
+  @keyframes skel { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+  .skeleton-row { height: 11px; margin: var(--space-3) 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+    .toast { animation: none; }
+    * { scroll-behavior: auto !important; }
+  }
 </style>
 </head>
 <body>
+
+<div class="cmdk-overlay" id="cmdk-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="cmdk" role="combobox" aria-expanded="true" aria-haspopup="listbox">
+    <input class="cmdk-input" id="cmdk-input" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Jump to a panel, or type a command…" aria-controls="cmdk-list">
+    <div class="cmdk-list" id="cmdk-list" role="listbox"></div>
+  </div>
+</div>
+<div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
 <div class="app-shell">
   <nav class="sidebar">
@@ -363,17 +711,24 @@
 
   <div class="main-content">
     <header>
-      <h1>AI PR &amp; Security Insights</h1>
-      <div class="subtitle">AI-written PR summaries, vulnerability scans, and team activity analytics &mdash; all pulled live from your GitHub account</div>
-    </header>
-
-    <div class="hero-search">
-      <div class="username-field">
-        <span class="username-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
-        <input id="username-input" type="text" value="" placeholder="Search a GitHub username, then press Enter" autocomplete="off">
-        <div class="username-suggestions" id="username-suggestions"></div>
+      <div class="header-fx" aria-hidden="true"></div>
+      <div class="header-titles">
+        <div class="header-eyebrow">
+          <span class="header-dot"></span>Security &amp; delivery intelligence
+        </div>
+        <h1>AI PR &amp; Security Insights</h1>
+        <div class="subtitle">PR summaries, vulnerability scans and team analytics from your GitHub account</div>
       </div>
-    </div>
+
+      <div class="hero-search">
+        <div class="username-field">
+          <span class="username-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+          <input id="username-input" type="text" value="" placeholder="Search a GitHub username…" autocomplete="off">
+          <div class="username-suggestions" id="username-suggestions"></div>
+        </div>
+        <div class="header-stats" id="header-stats" aria-live="polite"></div>
+      </div>
+    </header>
 
     <div class="status" id="status"></div>
 
@@ -562,11 +917,6 @@
     </div>
   </div>
 
-  <div class="panel-card" id="vuln-history-card" style="display:none;">
-    <div class="panel-card-title">Recent scans</div>
-    <div id="vuln-history-list"></div>
-  </div>
-
   <div class="status" id="vuln-status"></div>
   <div id="vuln-ai-note" class="hint-text" style="display:none;margin-bottom:8px;"></div>
   <div class="panel-card" id="vuln-log-card" style="display:none;">
@@ -577,8 +927,10 @@
     <div id="vuln-log-content" style="display:none;font-family:monospace;font-size:12px;color:var(--text-secondary);max-height:300px;overflow-y:auto;white-space:pre-wrap;margin-top:8px;"></div>
   </div>
   <div id="vuln-summary" class="metrics" style="display:none;"></div>
+  <div class="row" id="vuln-review-tabs" style="display:none;"></div>
   <div class="row" id="vuln-severity-filter" style="display:none;"></div>
   <div class="row" id="vuln-type-filter" style="display:none;"></div>
+  <div id="vuln-dismissed-note" class="hint-text" style="display:none;margin:0 0 0.5rem;"></div>
 
   <div class="panel-card report-card" id="vuln-report-row" style="display:none;">
     <div class="panel-card-title">AI-generated report</div>
@@ -753,6 +1105,10 @@ function safeColor(c) {
   return /^[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '888888';
 }
 
+// One categorical ramp for every chart, so series colours mean the same thing
+// across the app. Muted on purpose: saturated colour is reserved for severity.
+const CHART_COLORS = ['#3b5bdb', '#0b7285', '#5f3dc4', '#a61e4d', '#2b8a3e', '#e67700', '#495057'];
+
 function currentTheme() {
   const saved = localStorage.getItem('theme');
   if (saved === 'dark' || saved === 'light') return saved;
@@ -794,6 +1150,19 @@ function getRecentUsernames() {
 function saveRecentUsername(name) {
   const list = [name, ...getRecentUsernames().filter(n => n.toLowerCase() !== name.toLowerCase())].slice(0, 5);
   localStorage.setItem(RECENT_USERS_KEY, JSON.stringify(list));
+}
+function removeRecentUsername(name) {
+  const kept = getRecentUsernames().filter(n => n.toLowerCase() !== String(name).toLowerCase());
+  localStorage.setItem(RECENT_USERS_KEY, JSON.stringify(kept));
+  // Forgetting a name should also stop it being restored on the next page
+  // load, otherwise deleting it from the list looks like it did nothing.
+  if ((loadLastState().username || '').toLowerCase() === String(name).toLowerCase()) {
+    localStorage.removeItem(LAST_STATE_KEY);
+  }
+}
+function clearRecentUsernames() {
+  localStorage.removeItem(RECENT_USERS_KEY);
+  localStorage.removeItem(LAST_STATE_KEY);
 }
 
 const LAST_STATE_KEY = 'aiprsummary_last_state';
@@ -873,9 +1242,19 @@ function highlightSuggestion(idx) {
 function renderRecentSuggestions() {
   const recents = getRecentUsernames();
   if (recents.length === 0) { closeSuggestions(); return; }
-  usernameSuggestions.innerHTML = '<div class="suggestions-heading">Recently viewed</div>' + recents.map(name =>
-    '<div class="username-suggestion" data-login="' + esc(name) + '"><span class="username-suggestion-icon">&#8635;</span><span>' + esc(name) + '</span></div>'
-  ).join('');
+  usernameSuggestions.innerHTML =
+    '<div class="suggestions-heading">' +
+      '<span>Recently viewed</span>' +
+      '<button type="button" class="recent-clear-all" title="Clear all recent searches">Clear all</button>' +
+    '</div>' +
+    recents.map(name =>
+      '<div class="username-suggestion" data-login="' + esc(name) + '">' +
+        '<span class="username-suggestion-icon">&#8635;</span>' +
+        '<span class="username-suggestion-name">' + esc(name) + '</span>' +
+        '<button type="button" class="recent-remove" data-remove="' + esc(name) + '" ' +
+          'title="Remove ' + esc(name) + ' from recent searches" aria-label="Remove ' + esc(name) + '">&times;</button>' +
+      '</div>'
+    ).join('');
   usernameSuggestions.classList.add('open');
   suggestionIndex = -1;
 }
@@ -911,6 +1290,22 @@ async function fetchUsernameSuggestions(q) {
 }
 
 usernameSuggestions.addEventListener('click', e => {
+  // "Clear all" and the per-row X must not fall through to the row's own
+  // click handler, which would load the very name being removed.
+  const clearAll = e.target.closest('.recent-clear-all');
+  if (clearAll) {
+    e.stopPropagation();
+    clearRecentUsernames();
+    closeSuggestions();
+    return;
+  }
+  const removeBtn = e.target.closest('.recent-remove');
+  if (removeBtn) {
+    e.stopPropagation();
+    removeRecentUsername(removeBtn.dataset.remove);
+    renderRecentSuggestions();
+    return;
+  }
   const item = e.target.closest('.username-suggestion');
   if (!item) return;
   usernameInput.value = item.dataset.login;
@@ -979,7 +1374,7 @@ function applyActivityFilter() {
   const hint = document.getElementById('pr-label-filter-hint');
   if (activityLabelFilter) {
     hint.style.display = 'inline';
-    hint.innerHTML = 'Filtering by label: <b>' + esc(activityLabelFilter) + '</b> &middot; <a href="#" id="pr-label-filter-clear" style="color:#4f46e5;">clear</a>';
+    hint.innerHTML = 'Filtering by label: <b>' + esc(activityLabelFilter) + '</b> &middot; <a href="#" id="pr-label-filter-clear" style="color:var(--accent-text);">clear</a>';
     const clearLink = document.getElementById('pr-label-filter-clear');
     if (clearLink) clearLink.addEventListener('click', e2 => { e2.preventDefault(); activityLabelFilter = null; applyActivityFilter(); });
   } else {
@@ -1053,22 +1448,38 @@ function updateRepoControlsForActiveTab() {
     repoToolbar.style.display = 'none';
   } else if (activePanel === 'vuln') {
     toggleVulnSource();
-    loadVulnScanHistory();
   } else {
     if (hasRepos) placeRepoSelect('repo-select-slot-top');
     repoToolbar.style.display = hasRepos ? 'flex' : 'none';
   }
 }
 
+const PANEL_KEY = 'aiprs.lastPanel';
+
+function activatePanel(name, opts) {
+  const tab = document.querySelector('.nav-item[data-panel="' + name + '"]');
+  const panel = document.getElementById('panel-' + name);
+  if (!tab || !panel) return false;
+  document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  tab.classList.add('active');
+  panel.classList.add('active');
+  updateRepoControlsForActiveTab();
+  try { localStorage.setItem(PANEL_KEY, name); } catch (e) {}
+  if (!opts || !opts.silent) window.scrollTo({ top: 0, behavior: 'smooth' });
+  return true;
+}
+
 document.querySelectorAll('.nav-item').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
-    updateRepoControlsForActiveTab();
-  });
+  tab.addEventListener('click', () => activatePanel(tab.dataset.panel));
 });
+
+// Reopen on the panel you were last using. Landing on Overview every reload is
+// a small tax you pay on every visit when you mostly live in one tab.
+try {
+  const last = localStorage.getItem(PANEL_KEY);
+  if (last) activatePanel(last, { silent: true });
+} catch (e) {}
 
 function badge(text, cls) {
   return '<span class="badge ' + cls + '">' + text + '</span>';
@@ -1211,7 +1622,7 @@ async function loadUserOverview(username) {
     if (topLangs.length > 0 || years.length > 0) {
       chartGrid.style.display = 'grid';
 
-      const langColors = ['#4f46e5', '#7c3aed', '#a855f7', '#0891b2', '#f59e0b', '#22c55e', '#64748b'];
+      const langColors = CHART_COLORS;
       if (langChartInstance) langChartInstance.destroy();
       langChartInstance = new Chart(document.getElementById('userLanguageChart'), {
         type: 'doughnut',
@@ -1232,7 +1643,7 @@ async function loadUserOverview(username) {
       if (repoTimelineChartInstance) repoTimelineChartInstance.destroy();
       repoTimelineChartInstance = new Chart(document.getElementById('userRepoTimelineChart'), {
         type: 'bar',
-        data: { labels: years, datasets: [{ data: years.map(y => yearCounts[y]), backgroundColor: '#7c3aed', borderRadius: 4, maxBarThickness: 36 }] },
+        data: { labels: years, datasets: [{ data: years.map(y => yearCounts[y]), backgroundColor: CHART_COLORS[0], borderRadius: 3, maxBarThickness: 32 }] },
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -1595,10 +2006,91 @@ const vulnReportBtn = document.getElementById('vuln-report-btn');
 const vulnReportStatus = document.getElementById('vuln-report-status');
 const vulnSeverityFilterEl = document.getElementById('vuln-severity-filter');
 const vulnTypeFilterEl = document.getElementById('vuln-type-filter');
+const vulnReviewTabsEl = document.getElementById('vuln-review-tabs');
+const vulnDismissedNoteEl = document.getElementById('vuln-dismissed-note');
 let lastVulnJobId = null;
 let lastVulnFindings = [];
+// Files covered by the scan currently on screen - shown in the header chips.
+let lastVulnFilesScanned = 0;
 let currentVulnFilter = 'all';
 let currentVulnTypeFilter = 'all';
+// 'review' = findings still worth looking at, 'dismissed' = judged false
+// positives. Kept apart because a scan of 27 files produced 178 detections of
+// which most were test fixtures, and mixing them buries the real work.
+let currentVulnBucket = 'review';
+
+function isDismissedFinding(f) {
+  const v = String(f.ai_verdict || '').trim().toLowerCase();
+  if (['false_positive', 'false-positive', 'falsepositive', 'not_a_finding', 'dismissed'].includes(v)) return true;
+  return !!f.likely_test_fixture;
+}
+
+function vulnBucketFindings(bucket) {
+  return lastVulnFindings.filter(f => isDismissedFinding(f) === (bucket === 'dismissed'));
+}
+
+function renderVulnReviewTabs() {
+  const nDismissed = lastVulnFindings.filter(isDismissedFinding).length;
+  const nReview = lastVulnFindings.length - nDismissed;
+  if (!lastVulnFindings.length || !nDismissed) {
+    vulnReviewTabsEl.style.display = 'none';
+    vulnReviewTabsEl.innerHTML = '';
+    currentVulnBucket = 'review';
+    return;
+  }
+  const opts = [
+    ['review', 'Needs review', nReview],
+    ['dismissed', 'Possible false positives', nDismissed],
+  ];
+  vulnReviewTabsEl.style.display = 'flex';
+  vulnReviewTabsEl.innerHTML = '<div class="segmented" id="vuln-bucket-segmented">' +
+    opts.map(([key, label, n]) =>
+      '<div class="segmented-option' + (key === currentVulnBucket ? ' active' : '') +
+      '" data-bucket="' + key + '">' + label + ' (' + n + ')</div>'
+    ).join('') + '</div>';
+  vulnReviewTabsEl.querySelectorAll('.segmented-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      currentVulnBucket = opt.dataset.bucket;
+      vulnReviewTabsEl.querySelectorAll('.segmented-option').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      // Severity/type pills describe whichever bucket is showing, so reset
+      // both filters rather than carrying a stale selection across tabs.
+      currentVulnFilter = 'all';
+      currentVulnTypeFilter = 'all';
+      refreshVulnBucketView();
+    });
+  });
+}
+
+// Re-renders the pills and the card list for the bucket currently selected.
+function refreshVulnBucketView() {
+  const bucket = vulnBucketFindings(currentVulnBucket);
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  bucket.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+  renderVulnFilterPills(counts);
+  renderVulnTypeFilterPills(bucket);
+  renderVulnFindingsList();
+  // Mirror the current bucket into the header chips.
+  const allCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+  (lastVulnFindings || []).forEach(f => {
+    if (allCounts.hasOwnProperty(f.severity)) allCounts[f.severity]++;
+  });
+  renderHeaderStats(allCounts, lastVulnFilesScanned);
+}
+
+// Single entry point after a scan finishes or is loaded from history.
+function showVulnFindings(findings) {
+  lastVulnFindings = findings || [];
+  currentVulnFilter = 'all';
+  currentVulnTypeFilter = 'all';
+  currentVulnBucket = 'review';
+  // If everything got dismissed, land on that tab rather than an empty one.
+  if (lastVulnFindings.length && !vulnBucketFindings('review').length) {
+    currentVulnBucket = 'dismissed';
+  }
+  renderVulnReviewTabs();
+  refreshVulnBucketView();
+}
 
 function renderVulnTypeFilterPills(findings) {
   const typeCounts = { code: 0, web: 0, network: 0 };
@@ -1925,7 +2417,7 @@ async function downloadHistoryReport(ref, fmt, btn) {
       let msg = 'Report failed.';
       try { msg = (await res.json()).error || msg; } catch (e) {}
       if (statusEl) statusEl.textContent = msg;
-      else alert(msg);
+      else toast(msg, 'err');
       return;
     }
     const blob = await res.blob();
@@ -1944,7 +2436,7 @@ async function downloadHistoryReport(ref, fmt, btn) {
     }
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Could not reach the server to generate the report.';
-    else alert('Could not reach the server to generate the report.');
+    else toast('Could not reach the server to generate the report.', 'err');
   } finally {
     clearInterval(ticker);
     btn.textContent = original;
@@ -1989,14 +2481,13 @@ async function deleteScan(ref, btn) {
       btn.style.background = 'transparent';
       btn.style.color = '#dc2626';
       btn.style.borderColor = '#fecaca';
-      alert(data.error);
+      toast(data.error, 'err');
       return;
     }
     // Drop it from the compare selection if it was picked
     _vulnCompareSelected = _vulnCompareSelected.filter(r => r !== ref);
     document.getElementById('vuln-compare-panel').style.display = 'none';
     await loadVulnScanHistoryFull();
-    loadVulnScanHistory();   // keep the sidebar "Recent scans" card in sync
   } catch (e) {
     btn.textContent = 'Delete';
     btn.disabled = false;
@@ -2157,7 +2648,7 @@ function openHistoryDetail(idx) {
   const item = _vulnHistoryItems[idx];
   if (!item) return;
   const findings = item.findings || [];
-  if (!findings.length) { alert('No findings stored for this scan.'); return; }
+  if (!findings.length) { toast('No findings stored for this scan.', 'err'); return; }
 
   const panel = document.getElementById('vuln-compare-panel');
   const results = document.getElementById('vuln-compare-results');
@@ -2196,37 +2687,6 @@ function openHistoryDetail(idx) {
   panel.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-async function loadVulnScanHistory() {
-  const card = document.getElementById('vuln-history-card');
-  const list = document.getElementById('vuln-history-list');
-  try {
-    const res = await fetch(API_BASE + '/api/vuln-scan/history');
-    const data = await res.json();
-    const items = (data.items || []).filter(i => i.status === 'done');
-    if (items.length === 0) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
-    list.innerHTML = items.map(i => {
-      const when = new Date(i.started * 1000).toLocaleString();
-      const counts = i.counts || {};
-      const trendHtml = renderTrendBadge(i.history_delta);
-      const clickAttr = i.job_id ? ' data-job="' + i.job_id + '" style="cursor:pointer;"' : '';
-      return '<div class="card"' + clickAttr + '>' +
-        '<div class="top"><span style="font-weight:600;">' + (i.repo || 'scan') + '</span>' +
-        '<span class="hint-text">' + when + (i.source === 'history' ? ' · saved' : '') + '</span></div>' +
-        '<div class="meta-row">' + trendHtml + '</div>' +
-        '<div class="section-body">' + (i.total_findings || 0) + ' finding(s) &mdash; ' +
-        (counts.critical || 0) + ' critical, ' + (counts.high || 0) + ' high, ' +
-        (counts.medium || 0) + ' medium, ' + (counts.low || 0) + ' low</div>' +
-        '</div>';
-    }).join('');
-    list.querySelectorAll('[data-job]').forEach(el => {
-      el.addEventListener('click', () => loadVulnScanFromHistory(el.dataset.job));
-    });
-  } catch (e) {
-    card.style.display = 'none';
-  }
-}
-
 async function loadVulnScanFromHistory(jobId) {
   try {
     const res = await fetch(API_BASE + '/api/vuln-scan/status/' + jobId);
@@ -2234,10 +2694,14 @@ async function loadVulnScanFromHistory(jobId) {
     if (pollData.status !== 'done' || !pollData.result) return;
     const report = pollData.result;
     const findings = report.findings || [];
+    // Tiles reflect findings that still need review; dismissed detections are
+    // counted separately in their own tab so they can't inflate the headline.
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-    findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+    findings.filter(f => !isDismissedFinding(f))
+            .forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
     lastVulnJobId = jobId;
     vulnReportRow.style.display = findings.length ? 'block' : 'none';
+    lastVulnFilesScanned = report.files_scanned || 0;
     vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings (from history). Exit code: ' + report.exit_code;
     const aiCount = findings.filter(f => (f.source || '').startsWith('ai-')).length;
     const aiNoteEl = document.getElementById('vuln-ai-note');
@@ -2250,13 +2714,22 @@ async function loadVulnScanFromHistory(jobId) {
     vulnSummary.innerHTML = Object.entries(counts).map(([lvl, n]) =>
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
     ).join('');
-    lastVulnFindings = findings;
-    currentVulnFilter = 'all';
-    currentVulnTypeFilter = 'all';
-    renderVulnFilterPills(counts);
-    renderVulnTypeFilterPills(findings);
-    renderVulnFindingsList();
+    showVulnFindings(findings);
   } catch (e) {}
+}
+
+function renderHeaderStats(counts, filesScanned) {
+  const el = document.getElementById('header-stats');
+  if (!el) return;
+  const total = SEVERITY_LEVELS.reduce((s, l) => s + (counts[l] || 0), 0);
+  if (!total && !filesScanned) { el.innerHTML = ''; return; }
+  const chip = (label, value, cls) =>
+    '<div class="header-stat ' + (cls || '') + '"><b>' + value + '</b><span>' + label + '</span></div>';
+  el.innerHTML =
+    (filesScanned ? chip('files', filesScanned) : '') +
+    chip('findings', total) +
+    (counts.critical ? chip('critical', counts.critical, 'is-critical') : '') +
+    (counts.high ? chip('high', counts.high, 'is-high') : '');
 }
 
 function renderVulnFilterPills(counts) {
@@ -2289,11 +2762,20 @@ function buildFindingCard(f) {
   // whatever repo was scanned, and file paths/descriptions can carry markup
   // too. Scanning a hostile repo must never be able to run script in this page.
   const verdictNote = f.ai_verdict ? ' &middot; AI: ' + esc(f.ai_verdict) + (f.ai_reason ? ' (' + esc(f.ai_reason) + ')' : '') : '';
-  const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:#9ca3af;">(likely test fixture)</span>' : '';
+  const fixtureTag = f.likely_test_fixture ? ' <span style="font-size:11px;color:var(--text-muted);">(likely test fixture)</span>' : '';
+  // The rule that fired ("xss", "ssrf", ...) was previously not shown at all,
+  // so you couldn't tell two findings in the same file apart without reading
+  // both descriptions - and the quick filter had nothing to match on.
+  const cat = f.category || f.rule;
+  const catTag = cat
+    ? '<span class="finding-cat" title="Rule that produced this finding">' + esc(cat) + '</span>'
+    : '';
+  // Web and network findings have no line number; ":undefined" reads as a bug.
+  const loc = esc(f.file || 'unknown') + (f.line != null && f.line !== '' ? ':' + esc(f.line) : '');
   return '<div class="card finding-card sev-' + vulnSeverityClass(f.severity) + '">' +
     '<div class="top">' +
-    '<span style="font-size:14px;font-weight:700;">' + esc(f.file || '') + ':' + esc(f.line || '') + fixtureTag + '</span>' +
-    vulnSeverityBadge(f.severity) +
+    '<span style="font-size:13.5px;font-weight:650;word-break:break-all;">' + loc + fixtureTag + '</span>' +
+    '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + catTag + vulnSeverityBadge(f.severity) + '</span>' +
     '</div>' +
     '<div class="section-body" style="margin-top:6px;">' + esc(f.description || '') + verdictNote + '</div>' +
     (f.evidence ? '<div class="file-row" style="border-top:none;padding-top:0;font-family:monospace;font-size:12px;color:#6b7280;">' + esc(f.evidence) + '</div>' : '') +
@@ -2303,13 +2785,32 @@ function buildFindingCard(f) {
 }
 
 function renderVulnFindingsList() {
-  const findings = lastVulnFindings.filter(f =>
+  const bucket = vulnBucketFindings(currentVulnBucket);
+  const findings = bucket.filter(f =>
     (currentVulnFilter === 'all' || (f.severity || '').toLowerCase() === currentVulnFilter) &&
     (currentVulnTypeFilter === 'all' || f.scan_type === currentVulnTypeFilter)
   );
 
+  // Explain what the dismissed tab is, and be honest that it's a best guess.
+  if (currentVulnBucket === 'dismissed' && bucket.length) {
+    vulnDismissedNoteEl.style.display = 'block';
+    vulnDismissedNoteEl.textContent =
+      'These were dismissed by AI review or matched inside test fixtures — not confirmed safe. '
+      + 'They are excluded from the counts and from the report’s main sections. '
+      + 'Treat this as a best guess and review before trusting it.';
+  } else {
+    vulnDismissedNoteEl.style.display = 'none';
+  }
+
   if (lastVulnFindings.length === 0) {
     vulnResults.innerHTML = '<div class="card">No findings.</div>';
+    return;
+  }
+  if (bucket.length === 0) {
+    vulnResults.innerHTML = '<div class="card">' + (currentVulnBucket === 'dismissed'
+      ? 'Nothing was dismissed in this scan.'
+      : 'Every detection in this scan was dismissed as a likely false positive. '
+        + 'Check the other tab.') + '</div>';
     return;
   }
   if (findings.length === 0) {
@@ -2320,8 +2821,106 @@ function renderVulnFindingsList() {
   vulnSortedFindings = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
   vulnRenderedCount = 0;
 
-  vulnResults.innerHTML = '<div class="section-label">Findings (' + vulnSortedFindings.length + ')</div><div id="vuln-cards"></div>';
+  const label = currentVulnBucket === 'dismissed' ? 'Possible false positives' : 'Findings';
+  vulnResults.innerHTML =
+    '<div class="section-label">' + label + ' (' + vulnSortedFindings.length + ')</div>' +
+    '<div class="vuln-split">' +
+      '<div class="vuln-list" id="vuln-cards"></div>' +
+      '<div class="vuln-detail" id="vuln-detail"></div>' +
+    '</div>';
   appendVulnCards();
+  installFindingFilter();
+  const _ff = document.getElementById('finding-filter-input');
+  if (_ff && _ff.value) applyFindingFilter(_ff.value);
+  // Open the worst finding by default - it's sorted first, and it's what you
+  // came to look at.
+  selectFinding(0);
+}
+
+const SEV_HEX = { critical: '#b02020', high: '#dc2626', medium: '#d97706', low: '#16a34a' };
+
+function buildFindingRow(f, index) {
+  const sev = (f.severity || 'unknown').toLowerCase();
+  const colour = SEV_HEX[sev] || '#6b7280';
+  const line = f.line != null && f.line !== '' ? ':' + esc(f.line) : '';
+  const cat = f.category || f.rule;
+  return '<button type="button" class="finding-row" data-i="' + index + '" style="--sev:' + colour + ';">' +
+    '<span class="finding-row-top">' +
+      '<span class="sev-dot"></span>' +
+      '<span class="finding-row-loc">' + esc(f.file || 'unknown') + line + '</span>' +
+      (cat ? '<span class="finding-cat">' + esc(cat) + '</span>' : '') +
+    '</span>' +
+    '<span class="finding-row-desc">' + esc(f.description || '') + '</span>' +
+  '</button>';
+}
+
+let _selectedFinding = -1;
+
+function selectFinding(i) {
+  const rows = Array.prototype.slice.call(document.querySelectorAll('#vuln-cards .finding-row'))
+    .filter(r => r.style.display !== 'none');
+  const pane = document.getElementById('vuln-detail');
+  if (!pane) return;
+  if (!rows.length) {
+    pane.innerHTML = '<div class="vuln-detail-empty">No finding selected.</div>';
+    _selectedFinding = -1;
+    return;
+  }
+  _selectedFinding = Math.max(0, Math.min(rows.length - 1, i));
+  const row = rows[_selectedFinding];
+  document.querySelectorAll('#vuln-cards .finding-row').forEach(r => r.classList.remove('sel'));
+  row.classList.add('sel');
+  row.scrollIntoView({ block: 'nearest' });
+  renderFindingDetail(vulnSortedFindings[+row.dataset.i]);
+}
+
+function renderFindingDetail(f) {
+  const pane = document.getElementById('vuln-detail');
+  if (!pane) return;
+  if (!f) { pane.innerHTML = '<div class="vuln-detail-empty">Select a finding to see the details.</div>'; return; }
+
+  const line = f.line != null && f.line !== '' ? ':' + esc(f.line) : '';
+  const cat = f.category || f.rule;
+  const section = (title, body, cls) => body
+    ? '<div class="detail-section"><h4>' + title + '</h4>' +
+      (cls === 'code' ? '<div class="detail-evidence">' + esc(body) + '</div>'
+                      : '<p>' + esc(body) + '</p>') + '</div>'
+    : '';
+
+  pane.innerHTML =
+    '<div class="detail-head">' +
+      '<div class="detail-loc">' + esc(f.file || 'unknown') + line + '</div>' +
+      (cat ? '<span class="finding-cat">' + esc(cat) + '</span>' : '') +
+      vulnSeverityBadge(f.severity) +
+    '</div>' +
+    (f.likely_test_fixture
+      ? '<div class="hint-text" style="margin-bottom:6px;">Looks like a test fixture rather than production code.</div>' : '') +
+    section('Issue', f.description) +
+    (f.evidence
+      ? '<div class="detail-section">' +
+          '<h4 style="display:flex;align-items:center;gap:8px;">Evidence' +
+            '<button type="button" class="copy-btn" data-copy="evidence">Copy</button></h4>' +
+          '<div class="detail-evidence">' + esc(f.evidence) + '</div>' +
+        '</div>'
+      : '') +
+    section('Impact', f.impact) +
+    section('Recommended fix', f.improvement) +
+    (f.ai_verdict
+      ? section('AI verdict', f.ai_verdict + (f.ai_reason ? ' — ' + f.ai_reason : '')) : '') +
+    '<div class="detail-section">' +
+      '<button type="button" class="copy-btn" data-copy="location">Copy location</button>' +
+    '</div>';
+
+  pane.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.copy === 'evidence'
+        ? (f.evidence || '')
+        : (f.file || '') + (f.line != null && f.line !== '' ? ':' + f.line : '');
+      navigator.clipboard.writeText(text)
+        .then(() => toast('Copied to clipboard', 'ok', 1800))
+        .catch(() => toast('Could not access the clipboard', 'err'));
+    });
+  });
 }
 
 function appendVulnCards() {
@@ -2329,12 +2928,17 @@ function appendVulnCards() {
   if (!container) return;
   const batch = vulnSortedFindings.slice(vulnRenderedCount, vulnRenderedCount + VULN_PAGE_SIZE);
   const frag = document.createDocumentFragment();
-  batch.forEach(f => {
+  batch.forEach((f, n) => {
     const div = document.createElement('div');
-    div.innerHTML = buildFindingCard(f);
-    frag.appendChild(div.firstElementChild);
+    div.innerHTML = buildFindingRow(f, vulnRenderedCount + n);
+    const row = div.firstElementChild;
+    row.addEventListener('click', () => {
+      const visible = Array.prototype.slice.call(document.querySelectorAll('#vuln-cards .finding-row'))
+        .filter(r => r.style.display !== 'none');
+      selectFinding(visible.indexOf(row));
+    });
+    frag.appendChild(row);
   });
-  // Remove old "load more" button if present
   const old = document.getElementById('vuln-load-more');
   if (old) old.remove();
   container.appendChild(frag);
@@ -2344,10 +2948,10 @@ function appendVulnCards() {
     const remaining = vulnSortedFindings.length - vulnRenderedCount;
     const btn = document.createElement('button');
     btn.id = 'vuln-load-more';
-    btn.style.cssText = 'margin:12px 0;background:var(--surface-alt);color:var(--accent-text);width:100%;';
+    btn.style.cssText = 'margin:8px 0;background:var(--surface-alt);color:var(--accent-text);width:100%;';
     btn.textContent = 'Show ' + Math.min(remaining, VULN_PAGE_SIZE) + ' more of ' + remaining + ' remaining';
     btn.addEventListener('click', appendVulnCards);
-    vulnResults.appendChild(btn);
+    container.appendChild(btn);
   }
 }
 
@@ -2611,6 +3215,10 @@ runVulnBtn.addEventListener('click', async () => {
   vulnSeverityFilterEl.innerHTML = '';
   vulnTypeFilterEl.style.display = 'none';
   vulnTypeFilterEl.innerHTML = '';
+  vulnReviewTabsEl.style.display = 'none';
+  vulnReviewTabsEl.innerHTML = '';
+  vulnDismissedNoteEl.style.display = 'none';
+  currentVulnBucket = 'review';
   lastVulnFindings = [];
   currentVulnFilter = 'all';
   currentVulnTypeFilter = 'all';
@@ -2734,12 +3342,16 @@ runVulnBtn.addEventListener('click', async () => {
 
     const report = data.report;
     const findings = report.findings || [];
+    // Tiles reflect findings that still need review; dismissed detections are
+    // counted separately in their own tab so they can't inflate the headline.
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-    findings.forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+    findings.filter(f => !isDismissedFinding(f))
+            .forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
 
     lastVulnJobId = jobId;
     vulnReportRow.style.display = findings.length ? 'block' : 'none';
 
+    lastVulnFilesScanned = report.files_scanned || 0;
     vulnStatus.textContent = report.files_scanned + ' files scanned, ' + findings.length + ' findings. Exit code: ' + report.exit_code;
 
     const aiCount = findings.filter(f => (f.source || '').startsWith('ai-')).length;
@@ -2763,12 +3375,7 @@ runVulnBtn.addEventListener('click', async () => {
       '<div class="metric sev-' + lvl + '"><div class="metric-label">' + lvl + '</div><div class="metric-value">' + n + '</div></div>'
     ).join('');
 
-    lastVulnFindings = findings;
-    currentVulnFilter = 'all';
-    currentVulnTypeFilter = 'all';
-    renderVulnFilterPills(counts);
-    renderVulnTypeFilterPills(findings);
-    renderVulnFindingsList();
+    showVulnFindings(findings);
   } catch (e) {
     vulnStatus.textContent = 'Could not reach the local server. Is server.py running?';
   } finally {
@@ -2912,7 +3519,7 @@ function renderMonitorCommitsChart(contributors) {
   monitorChartWrap.style.display = 'block';
   monitorChartInstance = new Chart(ctx, {
     type: 'bar',
-    data: { labels: contributors.map(c => c.login), datasets: [{ label: 'Commits', data: contributors.map(c => c.commits), backgroundColor: '#4f46e5', borderRadius: 4 }] },
+    data: { labels: contributors.map(c => c.login), datasets: [{ label: 'Commits', data: contributors.map(c => c.commits), backgroundColor: CHART_COLORS[0], borderRadius: 3 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Commits per contributor' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 }
@@ -2986,7 +3593,7 @@ function renderTimelineChart(contributors, timeline) {
   if (monitorTimelineChartInstance) monitorTimelineChartInstance.destroy();
   monitorTimelineChartWrap.style.display = 'block';
   const allDates = [...new Set(timeline.map(t => t.date))].sort();
-  const colors = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#7c3aed'];
+  const colors = CHART_COLORS;
   const datasets = contributors.map((c, idx) => {
     const counts = {};
     timeline.filter(t => t.login === c.login).forEach(t => { counts[t.date] = (counts[t.date] || 0) + 1; });
@@ -3004,7 +3611,7 @@ function renderLinesOverTimeChart(contributors, timeline) {
   if (monitorLinesChartInstance) monitorLinesChartInstance.destroy();
   monitorScatterChartWrap.style.display = 'block';
   const allDates = [...new Set(timeline.map(t => t.date))].sort();
-  const colors = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#7c3aed'];
+  const colors = CHART_COLORS;
   const datasets = contributors.map((c, idx) => {
     const lines = {};
     timeline.filter(t => t.login === c.login).forEach(t => { lines[t.date] = (lines[t.date] || 0) + t.additions + t.deletions; });
@@ -3354,6 +3961,335 @@ document.addEventListener('keydown', e => {
     loadRepos(last.repo);
   }
 })();
+
+/* ==========================================================================
+   Interaction layer: toasts, command palette, keyboard navigation and a
+   quick filter over the findings list.
+
+   Additive by design - it drives the existing functions rather than replacing
+   them, so deleting this block leaves the app working exactly as before.
+   ========================================================================== */
+
+/* ---- Toasts -------------------------------------------------------------
+   Replaces alert(), which blocks the page and can't stack. */
+function toast(message, kind, ms) {
+  const stack = document.getElementById('toast-stack');
+  if (!stack) { console.log(message); return; }
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' ' + kind : '');
+  el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  const close = document.createElement('button');
+  close.className = 'toast-close';
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '×';
+  close.addEventListener('click', () => el.remove());
+  el.append(text, close);
+  stack.appendChild(el);
+  // Errors stay until dismissed - you may have looked away when it appeared.
+  if (kind !== 'err') setTimeout(() => el.remove(), ms || 4000);
+  return el;
+}
+
+/* ---- Command palette ---------------------------------------------------- */
+const CMDK_PANELS = [
+  ['overview', 'Overview',         'Profile, repos and language mix'],
+  ['monitor',  'Team Performance', 'Commit activity and contributor stats'],
+  ['activity', 'PR Activity',      'Pull requests and AI summaries'],
+  ['run',      'Run Summary',      'Generate a summary for one PR'],
+  ['vuln',     'Vuln Scan',        'Code, web and network scanning'],
+];
+
+function cmdkCommands() {
+  const cmds = CMDK_PANELS.map(function (p) {
+    return { group: 'Go to', title: p[1], desc: p[2], hint: 'Panel',
+             run: function () { activatePanel(p[0]); } };
+  });
+  cmds.push({
+    group: 'Actions', title: 'Toggle dark mode',
+    desc: 'Switch between light and dark', hint: 'Theme',
+    run: function () {
+      // Click the real control so the chart recolouring it does stays in one
+      // place rather than being duplicated here.
+      document.getElementById('theme-toggle').click();
+      toast('Switched to ' + currentTheme() + ' mode');
+    },
+  });
+  cmds.push({
+    group: 'Actions', title: 'Focus search',
+    desc: 'Search a GitHub username', hint: '/',
+    run: function () {
+      const i = document.getElementById('username-input');
+      i.focus(); i.select();
+    },
+  });
+  cmds.push({
+    group: 'Actions', title: 'Run vulnerability scan',
+    desc: 'Start a scan with the current settings', hint: 'Vuln Scan',
+    run: function () {
+      activatePanel('vuln');
+      const b = document.getElementById('run-vuln-btn');
+      if (b && !b.disabled) b.click();
+      else toast('A scan is already running.', 'err');
+    },
+  });
+  cmds.push({
+    group: 'Actions', title: 'Open scan history',
+    desc: 'Past scans, comparison and reports', hint: 'Vuln Scan',
+    run: function () {
+      activatePanel('vuln');
+      const t = document.querySelector('[data-vuln-tab="history"]');
+      if (t) t.click();
+    },
+  });
+  cmds.push({
+    group: 'Help', title: 'Keyboard shortcuts', desc: 'Show every binding', hint: '?',
+    run: showShortcutHelp,
+  });
+  return cmds;
+}
+
+let _cmdkItems = [], _cmdkSel = 0;
+
+function cmdkIsOpen() {
+  return document.getElementById('cmdk-overlay').classList.contains('open');
+}
+function cmdkOpen() {
+  const overlay = document.getElementById('cmdk-overlay');
+  const input = document.getElementById('cmdk-input');
+  overlay.classList.add('open');
+  input.value = '';
+  cmdkRender('');
+  input.focus();
+}
+function cmdkClose() {
+  document.getElementById('cmdk-overlay').classList.remove('open');
+}
+
+function cmdkRender(query) {
+  const q = (query || '').trim().toLowerCase();
+  const all = cmdkCommands();
+  _cmdkItems = q
+    ? all.filter(function (c) { return (c.title + ' ' + c.desc).toLowerCase().indexOf(q) !== -1; })
+    : all;
+  _cmdkSel = 0;
+  const list = document.getElementById('cmdk-list');
+  if (!_cmdkItems.length) {
+    list.innerHTML = '<div class="cmdk-empty">No matches for ' + esc(query) + '</div>';
+    return;
+  }
+  let html = '', lastGroup = null;
+  _cmdkItems.forEach(function (c, i) {
+    if (c.group !== lastGroup) {
+      html += '<div class="cmdk-group">' + esc(c.group) + '</div>';
+      lastGroup = c.group;
+    }
+    html += '<div class="cmdk-item' + (i === 0 ? ' sel' : '') + '" role="option" data-i="' + i + '">' +
+            '<span>' + esc(c.title) + '</span>' +
+            '<span class="cmdk-hint">' + esc(c.hint || '') + '</span></div>';
+  });
+  list.innerHTML = html;
+  list.querySelectorAll('.cmdk-item').forEach(function (el) {
+    el.addEventListener('mouseenter', function () { cmdkSelect(+el.dataset.i); });
+    el.addEventListener('click', function () { cmdkRun(+el.dataset.i); });
+  });
+}
+
+function cmdkSelect(i) {
+  const items = Array.prototype.slice.call(document.querySelectorAll('.cmdk-item'));
+  if (!items.length) return;
+  _cmdkSel = (i + items.length) % items.length;
+  items.forEach(function (el, n) { el.classList.toggle('sel', n === _cmdkSel); });
+  items[_cmdkSel].scrollIntoView({ block: 'nearest' });
+}
+
+function cmdkRun(i) {
+  const cmd = _cmdkItems[i == null ? _cmdkSel : i];
+  cmdkClose();
+  if (cmd) {
+    try { cmd.run(); }
+    catch (e) { toast('That action failed: ' + e.message, 'err'); }
+  }
+}
+
+document.getElementById('cmdk-input').addEventListener('input', function (e) {
+  cmdkRender(e.target.value);
+});
+document.getElementById('cmdk-overlay').addEventListener('mousedown', function (e) {
+  if (e.target.id === 'cmdk-overlay') cmdkClose();
+});
+
+/* ---- Global keyboard shortcuts ------------------------------------------
+   Bindings are skipped while you're typing, except ones that are explicitly
+   modal (Escape) or chorded (Ctrl/Cmd+K). */
+function typingInField(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+document.addEventListener('keydown', function (e) {
+  const mod = e.metaKey || e.ctrlKey;
+
+  if (mod && e.key && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    cmdkIsOpen() ? cmdkClose() : cmdkOpen();
+    return;
+  }
+
+  if (cmdkIsOpen()) {
+    if (e.key === 'Escape') { e.preventDefault(); cmdkClose(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); cmdkSelect(_cmdkSel + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkSelect(_cmdkSel - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); cmdkRun(); }
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    const ff = document.getElementById('finding-filter-input');
+    if (ff && document.activeElement === ff && ff.value) {
+      ff.value = '';
+      ff.dispatchEvent(new Event('input'));
+      return;
+    }
+    if (typingInField(document.activeElement)) document.activeElement.blur();
+    return;
+  }
+
+  if (typingInField(document.activeElement) || mod || e.altKey) return;
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const i = document.getElementById('username-input');
+    i.focus(); i.select();
+    return;
+  }
+  if (e.key === '?') { e.preventDefault(); showShortcutHelp(); return; }
+  if (e.key === 'f') {
+    const ff = document.getElementById('finding-filter-input');
+    if (ff && ff.offsetParent !== null) { e.preventDefault(); ff.focus(); ff.select(); }
+    return;
+  }
+  if (e.key === 'j' || e.key === 'k') {
+    moveFindingFocus(e.key === 'j' ? 1 : -1);
+    e.preventDefault();
+    return;
+  }
+
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= CMDK_PANELS.length) activatePanel(CMDK_PANELS[n - 1][0]);
+});
+
+function showShortcutHelp() {
+  const rows = [
+    ['Ctrl / Cmd + K', 'Command palette'],
+    ['/', 'Search a username'],
+    ['f', 'Filter findings'],
+    ['j / k', 'Next / previous finding'],
+    ['1-5', 'Jump to a panel'],
+    ['Esc', 'Close, clear or unfocus'],
+    ['?', 'This list'],
+  ];
+  toast('Shortcuts:  ' + rows.map(function (r) { return r[0] + ' = ' + r[1]; }).join('   |   '), null, 9000);
+}
+
+/* ---- Keyboard focus through the findings list --------------------------- */
+function moveFindingFocus(step) {
+  // j/k move the selection, which also swaps the detail pane - so you can walk
+  // a whole scan from the keyboard without touching the mouse.
+  if (typeof selectFinding !== 'function') return;
+  const rows = document.querySelectorAll('#vuln-cards .finding-row');
+  if (!rows.length) return;
+  selectFinding((_selectedFinding < 0 ? 0 : _selectedFinding) + step);
+}
+
+/* ---- Quick filter over the rendered findings ----------------------------
+   Narrows what's already on screen by file, category or description. Sits on
+   top of the severity/type pills rather than replacing them. */
+function installFindingFilter() {
+  const host = document.getElementById('vuln-type-filter');
+  if (!host || document.getElementById('finding-filter-input')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'finding-filter';
+  wrap.innerHTML =
+    '<svg class="ff-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+    '<input id="finding-filter-input" type="text" placeholder="Filter findings  (f)" autocomplete="off">' +
+    '<button class="ff-clear" type="button" aria-label="Clear filter">×</button>';
+  host.appendChild(wrap);
+  const input = wrap.querySelector('input');
+  input.addEventListener('input', function () {
+    wrap.classList.toggle('has-value', !!input.value);
+    applyFindingFilter(input.value);
+  });
+  wrap.querySelector('.ff-clear').addEventListener('click', function () {
+    input.value = '';
+    wrap.classList.remove('has-value');
+    applyFindingFilter('');
+    input.focus();
+  });
+}
+
+function applyFindingFilter(query) {
+  const q = (query || '').trim().toLowerCase();
+  const cards = Array.prototype.slice.call(document.querySelectorAll('#vuln-cards .finding-row'));
+  let shown = 0;
+  cards.forEach(function (card, i) {
+    // Match against the full finding, not just the row's visible text - the row
+    // truncates the description, and evidence/impact/fix aren't in it at all.
+    const f = vulnSortedFindings[i] || {};
+    const hay = [card.textContent, f.description, f.evidence, f.impact, f.improvement,
+                 f.category, f.rule, f.file].join(' ').toLowerCase();
+    const hit = !q || hay.indexOf(q) !== -1;
+    card.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  const label = document.querySelector('#vuln-results .section-label');
+  if (label) {
+    if (!label.dataset.base) label.dataset.base = label.textContent;
+    label.textContent = q
+      ? label.dataset.base.replace(/\((\d+)\)/, '(' + shown + ' of $1)')
+      : label.dataset.base;
+  }
+  let empty = document.getElementById('ff-empty');
+  if (q && shown === 0) {
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'ff-empty';
+      empty.className = 'card';
+      const host = document.getElementById('vuln-cards');
+      if (host) host.appendChild(empty);
+    }
+    empty.textContent = 'No findings match "' + query + '".';
+    empty.style.display = '';
+  } else if (empty) {
+    empty.style.display = 'none';
+  }
+  // Re-anchor the selection to the first row that survived the filter,
+  // otherwise the detail pane keeps showing something now hidden.
+  if (typeof selectFinding === 'function') selectFinding(0);
+}
+// Sidebar expand-on-focus, keyboard only.
+// Plain :focus-within latched the rail open after any mouse click inside it
+// (the theme toggle is a real button), so it stayed expanded until you
+// clicked elsewhere. Track input modality explicitly: only a keyboard-driven
+// focus expands it, and it always collapses when focus leaves.
+(function () {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  let viaKeyboard = false;
+  document.addEventListener('keydown', e => { if (e.key === 'Tab') viaKeyboard = true; }, true);
+  document.addEventListener('mousedown', () => { viaKeyboard = false; }, true);
+  sidebar.addEventListener('focusin', () => { if (viaKeyboard) sidebar.classList.add('kbd-open'); });
+  sidebar.addEventListener('focusout', () => {
+    // focusout fires before the next focusin, so defer until focus settles.
+    setTimeout(() => {
+      if (!sidebar.contains(document.activeElement)) sidebar.classList.remove('kbd-open');
+    }, 0);
+  });
+})();
+
 </script>
 
 </body>
