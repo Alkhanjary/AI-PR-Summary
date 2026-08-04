@@ -1109,42 +1109,25 @@ function safeColor(c) {
 
 // Security: CSRF token for protected requests
 let csrfToken = null;
-fetch('/api/csrf-token')
+let csrfTokenPromise = fetch('/api/csrf-token')
   .then(r => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   })
   .then(d => {
     csrfToken = d.csrf_token;
-    console.log('CSRF token loaded');
+    console.log('CSRF token loaded:', csrfToken.slice(0, 10) + '...');
+    return csrfToken;
   })
   .catch(err => {
-    console.warn('Could not load CSRF token:', err);
-    // Retry once
-    fetch('/api/csrf-token')
-      .then(r => r.json())
-      .then(d => { csrfToken = d.csrf_token; })
-      .catch(err2 => console.error('CSRF token retry failed:', err2));
+    console.error('CSRF token load failed:', err);
+    throw err;
   });
 
-// Wait for CSRF token to be available (with timeout)
+// Wait for CSRF token (required for all mutations)
 async function ensureCsrfToken() {
-  for (let i = 0; i < 100; i++) {
-    if (csrfToken) return csrfToken;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  // If still not available, fetch it directly
-  try {
-    const res = await fetch('/api/csrf-token');
-    if (res.ok) {
-      const data = await res.json();
-      csrfToken = data.csrf_token;
-      return csrfToken;
-    }
-  } catch (e) {
-    console.error('CSRF token fetch failed:', e);
-  }
-  throw new Error('CSRF token not available');
+  if (csrfToken) return csrfToken;
+  return csrfTokenPromise;
 }
 
 // One categorical ramp for every chart, so series colours mean the same thing
@@ -2459,7 +2442,8 @@ async function downloadHistoryReport(ref, fmt, btn) {
         scan_ref: ref,
         job_id: ref.startsWith('job:') ? ref.slice(4) : '',
         format: fmt,
-        detail: detailed
+        detail: detailed,
+        csrf_token: csrfToken
       }),
     });
     if (!res.ok) {
@@ -3233,6 +3217,13 @@ document.getElementById('vuln-log-toggle').addEventListener('click', () => {
 let vulnScanInFlight = false;
 runVulnBtn.addEventListener('click', async () => {
   if (vulnScanInFlight) return;
+  try {
+    await ensureCsrfToken();
+  } catch (e) {
+    vulnStatus.textContent = 'Error: Could not load security token. Check console.';
+    console.error('CSRF token error:', e);
+    return;
+  }
   const useUpload = vulnSourceUpload.checked;
   const repo = repoSelect.value;
 
@@ -3317,7 +3308,7 @@ runVulnBtn.addEventListener('click', async () => {
     const startRes = await fetch(API_BASE + '/api/vuln-scan/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ ...body, csrf_token: csrfToken })
     });
     const startData = await startRes.json();
     if (!startRes.ok) {

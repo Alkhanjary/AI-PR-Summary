@@ -72,18 +72,15 @@ def _validate_csrf_token(token):
   return True
 
 def require_csrf_token(f):
-  """Decorator to require valid CSRF token in POST requests.
-  Disabled on localhost for development convenience."""
+  """Decorator to require valid CSRF token in POST requests."""
   @wraps(f)
   def decorated_function(*args, **kwargs):
     if request.method == 'POST':
-      # CSRF protection disabled on localhost (dev) for convenience
-      if request.remote_addr not in ('127.0.0.1', 'localhost'):
-        token = request.form.get('csrf_token')
-        if not token and request.json:
-          token = request.json.get('csrf_token')
-        if not token or not _validate_csrf_token(token):
-          abort(403)
+      token = request.form.get('csrf_token')
+      if not token and request.json:
+        token = request.json.get('csrf_token')
+      if not token or not _validate_csrf_token(token):
+        abort(403)
     return f(*args, **kwargs)
   return decorated_function
 
