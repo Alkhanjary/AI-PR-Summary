@@ -1501,7 +1501,7 @@ function mdToHtml(text) {
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
-    .map(line => line.startsWith('-') ? '<li>' + line.slice(1).trim() + '</li>' : '<p>' + line + '</p>')
+    .map(line => line.startsWith('-') ? '<li>' + esc(line.slice(1).trim()) + '</li>' : '<p>' + esc(line) + '</p>')
     .join('')
     .replace(/(<li>.*<\/li>)+/gs, m => '<ul>' + m + '</ul>');
 }
