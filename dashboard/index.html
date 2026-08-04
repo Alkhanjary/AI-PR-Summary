@@ -1572,7 +1572,7 @@ function renderChart(counts) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } }
     }
   });
 }
@@ -1678,7 +1678,7 @@ async function loadUserOverview(username) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: { legend: { display: false }, title: { display: true, text: 'Repos created per year', font: { size: 12 } } },
-            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } }
           }
         });
       }
@@ -3586,7 +3586,7 @@ function renderMonitorCommitsChart(contributors) {
   monitorChartInstance = new Chart(ctx, {
     type: 'bar',
     data: { labels: contributors.map(c => c.login), datasets: [{ label: 'Commits', data: contributors.map(c => c.commits), backgroundColor: CHART_COLORS[0], borderRadius: 3 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Commits per contributor' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Commits per contributor' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } } }
   });
 }
 
@@ -3624,7 +3624,7 @@ function renderSeverityChart(contributors, bugsByAuthor) {
         legend: { display: false },
         title: { display: true, text: 'Bug risk score by contributor (weighted by severity, bar color = worst severity)' },
       },
-      scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, y: { grid: { display: false } } },
     },
   });
 }
@@ -3649,7 +3649,7 @@ function renderCoverageChart(contributors) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false }, title: { display: true, text: '% of commits touching a test file, per contributor' } },
-      scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } },
+      scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } },
     },
   });
 }
@@ -3668,7 +3668,7 @@ function renderTimelineChart(contributors, timeline) {
   monitorTimelineChartInstance = new Chart(ctx, {
     type: 'line',
     data: { labels: allDates, datasets },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Commits over time' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Commits over time' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } } }
   });
 }
 
@@ -3686,7 +3686,7 @@ function renderLinesOverTimeChart(contributors, timeline) {
   monitorLinesChartInstance = new Chart(ctx, {
     type: 'line',
     data: { labels: allDates, datasets },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Lines written over time' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Lines written over time' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } } }
   });
 }
 
