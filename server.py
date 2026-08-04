@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -2676,10 +2677,22 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             # Auto-open the scanned app in browser after scan completes
             if url:
                 job["log"].append(f"Opening {url} in browser...")
+                time.sleep(1)  # Brief delay to ensure server is ready
                 try:
-                    webbrowser.open(url)
+                    success = webbrowser.open(url)
+                    if success:
+                        job["log"].append("Browser opened successfully ✓")
+                    else:
+                        job["log"].append("Warning: webbrowser.open() returned False — browser may not have opened")
                 except Exception as e:
-                    job["log"].append(f"Could not auto-open browser: {e}")
+                    job["log"].append(f"Error opening browser: {e}")
+                    # Fallback: try using start command on Windows
+                    try:
+                        if sys.platform == "win32":
+                            subprocess.Popen(["start", url], shell=True)
+                            job["log"].append("Fallback: used 'start' command to open browser")
+                    except Exception as e2:
+                        job["log"].append(f"Fallback also failed: {e2}")
         except (FileNotFoundError, json.JSONDecodeError):
             job["status"] = "error"
             job["error"] = "Scanner did not produce a valid report."
