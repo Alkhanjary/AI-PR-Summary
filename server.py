@@ -2749,13 +2749,15 @@ def vuln_scan_history():
         }
         if job.get("result"):
             findings = job["result"].get("findings", [])
+            real_findings = [f for f in findings if not _is_dismissed(f)]
             counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-            for f in findings:
+            for f in real_findings:
                 sev = (f.get("severity") or "").lower()
                 if sev in counts:
                     counts[sev] += 1
             entry["files_scanned"] = job["result"].get("files_scanned")
-            entry["total_findings"] = len(findings)
+            entry["total_findings"] = len(real_findings)
+            entry["dismissed_findings"] = len(findings) - len(real_findings)
             entry["counts"] = counts
             entry["history_delta"] = job["result"].get("history_delta")
         items.append(entry)
@@ -2768,15 +2770,18 @@ def vuln_scan_history():
     for rec in reversed(disk_records):
         if rec.get("timestamp") in session_ts:
             continue  # already shown from in-memory
+        all_findings = rec.get("findings") or []
+        real_findings = [f for f in all_findings if not _is_dismissed(f)]
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        for f in (rec.get("findings") or []):
+        for f in real_findings:
             sev = (f.get("severity") or "").lower()
             if sev in counts:
                 counts[sev] += 1
         items.append({
             "repo": rec.get("repo", ""), "status": "done",
             "started": rec.get("timestamp", 0),
-            "total_findings": len(rec.get("findings") or []),
+            "total_findings": len(real_findings),
+            "dismissed_findings": len(all_findings) - len(real_findings),
             "counts": counts,
             "scan_types": rec.get("scan_types"),
             "source": "history",

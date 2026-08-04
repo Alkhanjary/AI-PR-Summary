@@ -2204,7 +2204,7 @@ async function loadVulnScanHistoryFull() {
             <div style="color:#64748b;font-size:11px;margin-top:1px;">${_esc(i.repo || '')}</div>
             <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
               ${trendHtml}
-              <span style="font-size:12px;"><strong>${i.total_findings || 0}</strong> finding(s) · ${sevBadges}</span>
+              <span style="font-size:12px;"><strong>${i.total_findings || 0}</strong> finding(s)${i.dismissed_findings ? ` · ${i.dismissed_findings} dismissed` : ''} · ${sevBadges}</span>
             </div>
             ${deltaDetail}
             ${i.scan_types ? `<div class="hint-text" style="margin-top:4px;font-size:11px;">Scans: ${i.scan_types.join(', ')}</div>` : ''}
