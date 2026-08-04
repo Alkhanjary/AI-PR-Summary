@@ -182,6 +182,15 @@ def get_client():
     return OpenAI(api_key=api_key, base_url=base_url), model
 
 
+@app.route("/")
+def dashboard():
+  """Serve the dashboard HTML."""
+  dashboard_path = Path(__file__).resolve().parent / "dashboard" / "index.html"
+  if dashboard_path.exists():
+    return dashboard_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html"}
+  return "Dashboard not found", 404
+
+
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
