@@ -1114,6 +1114,15 @@ fetch('/api/csrf-token')
   .then(d => { csrfToken = d.csrf_token; })
   .catch(() => console.warn('Could not load CSRF token'));
 
+// Wait for CSRF token to be available (with timeout)
+async function ensureCsrfToken() {
+  for (let i = 0; i < 50; i++) {
+    if (csrfToken) return csrfToken;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('CSRF token not available');
+}
+
 // One categorical ramp for every chart, so series colours mean the same thing
 // across the app. Muted on purpose: saturated colour is reserved for severity.
 const CHART_COLORS = ['#3b5bdb', '#0b7285', '#5f3dc4', '#a61e4d', '#2b8a3e', '#e67700', '#495057'];
@@ -3201,6 +3210,12 @@ document.getElementById('vuln-log-toggle').addEventListener('click', () => {
 let vulnScanInFlight = false;
 runVulnBtn.addEventListener('click', async () => {
   if (vulnScanInFlight) return;
+  try {
+    await ensureCsrfToken();
+  } catch (e) {
+    vulnStatus.textContent = 'Security error: could not load CSRF token. Refresh the page.';
+    return;
+  }
   const useUpload = vulnSourceUpload.checked;
   const repo = repoSelect.value;
 
