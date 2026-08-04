@@ -2334,9 +2334,11 @@ def build_and_start_project(target_dir, job):
         job["log"].append("Starting: " + cmd_display(det["start"]))
         log_mark = len(job["log"])  # so we can inspect only this attempt's output
         try:
+            # Parse command string into list for safe execution (shell=False prevents injection)
+            cmd_list = shlex.split(det["start"]) if isinstance(det["start"], str) else det["start"]
             process = subprocess.Popen(
-                det["start"], cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, env=run_env, shell=det["use_shell"], errors="replace",
+                cmd_list, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, env=run_env, shell=False, errors="replace",
             )
         except (FileNotFoundError, OSError) as e:
             job["log"].append(f"Could not start: {e}")
