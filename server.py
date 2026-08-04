@@ -4666,9 +4666,9 @@ if __name__ == "__main__":
     if debug:
         print("WARNING: debug mode is on - the Werkzeug debugger allows code "
               "execution. Never use this on a shared or reachable machine.")
-    # Listen on localhost only
+    # Listen on all interfaces
     app.run(
-        host="127.0.0.1", port=5000, debug=debug,
+        host="0.0.0.0", port=5000, debug=debug,
         # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
         # without it, checking out a branch in a cached clone (which touches
         # file mtimes, including any server.py inside a cloned repo) can
