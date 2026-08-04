@@ -1356,7 +1356,7 @@ usernameInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeSuggestions();
 });
 
-const API_BASE = 'http://127.0.0.1:5000';
+const API_BASE = `${window.location.protocol}//${window.location.hostname}:5000`;
 function ghFetch(url) {
   return fetch(url);
 }
