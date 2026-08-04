@@ -2399,14 +2399,30 @@ def build_and_start_project(target_dir, job):
         job["log"].append(f"App is up at {url}")
         return process, url
 
+    started_services = []  # Track all started services (backend + frontend)
+
     for i, det in enumerate(candidates):
         job["log"].append(f"--- Attempt {i + 1} of {len(candidates)}: {det['name']} ---")
         process, url = _try_start(det)
         if url:
             job["log"].append(f"Started successfully on attempt {i + 1} ({det['name']}).")
-            return process, url
+            started_services.append((process, url, det['name']))
+            # For full-stack apps: if backend is up, try to start frontend too
+            is_backend = any(x in det['name'].lower() for x in ['fastapi', 'django', 'flask', 'node'])
+            if is_backend and len(started_services) == 1:
+                job["log"].append("Backend detected — looking for frontend to start alongside it...")
+                continue  # Keep trying other candidates (frontend)
+            else:
+                # Frontend or other, use the first working combo
+                break
         if i < len(candidates) - 1:
             job["log"].append(f"Attempt {i + 1} failed — trying next option...")
+
+    if started_services:
+        # Return backend + frontend if both started, otherwise just what we have
+        primary_process, primary_url, primary_name = started_services[0]
+        job["log"].append(f"\nStarted services: {', '.join(s[2] for s in started_services)}")
+        return primary_process, primary_url  # Return primary (backend) for scanning
 
     job["log"].append(f"All {len(candidates)} start method(s) failed.")
 
