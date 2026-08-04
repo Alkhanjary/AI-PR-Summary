@@ -4657,10 +4657,9 @@ if __name__ == "__main__":
     if debug:
         print("WARNING: debug mode is on - the Werkzeug debugger allows code "
               "execution. Never use this on a shared or reachable machine.")
-    # host stays on loopback so the API (which reads local folders and runs
-    # build commands) is never exposed to the local network.
+    # Listen on all interfaces to allow access via IP address
     app.run(
-        host="127.0.0.1", port=5000, debug=debug,
+        host="0.0.0.0", port=5000, debug=debug,
         # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
         # without it, checking out a branch in a cached clone (which touches
         # file mtimes, including any server.py inside a cloned repo) can

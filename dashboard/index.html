@@ -1554,6 +1554,7 @@ function labelChips(labels) {
   ).join('') + '</div>';
 }
 function renderChart(counts) {
+  if (!window.Chart) return; // Chart.js not loaded from CDN
   const ctx = document.getElementById('riskChart');
   const data = [counts.low, counts.medium, counts.high];
   if (chartInstance) {
@@ -1651,8 +1652,9 @@ async function loadUserOverview(username) {
       chartGrid.style.display = 'grid';
 
       const langColors = CHART_COLORS;
-      if (langChartInstance) langChartInstance.destroy();
-      langChartInstance = new Chart(document.getElementById('userLanguageChart'), {
+      if (window.Chart) {
+        if (langChartInstance) langChartInstance.destroy();
+        langChartInstance = new Chart(document.getElementById('userLanguageChart'), {
         type: 'doughnut',
         data: {
           labels: topLangs.map(([l]) => l),
@@ -1666,19 +1668,20 @@ async function loadUserOverview(username) {
             title: { display: true, text: 'Languages used', font: { size: 12 } }
           }
         }
-      });
+        });
 
-      if (repoTimelineChartInstance) repoTimelineChartInstance.destroy();
-      repoTimelineChartInstance = new Chart(document.getElementById('userRepoTimelineChart'), {
-        type: 'bar',
-        data: { labels: years, datasets: [{ data: years.map(y => yearCounts[y]), backgroundColor: CHART_COLORS[0], borderRadius: 3, maxBarThickness: 32 }] },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false }, title: { display: true, text: 'Repos created per year', font: { size: 12 } } },
-          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-        }
-      });
+        if (repoTimelineChartInstance) repoTimelineChartInstance.destroy();
+        repoTimelineChartInstance = new Chart(document.getElementById('userRepoTimelineChart'), {
+          type: 'bar',
+          data: { labels: years, datasets: [{ data: years.map(y => yearCounts[y]), backgroundColor: CHART_COLORS[0], borderRadius: 3, maxBarThickness: 32 }] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false }, title: { display: true, text: 'Repos created per year', font: { size: 12 } } },
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+          }
+        });
+      }
     }
 
     const topRepos = [...repos].sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0)).slice(0, 5);
@@ -3577,6 +3580,7 @@ function trendArrow(current, previous) {
 }
 
 function renderMonitorCommitsChart(contributors) {
+  if (!window.Chart) return;
   const ctx = document.getElementById('monitorChart');
   if (monitorChartInstance) monitorChartInstance.destroy();
   monitorChartWrap.style.display = 'block';
@@ -3591,6 +3595,7 @@ const SEVERITY_WEIGHTS = { critical: 8, high: 4, medium: 2, low: 1 };
 const SEVERITY_CHART_COLORS = { critical: '#7f1d1d', high: '#dc2626', medium: '#d97706', low: '#059669' };
 
 function renderSeverityChart(contributors, bugsByAuthor) {
+  if (!window.Chart) return;
   const ctx = document.getElementById('monitorSeverityChart');
   if (monitorSeverityChartInstance) monitorSeverityChartInstance.destroy();
   monitorSeverityChartWrap.style.display = 'block';
@@ -3627,6 +3632,7 @@ function renderSeverityChart(contributors, bugsByAuthor) {
 }
 
 function renderCoverageChart(contributors) {
+  if (!window.Chart) return;
   const ctx = document.getElementById('monitorCoverageChart');
   if (monitorCoverageChartInstance) monitorCoverageChartInstance.destroy();
   monitorCoverageChartWrap.style.display = 'block';
@@ -3652,6 +3658,7 @@ function renderCoverageChart(contributors) {
 }
 
 function renderTimelineChart(contributors, timeline) {
+  if (!window.Chart) return;
   const ctx = document.getElementById('monitorTimelineChart');
   if (monitorTimelineChartInstance) monitorTimelineChartInstance.destroy();
   monitorTimelineChartWrap.style.display = 'block';
@@ -3670,6 +3677,7 @@ function renderTimelineChart(contributors, timeline) {
 }
 
 function renderLinesOverTimeChart(contributors, timeline) {
+  if (!window.Chart) return;
   const ctx = document.getElementById('monitorScatterChart');
   if (monitorLinesChartInstance) monitorLinesChartInstance.destroy();
   monitorScatterChartWrap.style.display = 'block';
