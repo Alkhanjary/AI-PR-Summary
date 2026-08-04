@@ -4166,6 +4166,18 @@ def build_report_html(md_text, title, subtitle=None):
     )
 
 
+def _has_weak_severity_note(detail_dict):
+  """Returns True if the severity_note indicates uncertainty or low confidence."""
+  note = (detail_dict or {}).get("severity_note", "").lower()
+  weak_signals = (
+    "false positive", "no risk", "no user data", "static", "empty string",
+    "likely a false positive", "appears to be a false positive",
+    "needs more context", "insufficient context", "further context",
+    "no viable", "unclear", "cannot exploit", "safe as written", "overstated"
+  )
+  return any(signal in note for signal in weak_signals)
+
+
 def build_fix_loop_markdown(result, details=None, scan_label="", scan_time=None):
     """Builds a task file meant to be handed straight to a coding agent.
 
@@ -4186,9 +4198,21 @@ def build_fix_loop_markdown(result, details=None, scan_label="", scan_time=None)
 
     order = {s: i for i, s in enumerate(SEVERITY_ORDER)}
     index_of = {id(f): i for i, f in enumerate(all_findings)}
-    ranked = sorted(findings, key=lambda f: order.get((f.get("severity") or "").lower(),
-                                                      len(SEVERITY_ORDER)))
-    counts = count_findings_by_severity(findings)
+
+    # Separate findings into actionable and uncertain (weak severity notes)
+    actionable = []
+    uncertain = []
+    for f in findings:
+        idx = index_of.get(id(f), 0)
+        d = details.get(idx, {}) or {}
+        if _has_weak_severity_note(d):
+            uncertain.append(f)
+        else:
+            actionable.append(f)
+
+    ranked = sorted(actionable, key=lambda f: order.get((f.get("severity") or "").lower(),
+                                                        len(SEVERITY_ORDER)))
+    counts = count_findings_by_severity(ranked)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     L = []
@@ -4199,6 +4223,8 @@ def build_fix_loop_markdown(result, details=None, scan_label="", scan_time=None)
     L.append(f"- **Tasks:** {len(ranked)} "
              f"({counts['critical']} critical, {counts['high']} high, "
              f"{counts['medium']} medium, {counts['low']} low)")
+    if uncertain:
+        L.append(f"- **Review manually:** {len(uncertain)} finding(s) with low confidence — see below")
     if dismissed:
         L.append(f"- **Do not fix:** {len(dismissed)} dismissed detection(s) — see the last section")
     L.append("")
@@ -4302,6 +4328,25 @@ def build_fix_loop_markdown(result, details=None, scan_label="", scan_time=None)
             L.append("")
         L.append("---")
         L.append("")
+
+    if uncertain:
+        L.append("## Review manually")
+        L.append("")
+        L.append("These findings have uncertain severity notes. The scanner detected something, but "
+                 "the AI could not determine a confident fix. Use your judgment before fixing them.")
+        L.append("")
+        for i, f in enumerate(uncertain, 1):
+            sev = (f.get("severity") or "unknown").upper()
+            loc = f.get("file", "unknown")
+            if f.get("line") not in (None, ""):
+                loc += f":{f['line']}"
+            cat = f.get("category") or f.get("rule") or "finding"
+            d = details.get(index_of.get(id(f)), {}) or {}
+            L.append(f"**{i}. [{sev}] {cat}** — `{loc}`")
+            if d.get("severity_note"):
+                L.append("")
+                L.append(f"_Reason for review:_ {d['severity_note']}")
+            L.append("")
 
     if dismissed:
         L.append("## Do not fix")
