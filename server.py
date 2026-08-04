@@ -2674,6 +2674,10 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             job["status"] = "done"
             job["result"] = report
 
+            # Log where findings are stored
+            job["log"].append(f"Scan findings saved: {len(all_findings)} total ({len([f for f in all_findings if not _is_dismissed(f)])} actionable)")
+            job["log"].append(f"History: {SCAN_HISTORY_FILE}")
+
             # Auto-open the scanned app in browser after scan completes
             if url:
                 job["log"].append(f"Opening {url} in browser...")
