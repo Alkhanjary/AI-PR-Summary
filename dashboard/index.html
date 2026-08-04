@@ -2459,8 +2459,7 @@ async function downloadHistoryReport(ref, fmt, btn) {
         scan_ref: ref,
         job_id: ref.startsWith('job:') ? ref.slice(4) : '',
         format: fmt,
-        detail: detailed,
-        csrf_token: csrfToken
+        detail: detailed
       }),
     });
     if (!res.ok) {
@@ -3234,12 +3233,6 @@ document.getElementById('vuln-log-toggle').addEventListener('click', () => {
 let vulnScanInFlight = false;
 runVulnBtn.addEventListener('click', async () => {
   if (vulnScanInFlight) return;
-  try {
-    await ensureCsrfToken();
-  } catch (e) {
-    vulnStatus.textContent = 'Security error: could not load CSRF token. Refresh the page.';
-    return;
-  }
   const useUpload = vulnSourceUpload.checked;
   const repo = repoSelect.value;
 
@@ -3324,7 +3317,7 @@ runVulnBtn.addEventListener('click', async () => {
     const startRes = await fetch(API_BASE + '/api/vuln-scan/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, csrf_token: csrfToken })
+      body: JSON.stringify(body)
     });
     const startData = await startRes.json();
     if (!startRes.ok) {
