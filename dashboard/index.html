@@ -1107,6 +1107,13 @@ function safeColor(c) {
   return /^[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '888888';
 }
 
+// Security: CSRF token for protected requests
+let csrfToken = null;
+fetch('/api/csrf-token')
+  .then(r => r.json())
+  .then(d => { csrfToken = d.csrf_token; })
+  .catch(() => console.warn('Could not load CSRF token'));
+
 // One categorical ramp for every chart, so series colours mean the same thing
 // across the app. Muted on purpose: saturated colour is reserved for severity.
 const CHART_COLORS = ['#3b5bdb', '#0b7285', '#5f3dc4', '#a61e4d', '#2b8a3e', '#e67700', '#495057'];
@@ -2415,11 +2422,13 @@ async function downloadHistoryReport(ref, fmt, btn) {
       method: 'POST',
       signal: _reportAbort.signal,
       headers: {'Content-Type': 'application/json'},
-      // scan_ref works for both live jobs and scans restored from disk.
-      // Prefer the History tab's own toggle - the Scan tab's copy is hidden
-      // from here, so reading that one would silently ignore what you set.
-      body: JSON.stringify({scan_ref: ref, job_id: ref.startsWith('job:') ? ref.slice(4) : '',
-                            format: fmt, detail: detailed}),
+      body: JSON.stringify({
+        scan_ref: ref,
+        job_id: ref.startsWith('job:') ? ref.slice(4) : '',
+        format: fmt,
+        detail: detailed,
+        csrf_token: csrfToken
+      }),
     });
     if (!res.ok) {
       let msg = 'Report failed.';
@@ -3276,7 +3285,7 @@ runVulnBtn.addEventListener('click', async () => {
     const startRes = await fetch(API_BASE + '/api/vuln-scan/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ ...body, csrf_token: csrfToken })
     });
     const startData = await startRes.json();
     if (!startRes.ok) {

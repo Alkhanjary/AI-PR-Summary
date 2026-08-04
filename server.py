@@ -41,6 +41,75 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+
+# Security: CSRF tokens, rate limiting, API key validation
+import secrets
+import hashlib
+import time
+from functools import wraps
+from flask import session, abort
+
+_csrf_tokens = {}  # token -> (creation_time, valid)
+_request_counts = {}  # ip -> [(timestamp, endpoint)]
+MAX_REQUESTS_PER_MINUTE = 60
+CSRF_TOKEN_LIFETIME = 3600  # 1 hour
+
+def _get_csrf_token():
+  """Generate a new CSRF token."""
+  token = secrets.token_urlsafe(32)
+  _csrf_tokens[token] = (time.time(), True)
+  return token
+
+def _validate_csrf_token(token):
+  """Validate a CSRF token."""
+  if token not in _csrf_tokens:
+    return False
+  created, valid = _csrf_tokens[token]
+  if not valid or (time.time() - created) > CSRF_TOKEN_LIFETIME:
+    _csrf_tokens[token] = (created, False)
+    return False
+  return True
+
+def require_csrf_token(f):
+  """Decorator to require valid CSRF token in POST requests."""
+  @wraps(f)
+  def decorated_function(*args, **kwargs):
+    if request.method == 'POST':
+      token = request.form.get('csrf_token') or request.json.get('csrf_token')
+      if not token or not _validate_csrf_token(token):
+        abort(403)
+    return f(*args, **kwargs)
+  return decorated_function
+
+def require_api_key(f):
+  """Decorator to require valid API key for sensitive endpoints."""
+  @wraps(f)
+  def decorated_function(*args, **kwargs):
+    key = request.headers.get('X-API-Key')
+    expected = os.environ.get('API_KEY')
+    if expected and key != expected:
+      abort(401)
+    return f(*args, **kwargs)
+  return decorated_function
+
+def rate_limit(endpoint_name):
+  """Decorator to rate-limit requests (60 per minute per IP)."""
+  def decorator(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+      ip = request.remote_addr
+      now = time.time()
+      if ip not in _request_counts:
+        _request_counts[ip] = []
+      # Clean old entries
+      _request_counts[ip] = [ts for ts in _request_counts[ip] if now - ts < 60]
+      if len(_request_counts[ip]) >= MAX_REQUESTS_PER_MINUTE:
+        abort(429)  # Too many requests
+      _request_counts[ip].append(now)
+      return f(*args, **kwargs)
+    return decorated_function
+  return decorator
 
 # This API can read arbitrary local folders and run build commands, so a
 # wildcard CORS policy is genuinely dangerous: any website you happened to have
@@ -114,6 +183,12 @@ def get_client():
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/csrf-token", methods=["GET"])
+def csrf_token():
+    """Get a CSRF token for protected requests."""
+    return jsonify({"csrf_token": _get_csrf_token()})
 
 
 @app.route("/api/github/repos")
@@ -2569,6 +2644,8 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
 
 
 @app.route("/api/vuln-scan/start", methods=["POST"])
+@rate_limit("vuln_scan_start")
+@require_csrf_token
 def vuln_scan_start():
     """Starts the vulnerability scan as a background job and returns a
     job_id immediately, so the dashboard can poll for live progress
@@ -2783,6 +2860,7 @@ def browse_folders():
 
 
 @app.route("/api/vuln-scan/rename", methods=["PATCH"])
+@require_csrf_token
 def vuln_scan_rename():
     """Rename a scan. Body: {scan_ref: 'job:<id>' or 'ts:<ts>', name: '...'}"""
     data = request.get_json(force=True)
@@ -2817,6 +2895,7 @@ def vuln_scan_rename():
 
 
 @app.route("/api/vuln-scan/delete", methods=["DELETE"])
+@require_csrf_token
 def vuln_scan_delete():
     """Deletes a scan. Body: {scan_ref: 'job:<id>' or 'ts:<ts>'}.
     A session job is dropped from memory; a saved scan is removed from
@@ -2910,6 +2989,8 @@ def _resolve_scan(ref):
 
 
 @app.route("/api/vuln-scan/compare", methods=["POST"])
+@rate_limit("vuln_scan_compare")
+@require_csrf_token
 def vuln_scan_compare():
     """Compare two scans. Body: {scan_a: ref, scan_b: ref}
     Returns new findings (in B not A), fixed (in A not B), recurring (in both)."""
@@ -4410,6 +4491,8 @@ def _report_filename(label, timestamp, ext):
 
 
 @app.route("/api/vuln-scan/report", methods=["POST"])
+@rate_limit("vuln_scan_report")
+@require_csrf_token
 def vuln_scan_report():
     """Generates a detailed vulnerability report from a completed scan: an
     AI-written narrative (executive summary, risk overview, remediation
