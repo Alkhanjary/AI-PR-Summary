@@ -1554,7 +1554,6 @@ function labelChips(labels) {
   ).join('') + '</div>';
 }
 function renderChart(counts) {
-  if (!window.Chart) return; // Chart.js not loaded from CDN
   const ctx = document.getElementById('riskChart');
   const data = [counts.low, counts.medium, counts.high];
   if (chartInstance) {
