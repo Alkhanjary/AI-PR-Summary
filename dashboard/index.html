@@ -1107,6 +1107,9 @@ function safeColor(c) {
   return /^[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '888888';
 }
 
+// Clear all cached state on page load (start fresh each time)
+localStorage.clear();
+
 // Security: CSRF token for protected requests
 let csrfToken = null;
 let csrfTokenPromise = fetch('/api/csrf-token')
