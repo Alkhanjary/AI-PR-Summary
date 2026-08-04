@@ -842,9 +842,10 @@ def _load_scan_history():
     try:
         _migrate_legacy_scan_history()
         if SCAN_HISTORY_FILE.exists():
-            return json.loads(SCAN_HISTORY_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+            records = json.loads(SCAN_HISTORY_FILE.read_text(encoding="utf-8"))
+            return records
+    except Exception as e:
+        print(f"Warning: Could not load scan history from {SCAN_HISTORY_FILE}: {e}", file=sys.stderr)
     return []
 
 
@@ -852,8 +853,8 @@ def _save_scan_history(records):
     try:
         SCAN_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         SCAN_HISTORY_FILE.write_text(json.dumps(records, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: Could not save scan history to {SCAN_HISTORY_FILE}: {e}", file=sys.stderr)
 
 
 def _finding_key(f):
@@ -4708,6 +4709,13 @@ if __name__ == "__main__":
     if debug:
         print("WARNING: debug mode is on - the Werkzeug debugger allows code "
               "execution. Never use this on a shared or reachable machine.")
+
+    # Load and show persistent scan history
+    persistent_scans = _load_scan_history()
+    print(f"✓ Loaded {len(persistent_scans)} persistent scan(s) from history")
+    if persistent_scans:
+        print(f"  History location: {SCAN_HISTORY_FILE}")
+
     # Listen on all interfaces
     app.run(
         host="0.0.0.0", port=5000, debug=debug,
