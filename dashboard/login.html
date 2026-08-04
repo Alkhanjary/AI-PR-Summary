@@ -3,274 +3,477 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI PR Summary - Login</title>
+  <title>AI PR Summary — Sign in</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-0: #05060a;
+      --bg-1: #0a0d18;
+      --panel: rgba(15, 19, 33, 0.55);
+      --panel-border: rgba(148, 163, 220, 0.14);
+      --panel-border-hover: rgba(148, 163, 220, 0.28);
+      --text-1: #f5f6fb;
+      --text-2: #9aa3bd;
+      --text-3: #5c6584;
+      --accent-1: #38bdf8;
+      --accent-2: #a78bfa;
+      --accent-3: #f472b6;
+      --accent-4: #34d399;
+      --input-bg: rgba(255, 255, 255, 0.035);
+      --input-bg-focus: rgba(255, 255, 255, 0.06);
+      --input-border: rgba(148, 163, 220, 0.18);
+      --danger-bg: rgba(244, 63, 94, 0.1);
+      --danger-border: rgba(244, 63, 94, 0.32);
+      --danger-fg: #fda4af;
+      color-scheme: dark;
     }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    :root[data-theme="light"] {
+      --bg-0: #eef1f8;
+      --bg-1: #f7f9fd;
+      --panel: rgba(255, 255, 255, 0.68);
+      --panel-border: rgba(15, 23, 41, 0.08);
+      --panel-border-hover: rgba(15, 23, 41, 0.14);
+      --text-1: #0f1729;
+      --text-2: #4b5670;
+      --text-3: #8790a8;
+      --input-bg: rgba(15, 23, 41, 0.03);
+      --input-bg-focus: #ffffff;
+      --input-border: rgba(15, 23, 41, 0.12);
+      --danger-bg: #fef2f2;
+      --danger-border: #fecdd3;
+      --danger-fg: #be123c;
+      color-scheme: light;
     }
 
-    .login-container {
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      width: 100%;
-      max-width: 400px;
-      padding: 40px;
-      animation: slideUp 0.5s ease-out;
+    /* Dark is this page's home theme regardless of OS setting - it's what the
+       aurora/starfield backdrop is built for. The toggle still lets someone
+       switch and have it stick (localStorage), but we don't auto-follow
+       prefers-color-scheme here the way the rest of the dashboard does. */
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-0);
+      color: var(--text-1);
+      overflow: hidden;
     }
 
-    @keyframes slideUp {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+    .mono { font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace; }
+
+    /* ---------- Ambient backdrop: aurora + starfield + scanning beam ---------- */
+    .backdrop {
+      position: fixed; inset: 0; overflow: hidden; z-index: 0;
+      background: radial-gradient(130% 110% at 50% -10%, var(--bg-1) 0%, var(--bg-0) 55%);
     }
 
-    .login-header {
-      text-align: center;
-      margin-bottom: 30px;
+    .blob { position: absolute; border-radius: 50%; filter: blur(90px); will-change: transform; }
+    .blob-1 { width: 48vw; height: 48vw; top: -14vw; left: -10vw; background: radial-gradient(circle, var(--accent-1), transparent 70%); opacity: 0.5; animation: float-a 24s ease-in-out infinite; }
+    .blob-2 { width: 42vw; height: 42vw; bottom: -16vw; right: -8vw; background: radial-gradient(circle, var(--accent-2), transparent 70%); opacity: 0.45; animation: float-b 28s ease-in-out infinite; }
+    .blob-3 { width: 26vw; height: 26vw; top: 35%; right: 15%; background: radial-gradient(circle, var(--accent-3), transparent 70%); opacity: 0.3; animation: float-c 32s ease-in-out infinite; }
+
+    @keyframes float-a { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6vw,8vw) scale(1.12); } }
+    @keyframes float-b { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-5vw,-6vw) scale(1.08); } }
+    @keyframes float-c { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-4vw,5vw) scale(0.9); } }
+
+    .grid-overlay {
+      position: absolute; inset: 0;
+      background-image: linear-gradient(to right, rgba(148,163,220,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,220,0.05) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(75% 55% at 50% 28%, black 35%, transparent 100%);
     }
 
-    .login-header h1 {
-      font-size: 28px;
-      color: #1e293b;
-      margin-bottom: 8px;
+    .stars { position: absolute; inset: 0; opacity: 0.6; }
+    .star { position: absolute; width: 2px; height: 2px; background: #fff; border-radius: 50%; animation: twinkle 3.5s ease-in-out infinite; }
+
+    @keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.9; } }
+
+    :root[data-theme="light"] .stars { display: none; }
+    @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .stars { display: none; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .blob-1, .blob-2, .blob-3, .star, .logo-ring, .logo-core { animation: none !important; }
     }
 
-    .login-header p {
-      color: #64748b;
-      font-size: 14px;
+    /* ---------- Layout ---------- */
+    .stage { position: relative; z-index: 1; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+
+    .card {
+      width: 100%; max-width: 420px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 22px;
+      padding: 42px 38px 30px;
+      backdrop-filter: blur(24px) saturate(150%);
+      -webkit-backdrop-filter: blur(24px) saturate(150%);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.07) inset, 0 40px 80px -24px rgba(0,0,0,0.6);
+      animation: rise 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
     }
 
-    .form-group {
-      margin-bottom: 20px;
+    @keyframes rise { from { opacity: 0; transform: translateY(26px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+    /* ---------- Signature logo mark: layered rotating rings + glowing core ---------- */
+    .brand { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 26px; }
+
+    .logo-wrap { position: relative; width: 76px; height: 76px; margin-bottom: 18px; display: flex; align-items: center; justify-content: center; }
+
+    .logo-ring {
+      position: absolute; inset: 0; border-radius: 50%;
+      border: 1.5px solid transparent;
+      background: conic-gradient(from 0deg, var(--accent-1), var(--accent-2), var(--accent-3), var(--accent-1)) border-box;
+      -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      animation: spin-ring 6s linear infinite;
+    }
+    .logo-ring.outer { animation-duration: 10s; animation-direction: reverse; opacity: 0.55; inset: -8px; }
+
+    @keyframes spin-ring { to { transform: rotate(360deg); } }
+
+    .logo-core {
+      width: 52px; height: 52px; border-radius: 16px;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2) 55%, var(--accent-3));
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset, 0 12px 28px -8px rgba(56, 189, 248, 0.55);
+      animation: pulse-core 3.2s ease-in-out infinite;
+      z-index: 1;
+    }
+    @keyframes pulse-core {
+      0%, 100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset, 0 12px 28px -8px rgba(56, 189, 248, 0.55); }
+      50% { box-shadow: 0 0 0 1px rgba(255,255,255,0.2) inset, 0 14px 34px -6px rgba(167, 139, 250, 0.65); }
     }
 
-    label {
-      display: block;
-      font-size: 14px;
-      font-weight: 500;
-      color: #334155;
-      margin-bottom: 8px;
+    .logo-core svg { width: 25px; height: 25px; }
+
+    .brand-title {
+      font-size: 21px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px;
+      background: linear-gradient(120deg, var(--text-1) 30%, var(--accent-1) 70%, var(--accent-2));
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
     }
 
-    input[type="text"],
-    input[type="password"] {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      font-size: 14px;
-      transition: border-color 0.3s;
+    .status-strip {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11.5px; color: var(--text-3);
+      padding: 5px 12px 5px 8px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.02);
+    }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-4); box-shadow: 0 0 0 0 rgba(52,211,153,0.6); animation: ping-dot 2s ease-out infinite; flex-shrink: 0; }
+    @keyframes ping-dot {
+      0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+      70% { box-shadow: 0 0 0 6px rgba(52,211,153,0); }
+      100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
     }
 
-    input[type="text"]:focus,
-    input[type="password"]:focus {
-      outline: none;
-      border-color: #667eea;
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    .field { position: relative; margin-bottom: 14px; }
+
+    .field-label {
+      display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--text-3); text-transform: uppercase; margin-bottom: 7px;
     }
 
-    .remember-me {
-      display: flex;
-      align-items: center;
-      font-size: 14px;
-      color: #64748b;
-      margin-bottom: 20px;
+    .field-icon {
+      position: absolute; left: 14px; top: 38px;
+      color: var(--text-3); pointer-events: none; display: flex; transition: color 0.2s;
     }
 
-    input[type="checkbox"] {
-      margin-right: 8px;
-      cursor: pointer;
+    .field input {
+      width: 100%; padding: 13px 14px 13px 42px;
+      background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 12px;
+      font-family: inherit; font-size: 14px; color: var(--text-1);
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+    .field input::placeholder { color: var(--text-3); }
+    .field input:focus { outline: none; border-color: var(--accent-1); background: var(--input-bg-focus); box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.13); }
+    .field:focus-within .field-icon { color: var(--accent-1); }
+
+    .toggle-visibility {
+      position: absolute; right: 6px; top: 30px;
+      background: transparent; border: none; color: var(--text-3); cursor: pointer;
+      padding: 8px; display: flex; border-radius: 9px; transition: color 0.2s, background 0.2s;
+    }
+    .toggle-visibility:hover { color: var(--text-1); background: rgba(148,163,220,0.1); }
+
+    .row-between { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 22px; font-size: 13px; }
+
+    .remember { display: flex; align-items: center; gap: 8px; color: var(--text-2); cursor: pointer; user-select: none; }
+    .remember input {
+      appearance: none; width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--input-border);
+      background: var(--input-bg); cursor: pointer; position: relative; transition: background 0.2s, border-color 0.2s; flex-shrink: 0;
+    }
+    .remember input:checked { background: linear-gradient(135deg, var(--accent-1), var(--accent-2)); border-color: transparent; }
+    .remember input:checked::after {
+      content: ""; position: absolute; left: 5px; top: 1.5px; width: 4px; height: 8px;
+      border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg);
     }
 
-    .login-btn {
-      width: 100%;
-      padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-      margin-bottom: 12px;
+    .submit-btn {
+      width: 100%; padding: 14px; border: none; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+      color: #ffffff; font-family: inherit; font-size: 14px; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+      position: relative; overflow: hidden;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+      box-shadow: 0 14px 28px -10px rgba(56, 189, 248, 0.5);
+      letter-spacing: 0.01em;
+    }
+    .submit-btn::before { content: ""; position: absolute; inset: 0; background: linear-gradient(135deg, var(--accent-2), var(--accent-3)); opacity: 0; transition: opacity 0.25s; }
+    .submit-btn:hover::before { opacity: 1; }
+    .submit-btn:hover { transform: translateY(-1px); box-shadow: 0 18px 34px -10px rgba(167, 139, 250, 0.55); }
+    .submit-btn span, .submit-btn svg { position: relative; z-index: 1; }
+    .submit-btn:active { transform: translateY(0); }
+    .submit-btn:disabled { opacity: 0.75; cursor: not-allowed; transform: none; }
+
+    .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+    .submit-btn.loading .spinner { display: inline-block; }
+    .submit-btn.loading .btn-label { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-banner {
+      display: flex; align-items: flex-start; gap: 8px;
+      background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger-fg);
+      padding: 11px 12px; border-radius: 11px; font-size: 12.5px; line-height: 1.4; margin-bottom: 16px;
+      max-height: 0; opacity: 0; overflow: hidden;
+      transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.25s ease, padding 0.25s ease;
+    }
+    .error-banner.show { max-height: 80px; opacity: 1; }
+    .error-banner svg { flex-shrink: 0; margin-top: 1px; }
+
+    .shake { animation: shake 0.4s; }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); }
+      30%, 50%, 70% { transform: translateX(-4px); } 40%, 60% { transform: translateX(4px); }
     }
 
-    .login-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    .divider {
+      display: flex; align-items: center; gap: 12px; margin: 26px 0 16px;
+      color: var(--text-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
     }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--panel-border); }
 
-    .login-btn:active {
-      transform: translateY(0);
+    .demo-creds { display: flex; gap: 8px; }
+    .demo-chip {
+      flex: 1; display: flex; align-items: center; gap: 9px;
+      padding: 10px 12px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 11px;
+      cursor: pointer; transition: border-color 0.2s, transform 0.15s, background 0.2s; text-align: left;
     }
+    .demo-chip:hover { border-color: var(--panel-border-hover); transform: translateY(-1px); background: var(--input-bg-focus); }
+    .demo-chip .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .demo-chip.role-admin .dot { background: var(--accent-3); }
+    .demo-chip.role-user .dot { background: var(--accent-4); }
+    .demo-chip .chip-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .demo-chip .role { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
+    .demo-chip .creds { font-size: 11px; color: var(--text-3); }
 
-    .login-btn:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-      transform: none;
+    .theme-flip {
+      position: fixed; top: 20px; right: 20px; z-index: 2; width: 38px; height: 38px; border-radius: 50%;
+      background: var(--panel); border: 1px solid var(--panel-border); backdrop-filter: blur(12px);
+      color: var(--text-2); display: flex; align-items: center; justify-content: center; cursor: pointer;
+      transition: color 0.2s, transform 0.2s, border-color 0.2s;
     }
+    .theme-flip:hover { color: var(--text-1); transform: scale(1.06) rotate(-8deg); border-color: var(--panel-border-hover); }
+    .theme-flip svg { width: 17px; height: 17px; }
 
-    .error-message {
-      background: #fee2e2;
-      border: 1px solid #fecaca;
-      color: #dc2626;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 14px;
-      margin-bottom: 20px;
-      display: none;
-    }
+    .footnote { text-align: center; margin-top: 22px; font-size: 11.5px; color: var(--text-3); }
 
-    .error-message.show {
-      display: block;
-    }
-
-    .default-credentials {
-      background: #eff6ff;
-      border: 1px solid #bfdbfe;
-      color: #1e40af;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      text-align: center;
-      line-height: 1.5;
-    }
-
-    .default-credentials strong {
-      display: block;
-      margin-bottom: 4px;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      body {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-      }
-
-      .login-container {
-        background: #1e293b;
-      }
-
-      .login-header h1 {
-        color: #f1f5f9;
-      }
-
-      .login-header p {
-        color: #94a3b8;
-      }
-
-      label {
-        color: #cbd5e1;
-      }
-
-      input[type="text"],
-      input[type="password"] {
-        background: #0f172a;
-        border-color: #334155;
-        color: #f1f5f9;
-      }
-
-      .default-credentials {
-        background: #1e3a8a;
-        border-color: #3b82f6;
-        color: #93c5fd;
-      }
+    @media (max-width: 420px) {
+      .card { padding: 34px 24px 26px; border-radius: 18px; }
+      .demo-creds { flex-direction: column; }
     }
   </style>
 </head>
 <body>
-  <div class="login-container">
-    <div class="login-header">
-      <h1>🔒 AI PR Summary</h1>
-      <p>Security Scanner Dashboard</p>
-    </div>
+  <div class="backdrop" aria-hidden="true">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="grid-overlay"></div>
+    <div class="stars" id="stars"></div>
+  </div>
 
-    <div class="error-message" id="errorMessage"></div>
+  <button class="theme-flip" id="themeFlip" type="button" aria-label="Toggle theme">
+    <svg id="themeIconDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A9 9 0 1 1 11.5 3a7 7 0 0 0 9.5 9.5z"/></svg>
+    <svg id="themeIconLight" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg>
+  </button>
 
-    <form id="loginForm" onsubmit="handleLogin(event)">
-      <div class="form-group">
-        <label for="username">Username</label>
-        <input
-          type="text"
-          id="username"
-          placeholder="Enter username"
-          required
-          autocomplete="username"
-        >
+  <div class="stage">
+    <div class="card">
+      <div class="brand">
+        <div class="logo-wrap">
+          <div class="logo-ring outer"></div>
+          <div class="logo-ring"></div>
+          <div class="logo-core">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13 2 L4 14h6l-1 8 9-12h-6l1-8z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="brand-title">AI PR &amp; Security Insights</div>
+        <div class="status-strip"><span class="status-dot"></span>Scanner online &middot; ready to authenticate</div>
       </div>
 
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input
-          type="password"
-          id="password"
-          placeholder="Enter password"
-          required
-          autocomplete="current-password"
-        >
+      <div class="error-banner" id="errorBanner">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span id="errorText"></span>
       </div>
 
-      <div class="remember-me">
-        <input type="checkbox" id="rememberMe">
-        <label for="rememberMe" style="margin: 0; cursor: pointer;">Remember me</label>
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label class="field-label" for="username">Username</label>
+          <span class="field-icon">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-6 8-6s8 2 8 6"/></svg>
+          </span>
+          <input type="text" id="username" placeholder="Enter your username" autocomplete="username" required>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="password">Password</label>
+          <span class="field-icon">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          </span>
+          <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" required style="padding-right:42px;">
+          <button type="button" class="toggle-visibility" id="toggleVis" aria-label="Show password" tabindex="-1">
+            <svg id="eyeOpen" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg id="eyeClosed" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.6 21.6 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a21.6 21.6 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
+
+        <div class="row-between">
+          <label class="remember">
+            <input type="checkbox" id="rememberMe">
+            <span>Remember me for 30 days</span>
+          </label>
+        </div>
+
+        <button type="submit" class="submit-btn" id="loginBtn">
+          <span class="spinner"></span>
+          <span class="btn-label">Sign in</span>
+          <svg class="btn-label" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </form>
+
+      <div class="divider">Quick demo access</div>
+
+      <div class="demo-creds">
+        <div class="demo-chip role-admin" data-user="admin" data-pass="admin123">
+          <span class="dot"></span>
+          <span class="chip-text">
+            <span class="role">Admin</span>
+            <span class="creds mono">admin / admin123</span>
+          </span>
+        </div>
+        <div class="demo-chip role-user" data-user="user" data-pass="user123">
+          <span class="dot"></span>
+          <span class="chip-text">
+            <span class="role">Viewer</span>
+            <span class="creds mono">user / user123</span>
+          </span>
+        </div>
       </div>
 
-      <button type="submit" class="login-btn" id="loginBtn">Sign In</button>
-    </form>
-
-    <div class="default-credentials">
-      <strong>Default Credentials:</strong>
-      Username: <code>admin</code><br>
-      Password: <code>admin123</code><br>
-      <small>(Change in settings after login)</small>
+      <div class="footnote">Protected session &middot; findings never leave this server</div>
     </div>
   </div>
 
   <script>
+    // ---- Starfield (dark theme only) ----
+    const starsEl = document.getElementById('stars');
+    for (let i = 0; i < 40; i++) {
+      const s = document.createElement('div');
+      s.className = 'star';
+      s.style.left = Math.random() * 100 + '%';
+      s.style.top = Math.random() * 100 + '%';
+      s.style.animationDelay = (Math.random() * 3.5) + 's';
+      s.style.opacity = (0.3 + Math.random() * 0.5).toFixed(2);
+      starsEl.appendChild(s);
+    }
+
+    // ---- Theme ----
+    const root = document.documentElement;
+    const themeFlip = document.getElementById('themeFlip');
+    const iconDark = document.getElementById('themeIconDark');
+    const iconLight = document.getElementById('themeIconLight');
+
+    function currentTheme() {
+      // Dark is this page's home look (the aurora/starfield backdrop is
+      // built for it) - default to it regardless of OS preference, but
+      // still honor an explicit choice made via the toggle.
+      return localStorage.getItem('theme') || 'dark';
+    }
+    function applyTheme(t) {
+      root.setAttribute('data-theme', t);
+      iconDark.style.display = t === 'dark' ? 'none' : 'block';
+      iconLight.style.display = t === 'dark' ? 'block' : 'none';
+    }
+    applyTheme(currentTheme());
+    themeFlip.addEventListener('click', () => {
+      const next = currentTheme() === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', next);
+      applyTheme(next);
+    });
+
+    // ---- Password visibility ----
+    const pwInput = document.getElementById('password');
+    const toggleVis = document.getElementById('toggleVis');
+    const eyeOpen = document.getElementById('eyeOpen');
+    const eyeClosed = document.getElementById('eyeClosed');
+    toggleVis.addEventListener('click', () => {
+      const show = pwInput.type === 'password';
+      pwInput.type = show ? 'text' : 'password';
+      eyeOpen.style.display = show ? 'none' : 'block';
+      eyeClosed.style.display = show ? 'block' : 'none';
+    });
+
+    // ---- Demo credential chips ----
+    document.querySelectorAll('.demo-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.getElementById('username').value = chip.dataset.user;
+        document.getElementById('password').value = chip.dataset.pass;
+        document.getElementById('username').focus();
+      });
+    });
+
+    // ---- Error banner ----
+    const errorBanner = document.getElementById('errorBanner');
+    const errorText = document.getElementById('errorText');
+    const card = document.querySelector('.card');
+
     function showError(message) {
-      const errorEl = document.getElementById('errorMessage');
-      errorEl.textContent = message;
-      errorEl.classList.add('show');
+      errorText.textContent = message;
+      errorBanner.classList.add('show');
+      card.classList.remove('shake');
+      void card.offsetWidth;
+      card.classList.add('shake');
     }
-
     function hideError() {
-      const errorEl = document.getElementById('errorMessage');
-      errorEl.classList.remove('show');
+      errorBanner.classList.remove('show');
     }
 
-    async function handleLogin(event) {
+    // ---- Submit ----
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('loginBtn');
+
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
       hideError();
 
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
       const rememberMe = document.getElementById('rememberMe').checked;
-      const btn = document.getElementById('loginBtn');
 
       if (!username || !password) {
-        showError('Please enter username and password');
+        showError('Please enter both username and password.');
         return;
       }
 
       btn.disabled = true;
-      btn.textContent = 'Signing in...';
+      btn.classList.add('loading');
 
       try {
         const res = await fetch('/api/auth/login', {
@@ -278,33 +481,24 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password, remember_me: rememberMe }),
         });
-
         const data = await res.json();
 
         if (res.ok) {
-          // Login successful
           window.location.href = '/';
         } else {
           showError(data.error || 'Login failed. Please try again.');
           btn.disabled = false;
-          btn.textContent = 'Sign In';
-          document.getElementById('password').value = '';
+          btn.classList.remove('loading');
+          pwInput.value = '';
+          pwInput.focus();
         }
       } catch (err) {
-        showError('Connection error. Please try again.');
+        showError('Could not reach the server. Is it running?');
         btn.disabled = false;
-        btn.textContent = 'Sign In';
-      }
-    }
-
-    // Allow Enter key to submit
-    document.getElementById('loginForm').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        handleLogin(e);
+        btn.classList.remove('loading');
       }
     });
 
-    // Focus on username field on load
     document.getElementById('username').focus();
   </script>
 </body>
