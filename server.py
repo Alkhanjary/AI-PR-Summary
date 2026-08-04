@@ -16,8 +16,9 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, session, redirect, url_for
 from flask_cors import CORS
+import hashlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from summarize_pr import (
@@ -44,6 +45,13 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+# Secure=True requires HTTPS - this server runs over plain HTTP on the local
+# network, so a Secure cookie would never be sent back and login would appear
+# to succeed while every subsequent request came back 401.
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('DASHBOARD_HTTPS', '0') == '1'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.permanent_session_lifetime = 24 * 60 * 60  # 24 hours default
 
 # Security: CSRF tokens, rate limiting, API key validation
 import secrets
@@ -115,6 +123,52 @@ def rate_limit(endpoint_name):
     return decorated_function
   return decorator
 
+# ============ Authentication & Roles ============
+# role: "admin" (full access - scans, delete, settings, tokens) or
+#       "user" (read-only - view PR summaries, view dashboards/charts, no scanning/mutation)
+_users = {
+    "admin": {"password": hashlib.sha256(b"admin123").hexdigest(), "role": "admin"},
+    "user": {"password": hashlib.sha256(b"user123").hexdigest(), "role": "user"},
+}
+
+def hash_password(password):
+  """Hash a password for storage."""
+  return hashlib.sha256(password.encode()).hexdigest()
+
+def check_login(username, password):
+  """Check credentials; returns the user's role on success, else None."""
+  u = _users.get(username)
+  if not u or u["password"] != hash_password(password):
+    return None
+  return u["role"]
+
+def current_role():
+  return session.get("role")
+
+def require_login(f):
+  """Decorator to require any authenticated session."""
+  @wraps(f)
+  def decorated_function(*args, **kwargs):
+    if 'user_id' not in session:
+      if request.path.startswith('/api/'):
+        abort(401)
+      return redirect(url_for('login_page'))
+    return f(*args, **kwargs)
+  return decorated_function
+
+def require_admin(f):
+  """Decorator to require the admin role (scans, delete, rename, settings, tokens)."""
+  @wraps(f)
+  def decorated_function(*args, **kwargs):
+    if 'user_id' not in session:
+      if request.path.startswith('/api/'):
+        abort(401)
+      return redirect(url_for('login_page'))
+    if current_role() != 'admin':
+      abort(403)
+    return f(*args, **kwargs)
+  return decorated_function
+
 # This API can read arbitrary local folders and run build commands, so a
 # wildcard CORS policy is genuinely dangerous: any website you happened to have
 # open could call http://127.0.0.1:5000 and read the response. Restrict it to
@@ -184,7 +238,60 @@ def get_client():
     return OpenAI(api_key=api_key, base_url=base_url), model
 
 
+@app.route("/login")
+def login_page():
+  """Serve the login page."""
+  login_path = Path(__file__).resolve().parent / "dashboard" / "login.html"
+  if login_path.exists():
+    return login_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html"}
+  return "Login page not found", 404
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_login():
+  """Handle login requests."""
+  data = request.get_json(force=True)
+  username = (data.get("username") or "").strip()
+  password = data.get("password", "")
+  remember_me = data.get("remember_me", False)
+
+  if not username or not password:
+    return jsonify({"error": "Username and password required"}), 400
+
+  role = check_login(username, password)
+  if not role:
+    return jsonify({"error": "Invalid username or password"}), 401
+
+  session['user_id'] = username
+  session['role'] = role
+  if remember_me:
+    session.permanent = True
+    app.permanent_session_lifetime = 30 * 24 * 60 * 60  # 30 days
+  return jsonify({"status": "ok", "role": role}), 200
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_logout():
+  """Handle logout requests."""
+  session.clear()
+  return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/auth/me")
+def api_me():
+  """Tells the frontend who's logged in and what role they have, so the
+  dashboard can show/hide admin-only tabs (scanning, delete, settings)."""
+  if 'user_id' not in session:
+    return jsonify({"authenticated": False}), 200
+  return jsonify({
+      "authenticated": True,
+      "username": session.get("user_id"),
+      "role": session.get("role", "user"),
+  }), 200
+
+
 @app.route("/")
+@require_login
 def dashboard():
   """Serve the dashboard HTML."""
   dashboard_path = Path(__file__).resolve().parent / "dashboard" / "index.html"
@@ -213,7 +320,22 @@ def csrf_token():
     return jsonify({"csrf_token": _get_csrf_token()})
 
 
+@app.errorhandler(401)
+def _handle_401(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Login required."}), 401
+    return redirect(url_for('login_page'))
+
+
+@app.errorhandler(403)
+def _handle_403(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Admin access required for this action."}), 403
+    return "Forbidden - admin access required.", 403
+
+
 @app.route("/api/github/repos")
+@require_login
 def github_repos():
     username = request.args.get("username", "")
     if not username:
@@ -227,6 +349,7 @@ def github_repos():
 
 
 @app.route("/api/github/user")
+@require_login
 def github_user():
     """Powers the Overview tab's user profile card (name, bio, follower
     counts, account age, etc.) - separate from /api/github/repos, which
@@ -242,6 +365,7 @@ def github_user():
 
 
 @app.route("/api/github/user-activity")
+@require_login
 def github_user_activity():
     """Powers the Overview tab's 'Involved in' section: pull requests the
     user has authored across ANY repo (not just ones they own), so
@@ -272,6 +396,7 @@ def github_user_activity():
 
 
 @app.route("/api/github/search-users")
+@require_login
 def github_search_users():
     """Powers the username autocomplete dropdown: proxies GitHub's user
     search so the frontend doesn't need its own token/CORS handling."""
@@ -336,6 +461,7 @@ def get_repo_dir(repo, branch=None):
 
 
 @app.route("/api/team-stats")
+@require_login
 def team_stats():
     """Aggregates commit activity per contributor (commits, lines added,
     lines deleted) for the given repo, using GitHub's API for the commit
@@ -512,6 +638,7 @@ def run_team_bugs_job(job_id, repo, use_ai, branch=None):
 
 
 @app.route("/api/team-summary", methods=["POST"])
+@require_admin
 def team_summary():
     """Generates a short, plain-English executive summary from
     aggregated team stats, using the same LLM setup as the rest of
@@ -541,6 +668,7 @@ def team_summary():
 
 
 @app.route("/api/team-report", methods=["POST"])
+@require_admin
 def team_report():
     """Builds a downloadable Team Performance report (PDF/Word/Markdown/
     HTML) from the Monitor tab's already-computed contributor data and
@@ -588,6 +716,7 @@ def team_report():
 
 
 @app.route("/api/team-bugs/start", methods=["POST"])
+@require_admin
 def team_bugs_start():
     """Starts the bug-attribution scan as a background job (mirrors
     /api/vuln-scan/start), so the Monitor tab can show live progress
@@ -609,6 +738,7 @@ def team_bugs_start():
 
 
 @app.route("/api/team-bugs/status/<job_id>")
+@require_login
 def team_bugs_status(job_id):
     job = TEAM_BUG_JOBS.get(job_id)
     if not job:
@@ -623,6 +753,7 @@ def team_bugs_status(job_id):
 
 
 @app.route("/api/branches")
+@require_login
 def branches():
     """Lists ALL remote branches for the given repo (cloning/fetching it
     into a local cache first), so the dashboard can offer a GitHub-style
@@ -644,6 +775,7 @@ def branches():
 
 
 @app.route("/api/current-diff")
+@require_login
 def current_diff():
     """Runs git diff for the given repo (cloning/fetching it into a
     local cache first) and returns it, so the dashboard can get a diff
@@ -666,6 +798,7 @@ def current_diff():
 
 
 @app.route("/api/scan", methods=["POST"])
+@require_login
 def scan():
     """Runs the real summarize_pr.py pipeline: filter -> truncate -> LLM."""
     data = request.get_json(force=True)
@@ -693,6 +826,7 @@ def scan():
 
 
 @app.route("/api/security-scan", methods=["POST"])
+@require_login
 def security_scan():
     """Runs the deterministic security scanner on the full raw diff."""
     data = request.get_json(force=True)
@@ -713,6 +847,7 @@ def gh_headers():
 
 
 @app.route("/api/github/pulls")
+@require_login
 def github_pulls():
     repo = request.args.get("repo", "")
     if "/" not in repo:
@@ -726,6 +861,7 @@ def github_pulls():
 
 
 @app.route("/api/github/comments")
+@require_login
 def github_comments():
     repo = request.args.get("repo", "")
     number = request.args.get("number", "")
@@ -738,6 +874,7 @@ def github_comments():
 
 
 @app.route("/api/github/commits")
+@require_login
 def github_commits():
     repo = request.args.get("repo", "")
     r = requests.get(
@@ -749,6 +886,7 @@ def github_commits():
 
 
 @app.route("/api/github/commit/<sha>")
+@require_login
 def github_commit_detail(sha):
     repo = request.args.get("repo", "")
     r = requests.get(
@@ -2709,6 +2847,7 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
 
 
 @app.route("/api/vuln-scan/start", methods=["POST"])
+@require_admin
 @rate_limit("vuln_scan_start")
 @require_csrf_token
 def vuln_scan_start():
@@ -2768,6 +2907,7 @@ def vuln_scan_start():
 
 
 @app.route("/api/vuln-scan/status/<job_id>")
+@require_login
 def vuln_scan_status(job_id):
     """Poll a running scan. Pass ?since=N to get only log lines after index N -
     an AI scan of a large repo produces thousands of lines, and resending the
@@ -2801,6 +2941,7 @@ def vuln_scan_status(job_id):
 
 
 @app.route("/api/vuln-scan/history")
+@require_login
 def vuln_scan_history():
     """Lists recent scans: in-memory session jobs first, then persistent
     history from disk (survives server restarts). Includes trend data."""
@@ -2859,6 +3000,7 @@ def vuln_scan_history():
 
 
 @app.route("/api/browse")
+@require_admin
 def browse_folders():
     """Lists sub-folders of a directory so the dashboard can offer a real
     folder picker for the 'scan a local folder' option.
@@ -2930,6 +3072,7 @@ def browse_folders():
 
 
 @app.route("/api/vuln-scan/rename", methods=["PATCH"])
+@require_admin
 @require_csrf_token
 def vuln_scan_rename():
     """Rename a scan. Body: {scan_ref: 'job:<id>' or 'ts:<ts>', name: '...'}"""
@@ -2965,6 +3108,7 @@ def vuln_scan_rename():
 
 
 @app.route("/api/vuln-scan/delete", methods=["DELETE"])
+@require_admin
 @require_csrf_token
 def vuln_scan_delete():
     """Deletes a scan. Body: {scan_ref: 'job:<id>' or 'ts:<ts>'}.
@@ -3059,6 +3203,7 @@ def _resolve_scan(ref):
 
 
 @app.route("/api/vuln-scan/compare", methods=["POST"])
+@require_login
 @rate_limit("vuln_scan_compare")
 @require_csrf_token
 def vuln_scan_compare():
@@ -4561,6 +4706,7 @@ def _report_filename(label, timestamp, ext):
 
 
 @app.route("/api/vuln-scan/report", methods=["POST"])
+@require_login
 @rate_limit("vuln_scan_report")
 @require_csrf_token
 def vuln_scan_report():
@@ -4712,7 +4858,7 @@ if __name__ == "__main__":
 
     # Load and show persistent scan history
     persistent_scans = _load_scan_history()
-    print(f"✓ Loaded {len(persistent_scans)} persistent scan(s) from history")
+    print(f"Loaded {len(persistent_scans)} persistent scan(s) from history")
     if persistent_scans:
         print(f"  History location: {SCAN_HISTORY_FILE}")
 

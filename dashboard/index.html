@@ -697,10 +697,14 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
         <span class="nav-label">Run scan</span>
       </div>
-      <div class="nav-item" data-panel="vuln">
+      <div class="nav-item admin-only" data-panel="vuln">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg></span>
         <span class="nav-label">Vuln Scan</span>
       </div>
+    </div>
+    <div id="sidebar-user-info" style="padding:10px 14px;font-size:12px;color:var(--text-secondary,#94a3b8);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <span id="sidebar-username-display"></span>
+      <button id="logout-btn" type="button" style="background:transparent;border:1px solid var(--border,#334155);color:inherit;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;">Log out</button>
     </div>
     <button class="theme-toggle" id="theme-toggle" type="button">
       <span class="nav-icon" id="theme-toggle-icon-dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A9 9 0 1 1 11.5 3a7 7 0 0 0 9.5 9.5z"/></svg></span>
@@ -1003,7 +1007,7 @@
           <option value="custom">Custom range&hellip;</option>
         </select>
       </div>
-      <label><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
+      <label class="admin-only"><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
     </div>
     <div class="row" id="monitor-custom-range-row" style="display:none;">
       <div class="field-group">
@@ -1058,7 +1062,7 @@
 
   <div class="row" id="monitor-export-row" style="display:none;">
     <button id="monitor-export-csv-btn">Export CSV</button>
-    <div class="field-group">
+    <div class="field-group admin-only">
       <span class="field-label">Report format</span>
       <select id="monitor-report-format" style="max-width:150px;">
         <option value="pdf">PDF</option>
@@ -1067,7 +1071,7 @@
         <option value="html">HTML</option>
       </select>
     </div>
-    <button id="monitor-export-report-btn">Export team report</button>
+    <button id="monitor-export-report-btn" class="admin-only">Export team report</button>
     <span id="monitor-export-status" class="hint-text"></span>
   </div>
   <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
@@ -1109,6 +1113,53 @@ function safeColor(c) {
 
 // Clear all cached state on page load (start fresh each time)
 localStorage.clear();
+
+// Auth: confirm a session exists and apply role-based UI (admin sees
+// everything; a plain "user" only gets the general/read-only tabs).
+// The backend is the real gate (401/403 on every protected route) - this
+// just hides controls a non-admin can't use, to avoid confusing dead ends.
+let currentUser = null;
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (!data.authenticated) {
+      window.location.href = '/login';
+      return;
+    }
+    currentUser = data;
+    applyRoleUI(data.role);
+  } catch (err) {
+    console.error('Auth check failed:', err);
+    window.location.href = '/login';
+  }
+}
+
+function applyRoleUI(role) {
+  const usernameEl = document.getElementById('sidebar-username-display');
+  if (usernameEl) usernameEl.textContent = (currentUser && currentUser.username || '') + (role === 'admin' ? ' (admin)' : '');
+  if (role !== 'admin') {
+    document.querySelectorAll('.admin-only').forEach(el => { el.style.display = 'none'; });
+  }
+}
+checkAuth();
+
+const logoutBtn = document.getElementById('logout-btn');
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', async () => {
+    try {
+      const token = await ensureCsrfToken();
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csrf_token: token }),
+      });
+    } catch (err) {
+      console.error('Logout request failed:', err);
+    }
+    window.location.href = '/login';
+  });
+}
 
 // Security: CSRF token for protected requests
 let csrfToken = null;
