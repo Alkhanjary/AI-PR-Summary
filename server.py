@@ -1129,7 +1129,7 @@ def detect_project(target_dir, skip_docker=False):
                 "install": install,
                 "start": start,
                 "env": {"PORT": str(_fp), "FLASK_RUN_PORT": str(_fp)},
-                "candidate_ports": [_fp, 5000, 8000],
+                "candidate_ports": [_fp, 8000],
                 "use_shell": use_shell,
             })
 
@@ -1234,7 +1234,7 @@ def detect_project(target_dir, skip_docker=False):
                       if script.suffix.lower() == ".ps1"
                       else f'bash "{script}"'),
             "env": {},
-            "candidate_ports": [3000, 5173, 8000, 8080, 4200, 5000, 80],
+            "candidate_ports": [3000, 5173, 8000, 8080, 4200, 80],
             "use_shell": True,
         })
 
