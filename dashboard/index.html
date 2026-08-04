@@ -1116,9 +1116,20 @@ fetch('/api/csrf-token')
 
 // Wait for CSRF token to be available (with timeout)
 async function ensureCsrfToken() {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 100; i++) {
     if (csrfToken) return csrfToken;
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  // If still not available, fetch it directly
+  try {
+    const res = await fetch('/api/csrf-token');
+    if (res.ok) {
+      const data = await res.json();
+      csrfToken = data.csrf_token;
+      return csrfToken;
+    }
+  } catch (e) {
+    console.error('CSRF token fetch failed:', e);
   }
   throw new Error('CSRF token not available');
 }
