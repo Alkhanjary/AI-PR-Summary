@@ -4166,6 +4166,178 @@ def build_report_html(md_text, title, subtitle=None):
     )
 
 
+def build_fix_loop_markdown(result, details=None, scan_label="", scan_time=None):
+    """Builds a task file meant to be handed straight to a coding agent.
+
+    A report is written for a person deciding what to do. This is written for an
+    agent doing it: one task per finding, ordered worst-first, each carrying the
+    exact location, the offending line, what to change and how to prove it
+    worked - plus a checkbox so a long run can be stopped and resumed.
+
+    Two things make the difference between this and just pasting the report:
+    dismissed detections are listed as explicitly DO-NOT-FIX (an agent handed
+    178 findings will otherwise "fix" the AWS key in a redaction test and break
+    it), and the rules up front stop it inventing changes for findings whose
+    evidence is too thin to act on."""
+    all_findings = result.get("findings", [])
+    findings = [f for f in all_findings if not _is_dismissed(f)]
+    dismissed = [f for f in all_findings if _is_dismissed(f)]
+    details = details or {}
+
+    order = {s: i for i, s in enumerate(SEVERITY_ORDER)}
+    index_of = {id(f): i for i, f in enumerate(all_findings)}
+    ranked = sorted(findings, key=lambda f: order.get((f.get("severity") or "").lower(),
+                                                      len(SEVERITY_ORDER)))
+    counts = count_findings_by_severity(findings)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    L = []
+    L.append("# Security fix loop")
+    L.append("")
+    L.append(f"- **Target:** `{scan_label or 'scanned project'}`")
+    L.append(f"- **Generated:** {stamp}")
+    L.append(f"- **Tasks:** {len(ranked)} "
+             f"({counts['critical']} critical, {counts['high']} high, "
+             f"{counts['medium']} medium, {counts['low']} low)")
+    if dismissed:
+        L.append(f"- **Do not fix:** {len(dismissed)} dismissed detection(s) — see the last section")
+    L.append("")
+
+    L.append("## How to use this file")
+    L.append("")
+    L.append("Give this file to a coding agent and tell it to work the loop. It should:")
+    L.append("")
+    L.append("1. Take the **first unchecked task** in order. They are sorted worst-first.")
+    L.append("2. Open the file at the given path and confirm the offending code is still there. "
+             "Line numbers drift — search for the evidence line rather than trusting the number.")
+    L.append("3. Apply the fix described in that task, and nothing else.")
+    L.append("4. Run the verification command for that task, plus the project's test suite.")
+    L.append("5. Tick the checkbox, commit that single fix, and move to the next task.")
+    L.append("")
+    L.append("Work one task per commit. A single commit fixing thirty findings cannot be "
+             "reviewed or reverted independently.")
+    L.append("")
+
+    L.append("## Rules")
+    L.append("")
+    L.append("- **Do not touch anything in the \"Do not fix\" section.** Those were reviewed and "
+             "judged false positives. Most are deliberate test fixtures, and \"fixing\" them "
+             "breaks the tests that prove the scanner works.")
+    L.append("- **If the code no longer matches the evidence, stop and mark the task obsolete.** "
+             "Do not hunt for something similar to change.")
+    L.append("- **If a task's evidence is too thin to act on with confidence, leave it unchecked "
+             "and note what you would need.** A guessed fix to security code is worse than none.")
+    L.append("- **Do not widen a fix into a refactor.** Change the vulnerable construct, not the "
+             "surrounding design.")
+    L.append("- **Never weaken a test to make a fix pass.**")
+    L.append("- Findings can be duplicates of each other. If a task is already resolved by an "
+             "earlier fix, tick it and say which task covered it.")
+    L.append("")
+
+    L.append("## Progress")
+    L.append("")
+    for i, f in enumerate(ranked, 1):
+        sev = (f.get("severity") or "unknown").upper()
+        loc = f.get("file", "unknown")
+        if f.get("line") not in (None, ""):
+            loc += f":{f['line']}"
+        cat = f.get("category") or f.get("rule") or "finding"
+        L.append(f"- [ ] **{i}.** `[{sev}]` {cat} — `{loc}`")
+    L.append("")
+
+    L.append("---")
+    L.append("")
+    L.append("## Tasks")
+    L.append("")
+
+    for i, f in enumerate(ranked, 1):
+        sev = (f.get("severity") or "unknown").upper()
+        file_ = f.get("file", "unknown")
+        line_no = f.get("line")
+        loc = file_ + (f":{line_no}" if line_no not in (None, "") else "")
+        cat = f.get("category") or f.get("rule") or "finding"
+        d = details.get(index_of.get(id(f)), {}) or {}
+
+        L.append(f"### Task {i} — [{sev}] {cat}")
+        L.append("")
+        L.append(f"- [ ] Fixed and verified")
+        L.append("")
+        L.append(f"**Where:** `{loc}`")
+        L.append("")
+        if f.get("description"):
+            L.append(f"**Problem:** {f['description']}")
+            L.append("")
+        if d.get("what"):
+            L.append(f"**What this is:** {d['what']}")
+            L.append("")
+        if d.get("why"):
+            L.append(f"**Why it matters here:** {d['why']}")
+            L.append("")
+        if f.get("evidence"):
+            L.append("**Find this line** (search for it; the line number may have moved):")
+            L.append("")
+            L.append("```")
+            L.append(str(f["evidence"]).rstrip())
+            L.append("```")
+            L.append("")
+        if d.get("attack"):
+            L.append(f"**How it would be exploited:** {d['attack']}")
+            L.append("")
+
+        fix = d.get("fix") or f.get("improvement")
+        L.append("**Change to make:**")
+        L.append("")
+        L.append(fix.strip() if fix else
+                 "_No specific fix was supplied. Read the surrounding code, decide whether this "
+                 "is real, and either fix it or leave the task unchecked with a note._")
+        L.append("")
+        L.append("**Verify:**")
+        L.append("")
+        L.append(d.get("verify")
+                 or "Re-run the scan and confirm this finding is gone, then run the project's "
+                    "test suite and confirm nothing regressed.")
+        L.append("")
+        if d.get("severity_note"):
+            L.append(f"**On the severity:** {d['severity_note']}")
+            L.append("")
+        L.append("---")
+        L.append("")
+
+    if dismissed:
+        L.append("## Do not fix")
+        L.append("")
+        L.append("These were dismissed by AI review or matched inside test fixtures. They are "
+                 "listed so you can recognise them if the scanner reports them again — **not** "
+                 "as work. Changing them is a regression.")
+        L.append("")
+        by_file = {}
+        for f in dismissed:
+            by_file.setdefault(f.get("file") or "unknown", []).append(f)
+        for fname, group in sorted(by_file.items()):
+            L.append(f"**`{fname}`** — {len(group)} dismissed")
+            L.append("")
+            for f in group:
+                ln = f.get("line")
+                where = f"line {ln}" if ln not in (None, "") else "—"
+                reason = f.get("ai_reason") or ("test fixture" if f.get("likely_test_fixture")
+                                                else "dismissed by AI review")
+                cat = f.get("category") or f.get("rule") or "finding"
+                L.append(f"- {where} · {cat} — {reason}")
+            L.append("")
+
+    L.append("## When the loop is done")
+    L.append("")
+    L.append("1. Every task above is either ticked or has a written note saying why not.")
+    L.append("2. The full test suite passes.")
+    L.append("3. Re-run the scan. The new report should show the fixed findings gone, and the "
+             "\"Do not fix\" list unchanged in size.")
+    L.append("4. Anything still reported that you decided not to fix should be recorded, with "
+             "the reason, so the next run doesn't re-litigate it.")
+    L.append("")
+
+    return "\n".join(L)
+
+
 def _report_filename(label, timestamp, ext):
     """Builds a download name from what was scanned, so a folder of saved
     reports is identifiable - 'vuln-report.pdf' five times over tells you
@@ -4267,11 +4439,17 @@ def vuln_scan_report():
         "dismissed_as_false_positive": dismissed_count,
         "findings": review_findings,
     }
-    findings_json = json.dumps(summary_payload, indent=2)[:REPORT_MAX_CHARS]
-    try:
-        narrative_md = call_llm(client, model, findings_json, system_prompt=VULN_REPORT_SYSTEM_PROMPT)
-    except Exception as e:
-        return jsonify({"error": f"Report generation failed: {e}"}), 500
+    # The fix loop is a task list for an agent, not a document for a reader -
+    # the executive narrative would only be noise in it, so don't pay for one.
+    is_fix_loop = fmt in ("fixloop", "agent")
+    narrative_md = ""
+    if not is_fix_loop:
+        findings_json = json.dumps(summary_payload, indent=2)[:REPORT_MAX_CHARS]
+        try:
+            narrative_md = call_llm(client, model, findings_json,
+                                    system_prompt=VULN_REPORT_SYSTEM_PROMPT)
+        except Exception as e:
+            return jsonify({"error": f"Report generation failed: {e}"}), 500
 
     # Per-finding deep-dive: what it is, why it matters here, how it would be
     # exploited, the specific fix, how to verify. On by default; pass
@@ -4280,7 +4458,7 @@ def vuln_scan_report():
     if data.get("detail", True):
         details, detail_note = enrich_findings_with_detail(findings)
 
-    report_md = normalize_report_text(
+    report_md = "" if is_fix_loop else normalize_report_text(
         narrative_md.strip() + "\n\n" + build_findings_markdown(result, details, detail_note)
     )
 
@@ -4300,6 +4478,11 @@ def vuln_scan_report():
         return {"Content-Disposition":
                 f'attachment; filename="{_report_filename(scan_label, scan_time, ext)}"'}
 
+    if fmt in ("fixloop", "agent"):
+        loop_md = build_fix_loop_markdown(result, details, scan_label, scan_time)
+        name = _report_filename(scan_label, scan_time, "md").replace("_vuln-report.md", "_fix-loop.md")
+        return Response(loop_md, mimetype="text/markdown",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
     if fmt == "markdown":
         return Response(report_md, mimetype="text/markdown", headers=_disp("md"))
     if fmt == "html":

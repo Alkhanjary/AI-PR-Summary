@@ -944,6 +944,7 @@
           <option value="docx">Word (.docx)</option>
           <option value="markdown">Markdown</option>
           <option value="html">HTML</option>
+          <option value="fixloop">AI fix loop (.md)</option>
         </select>
       </div>
       <label title="Adds a per-finding write-up: what it is, why it matters here, how it would be exploited, the specific fix, and how to verify it. Takes longer.">
@@ -2222,10 +2223,11 @@ async function loadVulnScanHistoryFull() {
               </label>
               <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <span style="font-size:11px;color:#94a3b8;">Report:</span>
-                ${['pdf','docx','html','markdown'].map(f =>
+                ${['pdf','docx','html','markdown','fixloop'].map(f =>
                   `<button class="btn btn-sm" style="font-size:11px;padding:3px 8px;"
                      onclick="downloadHistoryReport('${ref}','${f}',this)"
-                     >${f === 'markdown' ? 'md' : f}</button>`).join('')}
+                     title="${f === 'fixloop' ? 'Task list for a coding agent to work through' : 'Download as ' + f}"
+                   >${f === 'markdown' ? 'md' : f === 'fixloop' ? 'fix loop' : f}</button>`).join('')}
               </div>
             </div>
           </div>
@@ -2421,7 +2423,7 @@ async function downloadHistoryReport(ref, fmt, btn) {
       return;
     }
     const blob = await res.blob();
-    const ext = {pdf:'pdf', docx:'docx', html:'html', markdown:'md'}[fmt] || fmt;
+    const ext = {pdf:'pdf', docx:'docx', html:'html', markdown:'md', fixloop:'md'}[fmt] || fmt;
     const fname = filenameFromResponse(res, 'vuln-report.' + ext);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -2983,7 +2985,7 @@ vulnReportBtn.addEventListener('click', async () => {
       return;
     }
     const blob = await res.blob();
-    const ext = { pdf: 'pdf', docx: 'docx', markdown: 'md', html: 'html' }[format] || 'txt';
+    const ext = { pdf: 'pdf', docx: 'docx', markdown: 'md', html: 'html', fixloop: 'md' }[format] || 'txt';
     const fname = filenameFromResponse(res, 'vuln-report.' + ext);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
