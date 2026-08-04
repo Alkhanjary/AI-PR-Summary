@@ -11,7 +11,7 @@
     }
   })();
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="/chart.umd.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; }
@@ -3580,7 +3580,6 @@ function trendArrow(current, previous) {
 }
 
 function renderMonitorCommitsChart(contributors) {
-  if (!window.Chart) return;
   const ctx = document.getElementById('monitorChart');
   if (monitorChartInstance) monitorChartInstance.destroy();
   monitorChartWrap.style.display = 'block';
@@ -3595,7 +3594,6 @@ const SEVERITY_WEIGHTS = { critical: 8, high: 4, medium: 2, low: 1 };
 const SEVERITY_CHART_COLORS = { critical: '#7f1d1d', high: '#dc2626', medium: '#d97706', low: '#059669' };
 
 function renderSeverityChart(contributors, bugsByAuthor) {
-  if (!window.Chart) return;
   const ctx = document.getElementById('monitorSeverityChart');
   if (monitorSeverityChartInstance) monitorSeverityChartInstance.destroy();
   monitorSeverityChartWrap.style.display = 'block';
@@ -3632,7 +3630,6 @@ function renderSeverityChart(contributors, bugsByAuthor) {
 }
 
 function renderCoverageChart(contributors) {
-  if (!window.Chart) return;
   const ctx = document.getElementById('monitorCoverageChart');
   if (monitorCoverageChartInstance) monitorCoverageChartInstance.destroy();
   monitorCoverageChartWrap.style.display = 'block';
@@ -3658,7 +3655,6 @@ function renderCoverageChart(contributors) {
 }
 
 function renderTimelineChart(contributors, timeline) {
-  if (!window.Chart) return;
   const ctx = document.getElementById('monitorTimelineChart');
   if (monitorTimelineChartInstance) monitorTimelineChartInstance.destroy();
   monitorTimelineChartWrap.style.display = 'block';
@@ -3677,7 +3673,6 @@ function renderTimelineChart(contributors, timeline) {
 }
 
 function renderLinesOverTimeChart(contributors, timeline) {
-  if (!window.Chart) return;
   const ctx = document.getElementById('monitorScatterChart');
   if (monitorLinesChartInstance) monitorLinesChartInstance.destroy();
   monitorScatterChartWrap.style.display = 'block';

@@ -191,6 +191,15 @@ def dashboard():
   return "Dashboard not found", 404
 
 
+@app.route("/chart.umd.js")
+def serve_chart():
+  """Serve Chart.js locally (no external CDN dependency)."""
+  chart_path = Path(__file__).resolve().parent / "dashboard" / "chart.umd.js"
+  if chart_path.exists():
+    return chart_path.read_bytes(), 200, {"Content-Type": "application/javascript"}
+  return "Chart.js not found", 404
+
+
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
@@ -4657,9 +4666,9 @@ if __name__ == "__main__":
     if debug:
         print("WARNING: debug mode is on - the Werkzeug debugger allows code "
               "execution. Never use this on a shared or reachable machine.")
-    # Listen on all interfaces to allow access via IP address
+    # Listen on localhost only
     app.run(
-        host="0.0.0.0", port=5000, debug=debug,
+        host="127.0.0.1", port=5000, debug=debug,
         # exclude_patterns keeps the dev reloader from watching .repo-cache/ -
         # without it, checking out a branch in a cached clone (which touches
         # file mtimes, including any server.py inside a cloned repo) can
