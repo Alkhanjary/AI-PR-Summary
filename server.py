@@ -76,7 +76,9 @@ def require_csrf_token(f):
   @wraps(f)
   def decorated_function(*args, **kwargs):
     if request.method == 'POST':
-      token = request.form.get('csrf_token') or request.json.get('csrf_token')
+      token = request.form.get('csrf_token')
+      if not token and request.json:
+        token = request.json.get('csrf_token')
       if not token or not _validate_csrf_token(token):
         abort(403)
     return f(*args, **kwargs)

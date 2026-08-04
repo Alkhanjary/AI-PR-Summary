@@ -1110,9 +1110,22 @@ function safeColor(c) {
 // Security: CSRF token for protected requests
 let csrfToken = null;
 fetch('/api/csrf-token')
-  .then(r => r.json())
-  .then(d => { csrfToken = d.csrf_token; })
-  .catch(() => console.warn('Could not load CSRF token'));
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then(d => {
+    csrfToken = d.csrf_token;
+    console.log('CSRF token loaded');
+  })
+  .catch(err => {
+    console.warn('Could not load CSRF token:', err);
+    // Retry once
+    fetch('/api/csrf-token')
+      .then(r => r.json())
+      .then(d => { csrfToken = d.csrf_token; })
+      .catch(err2 => console.error('CSRF token retry failed:', err2));
+  });
 
 // Wait for CSRF token to be available (with timeout)
 async function ensureCsrfToken() {
