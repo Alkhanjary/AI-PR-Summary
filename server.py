@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2671,6 +2672,14 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             report["history_delta"] = delta
             job["status"] = "done"
             job["result"] = report
+
+            # Auto-open the scanned app in browser after scan completes
+            if url:
+                job["log"].append(f"Opening {url} in browser...")
+                try:
+                    webbrowser.open(url)
+                except Exception as e:
+                    job["log"].append(f"Could not auto-open browser: {e}")
         except (FileNotFoundError, json.JSONDecodeError):
             job["status"] = "error"
             job["error"] = "Scanner did not produce a valid report."
