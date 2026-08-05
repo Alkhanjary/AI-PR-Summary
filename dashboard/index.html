@@ -3051,10 +3051,11 @@ async function runScanComparison() {
   panel.scrollIntoView({behavior:'smooth', block:'start'});
 
   try {
+    const token = await ensureCsrfToken();
     const res = await fetch(API_BASE + '/api/vuln-scan/compare', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({scan_a: _vulnCompareSelected[0], scan_b: _vulnCompareSelected[1]}),
+      body: JSON.stringify({scan_a: _vulnCompareSelected[0], scan_b: _vulnCompareSelected[1], csrf_token: token}),
     });
     const data = await res.json();
     if (data.error) { results.innerHTML = `<span class="hint-text">Error: ${_esc(data.error)}</span>`; return; }
@@ -3483,11 +3484,12 @@ vulnReportBtn.addEventListener('click', async () => {
   cancelBtn.style.display = '';
   cancelBtn.onclick = () => { _reportAbort.abort(); };
   try {
+    const token = await ensureCsrfToken();
     const res = await fetch(API_BASE + '/api/vuln-scan/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: _reportAbort.signal,
-      body: JSON.stringify({ job_id: lastVulnJobId, format, detail: document.getElementById('vuln-report-detail').checked })
+      body: JSON.stringify({ job_id: lastVulnJobId, format, detail: document.getElementById('vuln-report-detail').checked, csrf_token: token })
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
