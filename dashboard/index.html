@@ -2539,17 +2539,13 @@ document.querySelectorAll('#vuln-tab-segmented .segmented-option').forEach(opt =
 });
 
 let _vulnCompareSelected = [];   // up to 2 scan_ref strings
-let _vulnHistoryItems = [];       // last-loaded items for compare lookup
+let _vulnHistoryItems = [];       // all loaded-so-far items for compare lookup
+const VULN_HISTORY_PAGE_SIZE = 25;
+let _vulnHistoryOffset = 0;
+let _vulnHistoryHasMore = false;
+let _vulnHistoryLoadingMore = false;
 
-async function loadVulnScanHistoryFull() {
-  const list = document.getElementById('vuln-history-list-full');
-  list.innerHTML = '<span class="hint-text">Loading...</span>';
-  try {
-    const res = await fetch(API_BASE + '/api/vuln-scan/history');
-    const data = await res.json();
-    _vulnHistoryItems = (data.items || []).filter(i => i.status === 'done');
-    if (_vulnHistoryItems.length === 0) { list.innerHTML = '<span class="hint-text">No scans saved yet.</span>'; return; }
-    list.innerHTML = _vulnHistoryItems.map((i, idx) => {
+function renderVulnHistoryItem(i, idx) {
       const when = new Date(i.started * 1000).toLocaleString();
       const counts = i.counts || {};
       const d = i.history_delta;
@@ -2628,7 +2624,35 @@ async function loadVulnScanHistoryFull() {
           </div>
         </div>
       </div>`;
-    }).join('');
+}
+
+function renderVulnHistoryLoadMore() {
+  const list = document.getElementById('vuln-history-list-full');
+  const old = document.getElementById('vuln-history-load-more');
+  if (old) old.remove();
+  if (!_vulnHistoryHasMore) return;
+  const btn = document.createElement('button');
+  btn.id = 'vuln-history-load-more';
+  btn.className = 'btn btn-sm';
+  btn.style.cssText = 'margin:8px 0;background:var(--surface-alt);color:var(--accent-text);width:100%;';
+  btn.textContent = 'Load more scans';
+  btn.addEventListener('click', loadMoreVulnHistory);
+  list.appendChild(btn);
+}
+
+async function loadVulnScanHistoryFull() {
+  const list = document.getElementById('vuln-history-list-full');
+  list.innerHTML = '<span class="hint-text">Loading...</span>';
+  _vulnHistoryOffset = 0;
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/history?limit=' + VULN_HISTORY_PAGE_SIZE + '&offset=0');
+    const data = await res.json();
+    _vulnHistoryItems = (data.items || []).filter(i => i.status === 'done');
+    _vulnHistoryOffset = (data.items || []).length;
+    _vulnHistoryHasMore = !!data.has_more;
+    if (_vulnHistoryItems.length === 0) { list.innerHTML = '<span class="hint-text">No scans saved yet.</span>'; return; }
+    list.innerHTML = _vulnHistoryItems.map((i, idx) => renderVulnHistoryItem(i, idx)).join('');
+    renderVulnHistoryLoadMore();
 
     // restore any existing selection state
     _vulnCompareSelected.forEach(ref => {
@@ -2639,6 +2663,39 @@ async function loadVulnScanHistoryFull() {
     renderVulnTrendChart();
   } catch (e) {
     list.innerHTML = '<span class="hint-text">Could not load history.</span>';
+  }
+}
+
+async function loadMoreVulnHistory() {
+  if (_vulnHistoryLoadingMore || !_vulnHistoryHasMore) return;
+  _vulnHistoryLoadingMore = true;
+  const loadMoreBtn = document.getElementById('vuln-history-load-more');
+  if (loadMoreBtn) { loadMoreBtn.disabled = true; loadMoreBtn.textContent = 'Loading...'; }
+  try {
+    const res = await fetch(API_BASE + '/api/vuln-scan/history?limit=' + VULN_HISTORY_PAGE_SIZE
+                            + '&offset=' + _vulnHistoryOffset);
+    const data = await res.json();
+    const newItems = (data.items || []).filter(i => i.status === 'done');
+    const startIdx = _vulnHistoryItems.length;
+    _vulnHistoryItems = _vulnHistoryItems.concat(newItems);
+    _vulnHistoryOffset += (data.items || []).length;
+    _vulnHistoryHasMore = !!data.has_more;
+
+    const list = document.getElementById('vuln-history-list-full');
+    const html = newItems.map((i, idx) => renderVulnHistoryItem(i, startIdx + idx)).join('');
+    const oldBtn = document.getElementById('vuln-history-load-more');
+    if (oldBtn) oldBtn.insertAdjacentHTML('beforebegin', html);
+    else list.insertAdjacentHTML('beforeend', html);
+    renderVulnHistoryLoadMore();
+
+    _vulnCompareSelected.forEach(ref => {
+      const cb = list.querySelector(`input[data-ref="${ref}"]`);
+      if (cb) cb.checked = true;
+    });
+  } catch (e) {
+    if (loadMoreBtn) { loadMoreBtn.disabled = false; loadMoreBtn.textContent = 'Load more scans'; }
+  } finally {
+    _vulnHistoryLoadingMore = false;
   }
 }
 
@@ -2749,10 +2806,11 @@ function startRename(nameEl, ref) {
   const save = async () => {
     const newName = inp.value.trim() || current;
     try {
+      const token = await ensureCsrfToken();
       await fetch(API_BASE + '/api/vuln-scan/rename', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({scan_ref: ref, name: newName}),
+        body: JSON.stringify({scan_ref: ref, name: newName, csrf_token: token}),
       });
     } catch (e) { /* silent */ }
     const span = document.createElement('span');
@@ -2972,10 +3030,11 @@ async function deleteScan(ref, btn) {
   btn.disabled = true;
 
   try {
+    const token = await ensureCsrfToken();
     const res = await fetch(API_BASE + '/api/vuln-scan/delete', {
       method: 'DELETE',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({scan_ref: ref}),
+      body: JSON.stringify({scan_ref: ref, csrf_token: token}),
     });
     const data = await res.json();
     if (data.error) {

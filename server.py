@@ -109,10 +109,10 @@ def _validate_csrf_token(token):
     return False
 
 def require_csrf_token(f):
-  """Decorator to require valid CSRF token in POST requests."""
+  """Decorator to require a valid CSRF token on state-changing requests."""
   @wraps(f)
   def decorated_function(*args, **kwargs):
-    if request.method == 'POST':
+    if request.method in ('POST', 'PATCH', 'DELETE'):
       token = request.form.get('csrf_token')
       if not token and request.json:
         token = request.json.get('csrf_token')
@@ -1320,7 +1320,10 @@ def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_
         records = _load_scan_history()
         prev = next((r for r in reversed(records) if r.get("repo") == repo_key), None)
         records.append(entry)
-        records = records[-200:]  # cap at 200 records total
+        # No cap here - a scan is kept until the user explicitly deletes it
+        # (see vuln_scan_delete). This used to silently drop the oldest
+        # record past 200 total, which looked like findings randomly
+        # disappearing since nothing about it was visible or user-driven.
         _save_scan_history(records)
 
     if not prev:
@@ -3371,7 +3374,26 @@ def vuln_scan_history():
         })
 
     items.sort(key=lambda e: -e["started"])
-    return jsonify({"items": items[:25]})
+
+    # Paginated rather than a hard slice - scans are kept until explicitly
+    # deleted now (see save_and_compare_scan), so the list can grow well
+    # past what used to be a silent 25-item cutoff. Default page size
+    # matches the old behavior; the client can page through the rest.
+    try:
+        limit = min(max(int(request.args.get("limit", 25)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 25
+    try:
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except (TypeError, ValueError):
+        offset = 0
+
+    page = items[offset:offset + limit]
+    return jsonify({
+        "items": page,
+        "total": len(items),
+        "has_more": offset + limit < len(items),
+    })
 
 
 @app.route("/api/browse")
