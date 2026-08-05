@@ -19,7 +19,7 @@ import requests
 
 from flask import Flask, jsonify, request, Response, session, redirect, url_for
 from flask_cors import CORS
-import hashlib
+from werkzeug.security import generate_password_hash, check_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from summarize_pr import (
@@ -56,7 +56,6 @@ app.permanent_session_lifetime = 24 * 60 * 60  # 24 hours default
 
 # Security: CSRF tokens, rate limiting, API key validation
 import secrets
-import hashlib
 import time
 from functools import wraps
 from flask import session, abort
@@ -127,19 +126,47 @@ def rate_limit(endpoint_name):
 # ============ Authentication & Roles ============
 # role: "admin" (full access - scans, delete, settings, tokens) or
 #       "user" (read-only - view PR summaries, view dashboards/charts, no scanning/mutation)
-_users = {
-    "admin": {"password": hashlib.sha256(b"admin123").hexdigest(), "role": "admin"},
-    "user": {"password": hashlib.sha256(b"user123").hexdigest(), "role": "user"},
-}
+#
+# Persisted to disk (salted, werkzeug-hashed) so a password change survives a
+# restart and isn't sitting in this file in plaintext-adjacent form. The two
+# accounts below are only the first-run defaults, written out once if no
+# users file exists yet - editing these constants after that has no effect;
+# change the password from the dashboard (or delete users.json to reset).
+USERS_FILE = Path(
+    os.environ.get("AI_PR_SUMMARY_DATA_DIR")
+    or (Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share") / "ai-pr-summary")
+) / "users.json"
+_users_lock = threading.Lock()
 
-def hash_password(password):
-  """Hash a password for storage."""
-  return hashlib.sha256(password.encode()).hexdigest()
+def _default_users():
+    return {
+        "admin": {"password": generate_password_hash("admin123"), "role": "admin"},
+        "user": {"password": generate_password_hash("user123"), "role": "user"},
+    }
+
+def _load_users():
+    try:
+        if USERS_FILE.exists():
+            return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Warning: Could not load users from {USERS_FILE}: {e}", file=sys.stderr)
+    defaults = _default_users()
+    _save_users(defaults)
+    return defaults
+
+def _save_users(users):
+    try:
+        USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not save users to {USERS_FILE}: {e}", file=sys.stderr)
 
 def check_login(username, password):
   """Check credentials; returns the user's role on success, else None."""
-  u = _users.get(username)
-  if not u or u["password"] != hash_password(password):
+  with _users_lock:
+    users = _load_users()
+  u = users.get(username)
+  if not u or not check_password_hash(u["password"], password):
     return None
   return u["role"]
 
@@ -334,6 +361,32 @@ def api_logout():
   return jsonify({"status": "ok"}), 200
 
 
+@app.route("/api/auth/change-password", methods=["POST"])
+@require_login
+@require_csrf_token
+def api_change_password():
+  """Lets the logged-in account change its own password. Requires the
+  current password - anyone with an open, unattended session shouldn't be
+  able to lock the real owner out just by having the tab open."""
+  data = request.get_json(force=True) or {}
+  current_password = data.get("current_password", "")
+  new_password = data.get("new_password", "")
+  username = session.get("user_id")
+
+  if len(new_password) < 6:
+    return jsonify({"error": "New password must be at least 6 characters."}), 400
+
+  with _users_lock:
+    users = _load_users()
+    u = users.get(username)
+    if not u or not check_password_hash(u["password"], current_password):
+      return jsonify({"error": "Current password is incorrect."}), 401
+    u["password"] = generate_password_hash(new_password)
+    _save_users(users)
+
+  return jsonify({"status": "ok"}), 200
+
+
 @app.route("/api/auth/me")
 def api_me():
   """Tells the frontend who's logged in, their role, and (for a "user")
@@ -382,6 +435,56 @@ def api_set_permissions():
         perms[key] = bool(incoming[key])
     _save_permissions(perms)
   return jsonify({"status": "ok", "permissions": perms})
+
+
+@app.route("/api/admin/health")
+@require_admin
+def api_admin_health():
+  """Surfaces the setup checks that would otherwise only show up as a
+  cryptic runtime error deep in a scan or a PR summary - missing API keys,
+  the security-scan tool not cloned yet, or a data directory the process
+  can't actually write to. Admin-only since it can reveal local file paths."""
+  llm_key = os.environ.get("LLM_API_KEY")
+  github_token = os.environ.get("GITHUB_TOKEN")
+
+  def _writable(path):
+    try:
+      path.parent.mkdir(parents=True, exist_ok=True)
+      probe = path.parent / ".write_test"
+      probe.write_text("ok", encoding="utf-8")
+      probe.unlink()
+      return True
+    except Exception:
+      return False
+
+  checks = [
+      {
+          "name": "LLM API key",
+          "ok": bool(llm_key),
+          "detail": "Configured" if llm_key else "LLM_API_KEY not set in .env - PR summaries and AI-verified scans will fail.",
+      },
+      {
+          "name": "GitHub token",
+          "ok": bool(github_token),
+          "detail": "Configured" if github_token else "GITHUB_TOKEN not set - GitHub API calls are rate-limited to 60/hour instead of 5000/hour, and private repos are unreachable.",
+      },
+      {
+          "name": "Vulnerability scanner tool",
+          "ok": OTHER_SCANNER_PATH.exists(),
+          "detail": str(OTHER_SCANNER_PATH) if OTHER_SCANNER_PATH.exists() else "Not found - will attempt to clone from GitHub on first scan.",
+      },
+      {
+          "name": "Scan history storage",
+          "ok": _writable(SCAN_HISTORY_FILE),
+          "detail": str(SCAN_HISTORY_FILE),
+      },
+      {
+          "name": "Permissions storage",
+          "ok": _writable(PERMISSIONS_FILE),
+          "detail": str(PERMISSIONS_FILE),
+      },
+  ]
+  return jsonify({"checks": checks})
 
 
 @app.route("/")

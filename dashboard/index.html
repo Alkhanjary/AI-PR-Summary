@@ -723,7 +723,7 @@
       <span class="nav-icon" id="theme-toggle-icon-light" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
       <span class="nav-label" id="theme-toggle-label">Dark mode</span>
     </button>
-    <div class="nav-item" id="sidebar-user-info" style="cursor:default;margin-top:0;">
+    <div class="nav-item" id="sidebar-user-info" title="Change password" style="margin-top:0;">
       <span class="nav-icon" id="sidebar-user-avatar" style="border-radius:50%;background:linear-gradient(135deg,#38bdf8,#818cf8);color:#fff;font-size:10px;font-weight:700;"></span>
       <span class="nav-label" style="display:flex;flex-direction:column;line-height:1.35;">
         <span id="sidebar-username-display" style="font-weight:var(--weight-semibold);"></span>
@@ -735,6 +735,34 @@
       <span class="nav-label">Log out</span>
     </button>
   </nav>
+
+  <div id="account-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center;">
+    <div class="panel-card" style="max-width:380px;width:100%;margin:16px;box-shadow:var(--elev-3);">
+      <div class="panel-card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        Change password
+        <button id="account-modal-close" type="button" style="background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:var(--text-secondary);">&times;</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+        <div class="field-group">
+          <span class="field-label">Current password</span>
+          <input type="password" id="account-current-password" autocomplete="current-password">
+        </div>
+        <div class="field-group">
+          <span class="field-label">New password</span>
+          <input type="password" id="account-new-password" autocomplete="new-password" placeholder="At least 6 characters">
+        </div>
+        <div class="field-group">
+          <span class="field-label">Confirm new password</span>
+          <input type="password" id="account-confirm-password" autocomplete="new-password">
+        </div>
+        <div id="account-modal-error" class="hint-text" style="display:none;color:#dc2626;"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+          <button id="account-modal-save" type="button" class="btn">Update password</button>
+          <span id="account-modal-status" class="hint-text"></span>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="main-content">
     <header>
@@ -1038,6 +1066,15 @@
       <span id="settings-save-status" class="hint-text"></span>
     </div>
   </div>
+
+  <div class="hero-block" style="margin-top:24px;">
+    <div class="hero-block-title">System health</div>
+    <div class="hero-block-desc">What's configured and what isn't, so a missing API key shows up here instead of as a cryptic error mid-scan.</div>
+  </div>
+  <div class="panel-card">
+    <div id="settings-health-list" style="display:flex;flex-direction:column;gap:2px;"><span class="hint-text">Loading...</span></div>
+    <button id="settings-health-refresh-btn" class="btn btn-sm" type="button" style="margin-top:12px;background:transparent;border:1px solid var(--border);">Re-check</button>
+  </div>
 </div>
 
 <div class="panel" id="panel-monitor">
@@ -1297,6 +1334,33 @@ async function initSettingsPanel() {
       }
     });
   }
+
+  loadSettingsHealth();
+  const healthRefreshBtn = document.getElementById('settings-health-refresh-btn');
+  if (healthRefreshBtn) healthRefreshBtn.addEventListener('click', loadSettingsHealth);
+}
+
+async function loadSettingsHealth() {
+  const healthEl = document.getElementById('settings-health-list');
+  if (!healthEl) return;
+  healthEl.innerHTML = '<span class="hint-text">Checking...</span>';
+  try {
+    const res = await fetch(API_BASE + '/api/admin/health');
+    const data = await res.json();
+    const checks = data.checks || [];
+    healthEl.innerHTML = checks.map(c => (
+      '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--divider);">' +
+        '<span style="flex-shrink:0;width:16px;height:16px;border-radius:50%;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;' +
+          (c.ok ? 'background:#dcfce7;color:#15803d;' : 'background:#fef2f2;color:#dc2626;') + '">' + (c.ok ? '✓' : '!') + '</span>' +
+        '<div style="min-width:0;">' +
+          '<div style="font-weight:600;font-size:13px;">' + esc(c.name) + '</div>' +
+          '<div class="hint-text" style="font-size:11.5px;word-break:break-all;">' + esc(c.detail) + '</div>' +
+        '</div>' +
+      '</div>'
+    )).join('');
+  } catch (err) {
+    healthEl.innerHTML = '<span class="hint-text">Could not load health checks.</span>';
+  }
 }
 
 const logoutBtn = document.getElementById('logout-btn');
@@ -1313,6 +1377,89 @@ if (logoutBtn) {
       console.error('Logout request failed:', err);
     }
     window.location.href = '/login';
+  });
+}
+
+// ---- Account modal: change-password, available to every role -----------
+const accountModalBackdrop = document.getElementById('account-modal-backdrop');
+const accountModalError = document.getElementById('account-modal-error');
+const accountModalStatus = document.getElementById('account-modal-status');
+
+function openAccountModal() {
+  if (!accountModalBackdrop) return;
+  ['account-current-password', 'account-new-password', 'account-confirm-password'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  accountModalError.style.display = 'none';
+  accountModalStatus.textContent = '';
+  accountModalBackdrop.style.display = 'flex';
+  document.getElementById('account-current-password').focus();
+}
+function closeAccountModal() {
+  if (accountModalBackdrop) accountModalBackdrop.style.display = 'none';
+}
+
+const sidebarUserInfo = document.getElementById('sidebar-user-info');
+if (sidebarUserInfo) sidebarUserInfo.addEventListener('click', openAccountModal);
+
+const accountModalClose = document.getElementById('account-modal-close');
+if (accountModalClose) accountModalClose.addEventListener('click', closeAccountModal);
+if (accountModalBackdrop) {
+  accountModalBackdrop.addEventListener('click', (e) => {
+    if (e.target === accountModalBackdrop) closeAccountModal();
+  });
+}
+
+const accountModalSave = document.getElementById('account-modal-save');
+if (accountModalSave) {
+  accountModalSave.addEventListener('click', async () => {
+    const current = document.getElementById('account-current-password').value;
+    const next = document.getElementById('account-new-password').value;
+    const confirm = document.getElementById('account-confirm-password').value;
+
+    accountModalError.style.display = 'none';
+    if (!current || !next) {
+      accountModalError.textContent = 'Fill in your current and new password.';
+      accountModalError.style.display = 'block';
+      return;
+    }
+    if (next.length < 6) {
+      accountModalError.textContent = 'New password must be at least 6 characters.';
+      accountModalError.style.display = 'block';
+      return;
+    }
+    if (next !== confirm) {
+      accountModalError.textContent = 'New password and confirmation do not match.';
+      accountModalError.style.display = 'block';
+      return;
+    }
+
+    accountModalSave.disabled = true;
+    accountModalStatus.textContent = 'Saving…';
+    try {
+      const token = await ensureCsrfToken();
+      const res = await fetch(API_BASE + '/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: current, new_password: next, csrf_token: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        accountModalError.textContent = data.error || 'Could not change password.';
+        accountModalError.style.display = 'block';
+        accountModalStatus.textContent = '';
+      } else {
+        accountModalStatus.textContent = 'Password updated.';
+        setTimeout(closeAccountModal, 1200);
+      }
+    } catch (err) {
+      accountModalError.textContent = 'Connection error. Please try again.';
+      accountModalError.style.display = 'block';
+      accountModalStatus.textContent = '';
+    } finally {
+      accountModalSave.disabled = false;
+    }
   });
 }
 
