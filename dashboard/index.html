@@ -3564,10 +3564,26 @@ const SCAN_PROGRESS_PATTERNS = [
   /^\[(\d+)\/(\d+)\]/,
   /^AI code scan: batch (\d+)\/(\d+)/,
 ];
+// The regex-only phase (no AI verification) never states a total on its own -
+// it just counts up ("[regex 12] some/file.py") - so the total has to come
+// from a separate marker line server.py logs once up front, and get combined
+// with whichever "[regex N]" line is most recent.
+const PROGRESS_TOTAL_PATTERN = /^\[\[progress-total\]\] (\d+)/;
+const PROGRESS_REGEX_COUNTER_PATTERN = /^\[regex (\d+)\]/;
 function extractScanProgress(lines) {
   let found = null;
+  let knownTotal = null;
   (lines || []).forEach(line => {
     const trimmed = line.trim();
+    const totalMatch = trimmed.match(PROGRESS_TOTAL_PATTERN);
+    if (totalMatch) { knownTotal = parseInt(totalMatch[1], 10); return; }
+
+    const regexMatch = trimmed.match(PROGRESS_REGEX_COUNTER_PATTERN);
+    if (regexMatch && knownTotal) {
+      found = { current: parseInt(regexMatch[1], 10), total: knownTotal };
+      return;
+    }
+
     for (const pattern of SCAN_PROGRESS_PATTERNS) {
       const m = trimmed.match(pattern);
       if (m) { found = { current: parseInt(m[1], 10), total: parseInt(m[2], 10) }; break; }
@@ -3935,7 +3951,13 @@ runVulnBtn.addEventListener('click', async () => {
 
     const aiCount = findings.filter(f => (f.source || '').startsWith('ai-')).length;
     const aiNoteEl = document.getElementById('vuln-ai-note');
-    if (body.ai) {
+    // report.ai_used reflects what the server actually did, not just what we
+    // asked for - a request can get silently downgraded (e.g. no ai_features
+    // permission), and the note would otherwise claim AI ran when it didn't.
+    if (body.ai && !report.ai_used) {
+      aiNoteEl.style.display = 'block';
+      aiNoteEl.textContent = "AI verification was requested but didn't run - you may not have the ai_features permission. Ask an admin to grant it in Settings.";
+    } else if (report.ai_used) {
       aiNoteEl.style.display = 'block';
       aiNoteEl.textContent = aiCount > 0
         ? 'AI scan contributed ' + aiCount + ' of these finding(s) (source: ai-code-scan / ai-web-scan / ai-network-scan).'

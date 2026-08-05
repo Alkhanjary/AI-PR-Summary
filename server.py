@@ -1,6 +1,7 @@
 import io
 import json
 import re
+import secrets
 import shlex
 import shutil
 import socket
@@ -44,8 +45,32 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+def _persistent_secret_key():
+    """A random key regenerated on every process start would silently log
+    every user out (session cookies are signed with it) any time the server
+    restarts - annoying for a normal deploy, and confusing since it looks
+    like a permissions problem rather than "your session just expired".
+    Generate one once and reuse it from disk, same as users.json."""
+    data_dir = Path(
+        os.environ.get("AI_PR_SUMMARY_DATA_DIR")
+        or (Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share") / "ai-pr-summary")
+    )
+    key_file = data_dir / "secret_key.txt"
+    try:
+        if key_file.exists():
+            existing = key_file.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+        data_dir.mkdir(parents=True, exist_ok=True)
+        new_key = secrets.token_hex(32)
+        key_file.write_text(new_key, encoding="utf-8")
+        return new_key
+    except Exception as e:
+        print(f"Warning: Could not persist SECRET_KEY ({e}) - sessions won't survive a restart.", file=sys.stderr)
+        return os.urandom(32).hex()
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _persistent_secret_key()
 # Secure=True requires HTTPS - this server runs over plain HTTP on the local
 # network, so a Secure cookie would never be sent back and login would appear
 # to succeed while every subsequent request came back 401.
@@ -55,7 +80,6 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.permanent_session_lifetime = 24 * 60 * 60  # 24 hours default
 
 # Security: CSRF tokens, rate limiting, API key validation
-import secrets
 import time
 from functools import wraps
 from flask import session, abort
@@ -2913,6 +2937,27 @@ def _warn_missing_manifests(target_dir, job, building):
                           "project intact, use the 'Local folder path' source instead of Upload.")
 
 
+# Directories the scanner itself never walks into - excluding them here too
+# keeps the file count used for the progress bar close to what the scanner
+# actually processes. .git alone can be 10-20x the size of the real project
+# (loose objects), which without this would make the bar crawl to a few
+# percent and then jump straight to done.
+_PROGRESS_COUNT_IGNORE_DIRS = {
+    ".git", "__pycache__", "node_modules", ".venv", "venv", "env",
+    "dist", "build", ".next", ".nuxt", ".tox", ".mypy_cache", ".pytest_cache",
+}
+
+def _count_scannable_files(target_dir):
+    count = 0
+    for f in target_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        if _PROGRESS_COUNT_IGNORE_DIRS.intersection(f.parts):
+            continue
+        count += 1
+    return count
+
+
 def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_files, files=None,
                        url=None, net_target=None, net_ports=None, auto_build=False,
                        local_path=None):
@@ -2953,8 +2998,17 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
         else:
             job["log"].append(f"Cloning {repo}...")
             target_dir = get_repo_dir(repo)
-            n_files = sum(1 for _ in target_dir.rglob("*") if _.is_file())
+            n_files = _count_scannable_files(target_dir)
             job["log"].append(f"Target ready: {target_dir} ({n_files} file(s))")
+
+        # One consistent, parseable "how many files total" line regardless of
+        # source (local path and upload didn't log a count above) - the
+        # progress bar combines this with the scanner's own running
+        # "[regex N] file" counter, which never states a total on its own.
+        if "code" in scan_types:
+            if local_path or files:
+                n_files = _count_scannable_files(target_dir)
+            job["log"].append(f"[[progress-total]] {n_files} file(s) to scan")
 
         if "web" in scan_types and auto_build and not url:
             built_process, built_url = build_and_start_project(target_dir, job)
@@ -3083,6 +3137,11 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
                                           files_scanned=report.get("files_scanned"),
                                           timestamp=job.get("started"), job_id=job_id)
             report["history_delta"] = delta
+            # The requested "ai" flag can end up not reflecting what actually
+            # ran (e.g. downgraded because the caller lacks ai_features) -
+            # tell the client the real outcome instead of it trusting its own
+            # request body for the "AI scan ran" note.
+            report["ai_used"] = bool(use_ai)
             job["status"] = "done"
             job["result"] = report
 
