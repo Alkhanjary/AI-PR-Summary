@@ -981,6 +981,11 @@
       <button id="vuln-report-cancel" type="button" style="display:none;background:transparent;color:var(--text-secondary);border:1px solid var(--border);">Cancel</button>
       <span id="vuln-report-status" class="hint-text"></span>
     </div>
+    <div class="row" style="margin-top:6px;">
+      <span class="hint-text" style="margin-right:2px;">Quick export (findings currently shown, no AI narrative):</span>
+      <button id="vuln-export-csv-btn" class="btn btn-sm" type="button" style="background:transparent;border:1px solid var(--border);">Export CSV</button>
+      <button id="vuln-export-json-btn" class="btn btn-sm" type="button" style="background:transparent;border:1px solid var(--border);">Export JSON</button>
+    </div>
   </div>
 
   <div id="vuln-results"></div>
@@ -3285,14 +3290,52 @@ function toSimpleStep(line) {
   return null;
 }
 
+// The AI verify/code-scan passes emit "[N/Total] AI reviewing ..." and
+// "AI code scan: batch N/Total (...)" lines as they work through files -
+// the only place in the log with an actual numerator/denominator. Take the
+// LAST match in the log (most recent progress), not the first, since the
+// build/install steps earlier in the log can contain unrelated "x/y"-looking
+// text.
+const SCAN_PROGRESS_PATTERNS = [
+  /^\[(\d+)\/(\d+)\]/,
+  /^AI code scan: batch (\d+)\/(\d+)/,
+];
+function extractScanProgress(lines) {
+  let found = null;
+  (lines || []).forEach(line => {
+    const trimmed = line.trim();
+    for (const pattern of SCAN_PROGRESS_PATTERNS) {
+      const m = trimmed.match(pattern);
+      if (m) { found = { current: parseInt(m[1], 10), total: parseInt(m[2], 10) }; break; }
+    }
+  });
+  return found;
+}
+
+function renderProgressBar(progress) {
+  if (!progress || !progress.total) return '';
+  const pct = Math.min(100, Math.round((progress.current / progress.total) * 100));
+  return (
+    '<div style="margin-bottom:10px;">' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:4px;">' +
+        '<span>Reviewing files</span><span>' + progress.current + ' / ' + progress.total + ' (' + pct + '%)</span>' +
+      '</div>' +
+      '<div style="height:6px;border-radius:999px;background:var(--segmented-bg);overflow:hidden;">' +
+        '<div style="height:100%;width:' + pct + '%;border-radius:999px;background:var(--accent-gradient, var(--accent));transition:width 0.3s ease;"></div>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
 function renderSimpleProgress(lines) {
+  const progressBar = renderProgressBar(extractScanProgress(lines));
   const steps = [];
   (lines || []).forEach(line => {
     const simple = toSimpleStep(line.trim());
     if (simple && steps[steps.length - 1] !== simple) steps.push(simple);
   });
-  if (steps.length === 0) return '<div class="hint-text">Getting started...</div>';
-  return '<div class="simple-steps">' + steps.map((s, i) => {
+  if (steps.length === 0) return progressBar || '<div class="hint-text">Getting started...</div>';
+  return progressBar + '<div class="simple-steps">' + steps.map((s, i) => {
     const isLast = i === steps.length - 1;
     const looksLikeIssue = /could not|timed out|skipped|issues/i.test(s);
     const dotClass = looksLikeIssue ? 'simple-step-dot-warn' : (isLast ? 'simple-step-dot-active' : 'simple-step-dot-done');
@@ -4109,6 +4152,37 @@ document.getElementById('monitor-export-csv-btn').addEventListener('click', () =
   a.href = url; a.download = 'team-activity.csv';
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+});
+
+function downloadBlob(content, mimeType, filename) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// CSV/JSON field must be individually quoted/escaped - a plain comma-join
+// (like the team-activity export above) breaks the moment a description or
+// evidence string contains a comma, which real findings do constantly.
+function csvField(v) {
+  const s = '' + (v ?? '');
+  return '"' + s.replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
+}
+
+document.getElementById('vuln-export-csv-btn').addEventListener('click', () => {
+  if (!vulnSortedFindings.length) { alert('No findings to export - run or open a scan first.'); return; }
+  const cols = ['severity', 'category', 'scan_type', 'file', 'line', 'description', 'impact', 'improvement', 'evidence'];
+  const csvLines = [cols.map(csvField).join(',')].concat(
+    vulnSortedFindings.map(f => cols.map(c => csvField(f[c])).join(','))
+  );
+  downloadBlob(csvLines.join('\r\n'), 'text/csv', 'vuln-findings.csv');
+});
+
+document.getElementById('vuln-export-json-btn').addEventListener('click', () => {
+  if (!vulnSortedFindings.length) { alert('No findings to export - run or open a scan first.'); return; }
+  downloadBlob(JSON.stringify(vulnSortedFindings, null, 2), 'application/json', 'vuln-findings.json');
 });
 
 document.getElementById('monitor-export-report-btn').addEventListener('click', async () => {
