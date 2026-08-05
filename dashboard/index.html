@@ -999,6 +999,18 @@
       <button class="btn btn-sm" onclick="runScanComparison()" style="background:#3b82f6;color:#fff;border:none;">Compare →</button>
       <button class="btn btn-sm" onclick="clearCompareSelection()" style="background:#475569;color:#fff;border:none;">Clear</button>
     </div>
+    <div class="panel-card" id="vuln-trends-card" style="display:none;">
+      <div class="panel-card-title" style="margin-bottom:0.75rem;">Trends</div>
+      <div class="chart-grid">
+        <div class="chart-wrap">
+          <canvas id="vulnTrendChart" role="img" aria-label="Line chart of findings count across recent scans"></canvas>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="vulnCategoryChart" role="img" aria-label="Bar chart of most common finding categories"></canvas>
+          <div id="vuln-category-chart-empty" class="hint-text" style="display:none;height:100%;align-items:center;justify-content:center;text-align:center;padding:0 20px;">Open a scan (from Scan history below, or run a new one) to see its finding types here.</div>
+        </div>
+      </div>
+    </div>
     <div class="panel-card" id="vuln-history-card-full">
       <div class="panel-card-title" style="margin-bottom:0.75rem;">Scan history</div>
 
@@ -2362,7 +2374,10 @@ document.querySelectorAll('#vuln-tab-segmented .segmented-option').forEach(opt =
     const tab = opt.dataset.vulnTab;
     document.getElementById('vuln-tab-scan').style.display = tab === 'scan' ? '' : 'none';
     document.getElementById('vuln-tab-history').style.display = tab === 'history' ? '' : 'none';
-    if (tab === 'history') loadVulnScanHistoryFull();
+    if (tab === 'history') {
+      loadVulnScanHistoryFull();
+      renderVulnCategoryChart(lastVulnFindings);
+    }
   });
 });
 
@@ -2464,9 +2479,101 @@ async function loadVulnScanHistoryFull() {
       if (cb) cb.checked = true;
     });
     updateCompareBar();
+    renderVulnTrendChart();
   } catch (e) {
     list.innerHTML = '<span class="hint-text">Could not load history.</span>';
   }
+}
+
+// ---- Desktop notification when a scan finishes -------------------------
+// Only useful if the user has actually navigated away from the tab -
+// notifying someone who's staring at the live progress bar is just noise.
+function requestScanNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') Notification.requestPermission();
+}
+function notifyScanComplete(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!document.hidden) return;
+  try {
+    const n = new Notification(title, { body });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch (err) {
+    console.error('Notification failed:', err);
+  }
+}
+
+let vulnTrendChartInstance = null;
+let vulnCategoryChartInstance = null;
+
+function renderVulnTrendChart() {
+  const trendsCard = document.getElementById('vuln-trends-card');
+  const ctx = document.getElementById('vulnTrendChart');
+  if (!window.Chart || !ctx || _vulnHistoryItems.length < 2) {
+    if (trendsCard) trendsCard.style.display = _vulnHistoryItems.length ? 'block' : 'none';
+    return;
+  }
+  trendsCard.style.display = 'block';
+  // Oldest-to-newest, capped to the last 20 scans so the axis stays readable.
+  const items = [..._vulnHistoryItems].reverse().slice(-20);
+  const labels = items.map(i => new Date(i.started * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  const totals = items.map(i => i.total_findings || 0);
+  const highs = items.map(i => (i.counts && (i.counts.critical + i.counts.high)) || 0);
+
+  if (vulnTrendChartInstance) vulnTrendChartInstance.destroy();
+  vulnTrendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Total findings', data: totals, borderColor: CHART_COLORS[0], backgroundColor: CHART_COLORS[0], tension: 0.3, fill: false },
+        { label: 'Critical + high', data: highs, borderColor: '#dc2626', backgroundColor: '#dc2626', tension: 0.3, fill: false },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Findings across recent scans' } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } },
+    },
+  });
+}
+
+function renderVulnCategoryChart(findings) {
+  const trendsCard = document.getElementById('vuln-trends-card');
+  const ctx = document.getElementById('vulnCategoryChart');
+  const emptyMsg = document.getElementById('vuln-category-chart-empty');
+  if (!window.Chart || !ctx) return;
+  const real = (findings || []).filter(f => !isDismissedFinding(f));
+  if (real.length === 0) {
+    ctx.style.display = 'none';
+    if (emptyMsg) emptyMsg.style.display = 'flex';
+    if (vulnCategoryChartInstance) { vulnCategoryChartInstance.destroy(); vulnCategoryChartInstance = null; }
+    return;
+  }
+  ctx.style.display = 'block';
+  if (emptyMsg) emptyMsg.style.display = 'none';
+  if (trendsCard) trendsCard.style.display = 'block';
+
+  const counts = {};
+  real.forEach(f => {
+    const cat = f.category || f.rule || 'other';
+    counts[cat] = (counts[cat] || 0) + 1;
+  });
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  if (vulnCategoryChartInstance) vulnCategoryChartInstance.destroy();
+  vulnCategoryChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top.map(([cat]) => cat),
+      datasets: [{ data: top.map(([, n]) => n), backgroundColor: CHART_COLORS[1] || CHART_COLORS[0], borderRadius: 4 }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: true, text: 'Most common finding types (current scan)' } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, y: { grid: { display: false } } },
+    },
+  });
 }
 
 // Kept as an alias so existing history-tab calls keep working.
@@ -3504,6 +3611,12 @@ runVulnBtn.addEventListener('click', async () => {
     body.files = await collectUploadedFiles();
   }
 
+  // Ask now (inside the click handler) rather than when the scan finishes -
+  // browsers only honor a permission prompt while it's still tied to a
+  // recent user gesture, and by the time a scan is done we're several
+  // await/setTimeout ticks removed from the click.
+  requestScanNotificationPermission();
+
   vulnScanInFlight = true;
   runVulnBtn.disabled = true;
   vulnSummary.innerHTML = '';
@@ -3628,11 +3741,14 @@ runVulnBtn.addEventListener('click', async () => {
       if (pollData.status === 'done') {
         if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(fullLog);
         data = { report: pollData.result, log: fullLog };
+        const n = (data.report && data.report.findings || []).filter(f => !isDismissedFinding(f)).length;
+        notifyScanComplete('Vulnerability scan finished', n + ' finding(s) to review.');
         break;
       }
       if (pollData.status === 'error') {
         vulnStatus.textContent = pollData.error || 'Scan failed.';
         if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(fullLog);
+        notifyScanComplete('Vulnerability scan failed', pollData.error || 'Check the dashboard for details.');
         return;
       }
     }
@@ -4085,6 +4201,7 @@ runMonitorBtn.addEventListener('click', async () => {
 
     const useAi = monitorAi.checked;
     monitorStatus.textContent = 'Scanning for bugs' + (useAi ? ' with AI verification (this can take a while)...' : '...');
+    requestScanNotificationPermission();
 
     const startRes = await fetch(API_BASE + '/api/team-bugs/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4102,8 +4219,17 @@ runMonitorBtn.addEventListener('click', async () => {
       monitorStatus.textContent = 'Scanning... (' + pollData.elapsed + 's elapsed)';
       monitorProgressLog.textContent = pollData.log.join('\n');
       monitorProgressLog.scrollTop = monitorProgressLog.scrollHeight;
-      if (pollData.status === 'done') { (pollData.result || []).forEach(b => { bugsByAuthor[b.author] = b; }); break; }
-      if (pollData.status === 'error') { monitorStatus.textContent = pollData.error || 'Bug scan failed.'; monitorProgressWrap.style.display = 'none'; return; }
+      if (pollData.status === 'done') {
+        (pollData.result || []).forEach(b => { bugsByAuthor[b.author] = b; });
+        notifyScanComplete('Bug attribution scan finished', 'Team activity data is ready to view.');
+        break;
+      }
+      if (pollData.status === 'error') {
+        monitorStatus.textContent = pollData.error || 'Bug scan failed.';
+        monitorProgressWrap.style.display = 'none';
+        notifyScanComplete('Bug attribution scan failed', pollData.error || 'Check the dashboard for details.');
+        return;
+      }
     }
 
     monitorProgressWrap.style.display = 'none';
