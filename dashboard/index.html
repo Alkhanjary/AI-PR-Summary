@@ -3543,6 +3543,7 @@ const SIMPLE_STEP_RULES = [
   [/^AI network scan found (\d+) finding/, m => 'AI network scan complete — ' + m[1] + ' finding(s)'],
   [/^AI scan pass added (\d+)/, m => 'AI added ' + m[1] + ' more finding(s) on top of the pattern scan'],
   [/^Skipping (web|network) scan: (.+)/, m => 'Skipped the ' + m[1] + ' scan — ' + m[2]],
+  [/^Note: every real backend start method failed/, () => 'Could not start the real app — scanning static files only, issues in the app itself may be missed'],
   [/^\[\*\] JSON report written/, () => 'Report saved'],
 ];
 

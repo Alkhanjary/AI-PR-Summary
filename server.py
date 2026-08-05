@@ -2844,6 +2844,21 @@ def build_and_start_project(target_dir, job):
         # Return backend + frontend if both started, otherwise just what we have
         primary_process, primary_url, primary_name = started_services[0]
         job["log"].append(f"\nStarted services: {', '.join(s[2] for s in started_services)}")
+        if primary_name == "Static HTML":
+            # This candidate exists purely so auto-build always has SOMETHING
+            # to point the scanner at - it's a bare file server with none of
+            # the app's actual routes/logic behind it, so a scan against it
+            # is a scan of flat files, not the real application. Every real
+            # backend candidate failed first (very often because the app can
+            # only bind the one port something else already holds - commonly
+            # this same dashboard, already running) - say so plainly instead
+            # of letting "Started successfully" read like a normal pass.
+            job["log"].append(
+                "Note: every real backend start method failed, so this fell back to a bare "
+                "static file server - it serves the project's files but runs none of its actual "
+                "code. Findings from the web/network scan below reflect that static server, not "
+                "the real running app. If the app is already running (e.g. on port 5000), skip "
+                "auto-build and put its URL directly in the Target URL field instead.")
         return primary_process, primary_url  # Return primary (backend) for scanning
 
     job["log"].append(f"All {len(candidates)} start method(s) failed.")
