@@ -56,11 +56,12 @@
        prefers-color-scheme here the way the rest of the dashboard does. */
 
     html, body {
-      height: 100%;
+      min-height: 100%;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg-0);
       color: var(--text-1);
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
 
     .mono { font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace; }

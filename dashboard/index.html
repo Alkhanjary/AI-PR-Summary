@@ -661,6 +661,18 @@
     .toast { animation: none; }
     * { scroll-behavior: auto !important; }
   }
+
+  /* ---- Permission toggle switch (Settings panel) ----------------------- */
+  .perm-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); padding: var(--space-4) 0; border-bottom: 1px solid var(--divider); }
+  .perm-row:last-child { border-bottom: none; }
+  .perm-row-title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--text-primary); }
+  .perm-row-desc { font-size: var(--text-sm); color: var(--text-secondary); margin-top: 2px; max-width: 480px; }
+  .toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-switch-track { position: absolute; inset: 0; background: var(--segmented-bg); border: 1px solid var(--border); border-radius: var(--radius-pill); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
+  .toggle-switch-track::before { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; top: 50%; transform: translateY(-50%); background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: transform 0.15s ease; }
+  .toggle-switch input:checked + .toggle-switch-track { background: var(--accent); border-color: var(--accent); }
+  .toggle-switch input:checked + .toggle-switch-track::before { transform: translateY(-50%) translateX(18px); }
 </style>
 </head>
 <body>
@@ -697,19 +709,30 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
         <span class="nav-label">Run scan</span>
       </div>
-      <div class="nav-item admin-only" data-panel="vuln">
+      <div class="nav-item" data-panel="vuln" data-perm="vuln_scan">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg></span>
         <span class="nav-label">Vuln Scan</span>
       </div>
-    </div>
-    <div id="sidebar-user-info" style="padding:10px 14px;font-size:12px;color:var(--text-secondary,#94a3b8);display:flex;align-items:center;justify-content:space-between;gap:8px;">
-      <span id="sidebar-username-display"></span>
-      <button id="logout-btn" type="button" style="background:transparent;border:1px solid var(--border,#334155);color:inherit;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;">Log out</button>
+      <div class="nav-item admin-only" data-panel="settings">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-label">Settings</span>
+      </div>
     </div>
     <button class="theme-toggle" id="theme-toggle" type="button">
       <span class="nav-icon" id="theme-toggle-icon-dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A9 9 0 1 1 11.5 3a7 7 0 0 0 9.5 9.5z"/></svg></span>
       <span class="nav-icon" id="theme-toggle-icon-light" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
       <span class="nav-label" id="theme-toggle-label">Dark mode</span>
+    </button>
+    <div class="nav-item" id="sidebar-user-info" style="cursor:default;margin-top:0;">
+      <span class="nav-icon" id="sidebar-user-avatar" style="border-radius:50%;background:linear-gradient(135deg,#38bdf8,#818cf8);color:#fff;font-size:10px;font-weight:700;"></span>
+      <span class="nav-label" style="display:flex;flex-direction:column;line-height:1.35;">
+        <span id="sidebar-username-display" style="font-weight:var(--weight-semibold);"></span>
+        <span id="sidebar-role-display" style="font-size:var(--text-2xs);color:var(--sidebar-fg-muted);font-weight:var(--weight-normal);"></span>
+      </span>
+    </div>
+    <button class="theme-toggle" id="logout-btn" type="button" style="margin-top:0;">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+      <span class="nav-label">Log out</span>
     </button>
   </nav>
 
@@ -843,7 +866,7 @@
         <div style="display:flex;gap:6px;align-items:center;">
           <input type="text" id="vuln-local-path" placeholder="Click Browse, or type a path"
                  style="flex:1;font-family:monospace;">
-          <button class="btn btn-sm" id="vuln-browse-btn" onclick="openFolderPicker()"
+          <button class="btn btn-sm" id="vuln-browse-btn" data-perm="browse_filesystem" onclick="openFolderPicker()"
                   style="white-space:nowrap;">Browse…</button>
         </div>
       </div>
@@ -986,6 +1009,20 @@
   </div>
 </div>
 
+<div class="panel" id="panel-settings">
+  <div class="hero-block">
+    <div class="hero-block-title">User permissions</div>
+    <div class="hero-block-desc">Choose which costly or mutating actions the "user" role can perform. Admin always has full access; these toggles only affect non-admin accounts.</div>
+  </div>
+  <div class="panel-card">
+    <div id="settings-perm-list" style="display:flex;flex-direction:column;gap:14px;"></div>
+    <div style="margin-top:16px;display:flex;align-items:center;gap:10px;">
+      <button id="settings-save-btn" class="btn">Save changes</button>
+      <span id="settings-save-status" class="hint-text"></span>
+    </div>
+  </div>
+</div>
+
 <div class="panel" id="panel-monitor">
   <div class="hero-block">
     <div class="hero-block-title">Team Performance</div>
@@ -1007,7 +1044,7 @@
           <option value="custom">Custom range&hellip;</option>
         </select>
       </div>
-      <label class="admin-only"><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
+      <label data-perm="team_bugs_ai"><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
     </div>
     <div class="row" id="monitor-custom-range-row" style="display:none;">
       <div class="field-group">
@@ -1062,7 +1099,7 @@
 
   <div class="row" id="monitor-export-row" style="display:none;">
     <button id="monitor-export-csv-btn">Export CSV</button>
-    <div class="field-group admin-only">
+    <div class="field-group" data-perm="team_ai_reports">
       <span class="field-label">Report format</span>
       <select id="monitor-report-format" style="max-width:150px;">
         <option value="pdf">PDF</option>
@@ -1071,7 +1108,7 @@
         <option value="html">HTML</option>
       </select>
     </div>
-    <button id="monitor-export-report-btn" class="admin-only">Export team report</button>
+    <button id="monitor-export-report-btn" data-perm="team_ai_reports">Export team report</button>
     <span id="monitor-export-status" class="hint-text"></span>
   </div>
   <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
@@ -1128,21 +1165,122 @@ async function checkAuth() {
       return;
     }
     currentUser = data;
-    applyRoleUI(data.role);
+    applyRoleUI(data.role, data.permissions || {});
   } catch (err) {
     console.error('Auth check failed:', err);
     window.location.href = '/login';
   }
 }
 
-function applyRoleUI(role) {
+function applyRoleUI(role, permissions) {
+  const username = (currentUser && currentUser.username) || '';
   const usernameEl = document.getElementById('sidebar-username-display');
-  if (usernameEl) usernameEl.textContent = (currentUser && currentUser.username || '') + (role === 'admin' ? ' (admin)' : '');
+  const roleEl = document.getElementById('sidebar-role-display');
+  const avatarEl = document.getElementById('sidebar-user-avatar');
+  if (usernameEl) usernameEl.textContent = username;
+  if (roleEl) roleEl.textContent = role === 'admin' ? 'Administrator' : 'Viewer';
+  if (avatarEl) avatarEl.textContent = username.charAt(0).toUpperCase();
+
+  // Hard admin-only controls (can never be delegated - e.g. the permissions
+  // panel itself, or destructive actions like deleting a saved scan).
   if (role !== 'admin') {
     document.querySelectorAll('.admin-only').forEach(el => { el.style.display = 'none'; });
   }
+
+  // Delegable controls - visible for admin always, and for "user" only if
+  // the admin granted the matching permission via the Settings panel.
+  document.querySelectorAll('[data-perm]').forEach(el => {
+    const key = el.getAttribute('data-perm');
+    const allowed = role === 'admin' || !!(permissions && permissions[key]);
+    el.style.display = allowed ? '' : 'none';
+  });
+
+  if (role === 'admin') initSettingsPanel();
 }
 checkAuth();
+
+// ---- Settings panel: admin manages what the "user" role can do --------
+const PERMISSION_LABELS = {
+  vuln_scan: {
+    title: 'Run vulnerability scans',
+    desc: 'Start a scan from the Vuln Scan tab (code, web, network, AI-verified findings). Viewing scan history and reports is already available to every account.',
+  },
+  team_bugs_ai: {
+    title: 'AI-verified bug attribution',
+    desc: 'Use the "AI-verified bugs" option on the Monitor tab - slower and costs LLM tokens, but more accurate than the heuristic pass.',
+  },
+  team_ai_reports: {
+    title: 'Generate AI team reports',
+    desc: 'Generate the AI executive summary and export a downloadable Team Performance report from the Monitor tab.',
+  },
+  browse_filesystem: {
+    title: 'Browse local folders',
+    desc: 'Use the folder picker to choose a scan target on this machine, instead of typing a path by hand. Reveals local folder names.',
+  },
+};
+
+let settingsPanelLoaded = false;
+async function initSettingsPanel() {
+  if (settingsPanelLoaded) return;
+  settingsPanelLoaded = true;
+
+  const listEl = document.getElementById('settings-perm-list');
+  const statusEl = document.getElementById('settings-save-status');
+  const saveBtn = document.getElementById('settings-save-btn');
+  if (!listEl) return;
+
+  let perms = {};
+  try {
+    const res = await fetch(API_BASE + '/api/permissions');
+    const data = await res.json();
+    perms = data.permissions || {};
+  } catch (err) {
+    listEl.innerHTML = '<span class="hint-text">Could not load permissions.</span>';
+    return;
+  }
+
+  listEl.innerHTML = Object.keys(PERMISSION_LABELS).map(key => {
+    const info = PERMISSION_LABELS[key];
+    const checked = perms[key] ? 'checked' : '';
+    return (
+      '<div class="perm-row">' +
+        '<div>' +
+          '<div class="perm-row-title">' + esc(info.title) + '</div>' +
+          '<div class="perm-row-desc">' + esc(info.desc) + '</div>' +
+        '</div>' +
+        '<label class="toggle-switch">' +
+          '<input type="checkbox" data-perm-key="' + attr(key) + '" ' + checked + '>' +
+          '<span class="toggle-switch-track"></span>' +
+        '</label>' +
+      '</div>'
+    );
+  }).join('');
+
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const updated = {};
+      listEl.querySelectorAll('input[data-perm-key]').forEach(input => {
+        updated[input.getAttribute('data-perm-key')] = input.checked;
+      });
+      saveBtn.disabled = true;
+      statusEl.textContent = 'Saving…';
+      try {
+        const token = await ensureCsrfToken();
+        const res = await fetch(API_BASE + '/api/permissions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ permissions: updated, csrf_token: token }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        statusEl.textContent = 'Saved. Takes effect next time that user reloads the page.';
+      } catch (err) {
+        statusEl.textContent = 'Could not save: ' + err.message;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+}
 
 const logoutBtn = document.getElementById('logout-btn');
 if (logoutBtn) {
@@ -1523,7 +1661,7 @@ let hasRepos = false;
 
 function updateRepoControlsForActiveTab() {
   const activePanel = document.querySelector('.nav-item.active')?.dataset.panel;
-  if (!activePanel || activePanel === 'overview') {
+  if (!activePanel || activePanel === 'overview' || activePanel === 'settings') {
     repoToolbar.style.display = 'none';
   } else if (activePanel === 'vuln') {
     toggleVulnSource();

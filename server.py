@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -157,7 +158,9 @@ def require_login(f):
   return decorated_function
 
 def require_admin(f):
-  """Decorator to require the admin role (scans, delete, rename, settings, tokens)."""
+  """Decorator to require the admin role. Reserved for things a user must
+  never be able to grant themselves: the permissions panel itself, and
+  destructive/irreversible actions like deleting or renaming saved scans."""
   @wraps(f)
   def decorated_function(*args, **kwargs):
     if 'user_id' not in session:
@@ -168,6 +171,60 @@ def require_admin(f):
       abort(403)
     return f(*args, **kwargs)
   return decorated_function
+
+# ============ Configurable permissions (admin toggles what "user" can do) ============
+# Admin always has every permission implicitly. These are the specific,
+# costly-or-mutating actions an admin can grant to the "user" role instead
+# of it being all-or-nothing - e.g. let users kick off vulnerability scans
+# without also giving them local folder browsing or AI report generation.
+DEFAULT_PERMISSIONS = {
+    "vuln_scan": False,        # start a vulnerability scan (Vuln Scan tab)
+    "team_bugs_ai": False,     # AI-verified bug-attribution scan (Monitor tab)
+    "team_ai_reports": False,  # generate AI team summary / exportable team report
+    "browse_filesystem": False,  # browse local folders to pick a scan target
+}
+PERMISSIONS_FILE = Path(
+    os.environ.get("AI_PR_SUMMARY_DATA_DIR")
+    or (Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share") / "ai-pr-summary")
+) / "permissions.json"
+_permissions_lock = threading.Lock()
+
+def _load_permissions():
+    try:
+        if PERMISSIONS_FILE.exists():
+            saved = json.loads(PERMISSIONS_FILE.read_text(encoding="utf-8"))
+            return {**DEFAULT_PERMISSIONS, **{k: v for k, v in saved.items() if k in DEFAULT_PERMISSIONS}}
+    except Exception as e:
+        print(f"Warning: Could not load permissions from {PERMISSIONS_FILE}: {e}", file=sys.stderr)
+    return dict(DEFAULT_PERMISSIONS)
+
+def _save_permissions(perms):
+    try:
+        PERMISSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PERMISSIONS_FILE.write_text(json.dumps(perms, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not save permissions to {PERMISSIONS_FILE}: {e}", file=sys.stderr)
+
+def require_permission(perm_key):
+  """Decorator for actions an admin can delegate to "user" via the
+  permissions panel. Admin always passes; a "user" needs the specific
+  flag enabled."""
+  def decorator(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+      if 'user_id' not in session:
+        if request.path.startswith('/api/'):
+          abort(401)
+        return redirect(url_for('login_page'))
+      if current_role() == 'admin':
+        return f(*args, **kwargs)
+      with _permissions_lock:
+        perms = _load_permissions()
+      if not perms.get(perm_key, False):
+        abort(403)
+      return f(*args, **kwargs)
+    return decorated_function
+  return decorator
 
 # This API can read arbitrary local folders and run build commands, so a
 # wildcard CORS policy is genuinely dangerous: any website you happened to have
@@ -279,15 +336,52 @@ def api_logout():
 
 @app.route("/api/auth/me")
 def api_me():
-  """Tells the frontend who's logged in and what role they have, so the
-  dashboard can show/hide admin-only tabs (scanning, delete, settings)."""
+  """Tells the frontend who's logged in, their role, and (for a "user")
+  which of the admin-delegable permissions are currently granted - so the
+  dashboard can show exactly the controls this account can use, not just
+  admin-vs-everyone-else."""
   if 'user_id' not in session:
     return jsonify({"authenticated": False}), 200
+  role = session.get("role", "user")
+  if role == "admin":
+    permissions = {k: True for k in DEFAULT_PERMISSIONS}
+  else:
+    with _permissions_lock:
+      permissions = _load_permissions()
   return jsonify({
       "authenticated": True,
       "username": session.get("user_id"),
-      "role": session.get("role", "user"),
+      "role": role,
+      "permissions": permissions,
   }), 200
+
+
+@app.route("/api/permissions", methods=["GET"])
+@require_admin
+def api_get_permissions():
+  """Lists the current permission grants for the "user" role, for the
+  admin-only settings panel to render toggles from."""
+  with _permissions_lock:
+    perms = _load_permissions()
+  return jsonify({"permissions": perms})
+
+
+@app.route("/api/permissions", methods=["POST"])
+@require_admin
+@require_csrf_token
+def api_set_permissions():
+  """Updates which delegable actions the "user" role can perform. Body:
+  {permissions: {vuln_scan: true, ...}} - unknown keys are ignored, missing
+  keys keep their previous value."""
+  data = request.get_json(force=True) or {}
+  incoming = data.get("permissions") or {}
+  with _permissions_lock:
+    perms = _load_permissions()
+    for key in DEFAULT_PERMISSIONS:
+      if key in incoming:
+        perms[key] = bool(incoming[key])
+    _save_permissions(perms)
+  return jsonify({"status": "ok", "permissions": perms})
 
 
 @app.route("/")
@@ -638,7 +732,7 @@ def run_team_bugs_job(job_id, repo, use_ai, branch=None):
 
 
 @app.route("/api/team-summary", methods=["POST"])
-@require_admin
+@require_permission("team_ai_reports")
 def team_summary():
     """Generates a short, plain-English executive summary from
     aggregated team stats, using the same LLM setup as the rest of
@@ -668,7 +762,7 @@ def team_summary():
 
 
 @app.route("/api/team-report", methods=["POST"])
-@require_admin
+@require_permission("team_ai_reports")
 def team_report():
     """Builds a downloadable Team Performance report (PDF/Word/Markdown/
     HTML) from the Monitor tab's already-computed contributor data and
@@ -716,7 +810,7 @@ def team_report():
 
 
 @app.route("/api/team-bugs/start", methods=["POST"])
-@require_admin
+@require_permission("team_bugs_ai")
 def team_bugs_start():
     """Starts the bug-attribution scan as a background job (mirrors
     /api/vuln-scan/start), so the Monitor tab can show live progress
@@ -2847,7 +2941,7 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
 
 
 @app.route("/api/vuln-scan/start", methods=["POST"])
-@require_admin
+@require_permission("vuln_scan")
 @rate_limit("vuln_scan_start")
 @require_csrf_token
 def vuln_scan_start():
@@ -3000,7 +3094,7 @@ def vuln_scan_history():
 
 
 @app.route("/api/browse")
-@require_admin
+@require_permission("browse_filesystem")
 def browse_folders():
     """Lists sub-folders of a directory so the dashboard can offer a real
     folder picker for the 'scan a local folder' option.
