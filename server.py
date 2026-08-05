@@ -204,10 +204,24 @@ def require_admin(f):
 # costly-or-mutating actions an admin can grant to the "user" role instead
 # of it being all-or-nothing - e.g. let users kick off vulnerability scans
 # without also giving them local folder browsing or AI report generation.
+#
+# The tab_* keys are pure UI visibility (which nav items a "user" sees at
+# all) rather than gating a specific API - Overview/Monitor/Activity/Run
+# scan only call already-general (require_login) endpoints, so hiding the
+# tab is the actual point, not a new server-side lock.
+#
+# Everything defaults to OFF: a freshly created "user" account sees nothing
+# until admin explicitly grants it from the Settings panel, rather than
+# most things being on by default and admin only locking down the
+# expensive/risky ones.
 DEFAULT_PERMISSIONS = {
-    "vuln_scan": False,        # start a vulnerability scan (Vuln Scan tab)
-    "team_bugs_ai": False,     # AI-verified bug-attribution scan (Monitor tab)
-    "team_ai_reports": False,  # generate AI team summary / exportable team report
+    "tab_overview": False,     # Overview tab (GitHub profile/stats browsing)
+    "tab_monitor": False,      # Monitor tab (team activity, heuristic bug counts)
+    "tab_activity": False,     # Activity tab
+    "tab_run_scan": False,     # Run scan tab (PR summary + security-scan tools)
+    "vuln_scan": False,        # Vuln Scan tab + starting a vulnerability scan
+    "ai_features": False,      # every LLM-cost action: AI-verified bug attribution,
+                                # AI team summary/report generation
     "browse_filesystem": False,  # browse local folders to pick a scan target
 }
 PERMISSIONS_FILE = Path(
@@ -485,6 +499,41 @@ def api_admin_health():
       },
   ]
   return jsonify({"checks": checks})
+
+
+@app.route("/api/admin/users")
+@require_admin
+def api_admin_list_users():
+  """Lists accounts (username + role only - never the password hash) so
+  the Settings panel can offer a reset-password action per account."""
+  with _users_lock:
+    users = _load_users()
+  return jsonify({"users": [{"username": u, "role": info.get("role", "user")} for u, info in users.items()]})
+
+
+@app.route("/api/admin/reset-password", methods=["POST"])
+@require_admin
+@require_csrf_token
+def api_admin_reset_password():
+  """Admin sets a DIFFERENT account's password directly, no current-password
+  needed - unlike /api/auth/change-password, which is self-service and
+  requires proving you already know the old one. This is how an admin
+  recovers a locked-out user without needing their old credentials."""
+  data = request.get_json(force=True) or {}
+  username = (data.get("username") or "").strip()
+  new_password = data.get("new_password", "")
+
+  if len(new_password) < 6:
+    return jsonify({"error": "New password must be at least 6 characters."}), 400
+
+  with _users_lock:
+    users = _load_users()
+    if username not in users:
+      return jsonify({"error": "No such account."}), 404
+    users[username]["password"] = generate_password_hash(new_password)
+    _save_users(users)
+
+  return jsonify({"status": "ok"}), 200
 
 
 @app.route("/")
@@ -835,7 +884,7 @@ def run_team_bugs_job(job_id, repo, use_ai, branch=None):
 
 
 @app.route("/api/team-summary", methods=["POST"])
-@require_permission("team_ai_reports")
+@require_permission("ai_features")
 def team_summary():
     """Generates a short, plain-English executive summary from
     aggregated team stats, using the same LLM setup as the rest of
@@ -865,7 +914,7 @@ def team_summary():
 
 
 @app.route("/api/team-report", methods=["POST"])
-@require_permission("team_ai_reports")
+@require_permission("ai_features")
 def team_report():
     """Builds a downloadable Team Performance report (PDF/Word/Markdown/
     HTML) from the Monitor tab's already-computed contributor data and
@@ -913,7 +962,7 @@ def team_report():
 
 
 @app.route("/api/team-bugs/start", methods=["POST"])
-@require_permission("team_bugs_ai")
+@require_permission("ai_features")
 def team_bugs_start():
     """Starts the bug-attribution scan as a background job (mirrors
     /api/vuln-scan/start), so the Monitor tab can show live progress
@@ -995,7 +1044,7 @@ def current_diff():
 
 
 @app.route("/api/scan", methods=["POST"])
-@require_login
+@require_permission("ai_features")
 def scan():
     """Runs the real summarize_pr.py pipeline: filter -> truncate -> LLM."""
     data = request.get_json(force=True)

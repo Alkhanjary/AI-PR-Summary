@@ -693,19 +693,19 @@
       <div class="sidebar-brand-text">PR Insights</div>
     </div>
     <div class="sidebar-nav">
-      <div class="nav-item active" data-panel="overview">
+      <div class="nav-item active" data-panel="overview" data-perm="tab_overview">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
         <span class="nav-label">Overview</span>
       </div>
-      <div class="nav-item" data-panel="monitor">
+      <div class="nav-item" data-panel="monitor" data-perm="tab_monitor">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 12 8 12 10 6 14 18 16 12 21 12"/></svg></span>
         <span class="nav-label">Monitor</span>
       </div>
-      <div class="nav-item" data-panel="activity">
+      <div class="nav-item" data-panel="activity" data-perm="tab_activity">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="7" r="2"/><path d="M7 8v8"/><path d="M17 9a6.5 6.5 0 0 1-6.5 6.5"/><circle cx="17" cy="17" r="1.3" fill="currentColor" stroke="none"/></svg></span>
         <span class="nav-label">Activity</span>
       </div>
-      <div class="nav-item" data-panel="run">
+      <div class="nav-item" data-panel="run" data-perm="tab_run_scan">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
         <span class="nav-label">Run scan</span>
       </div>
@@ -723,7 +723,7 @@
       <span class="nav-icon" id="theme-toggle-icon-light" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg></span>
       <span class="nav-label" id="theme-toggle-label">Dark mode</span>
     </button>
-    <div class="nav-item" id="sidebar-user-info" title="Change password" style="margin-top:0;">
+    <div class="nav-item" id="sidebar-user-info" style="margin-top:0;cursor:default;">
       <span class="nav-icon" id="sidebar-user-avatar" style="border-radius:50%;background:linear-gradient(135deg,#38bdf8,#818cf8);color:#fff;font-size:10px;font-weight:700;"></span>
       <span class="nav-label" style="display:flex;flex-direction:column;line-height:1.35;">
         <span id="sidebar-username-display" style="font-weight:var(--weight-semibold);"></span>
@@ -736,33 +736,6 @@
     </button>
   </nav>
 
-  <div id="account-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center;">
-    <div class="panel-card" style="max-width:380px;width:100%;margin:16px;box-shadow:var(--elev-3);">
-      <div class="panel-card-title" style="display:flex;justify-content:space-between;align-items:center;">
-        Change password
-        <button id="account-modal-close" type="button" style="background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:var(--text-secondary);">&times;</button>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
-        <div class="field-group">
-          <span class="field-label">Current password</span>
-          <input type="password" id="account-current-password" autocomplete="current-password">
-        </div>
-        <div class="field-group">
-          <span class="field-label">New password</span>
-          <input type="password" id="account-new-password" autocomplete="new-password" placeholder="At least 6 characters">
-        </div>
-        <div class="field-group">
-          <span class="field-label">Confirm new password</span>
-          <input type="password" id="account-confirm-password" autocomplete="new-password">
-        </div>
-        <div id="account-modal-error" class="hint-text" style="display:none;color:#dc2626;"></div>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
-          <button id="account-modal-save" type="button" class="btn">Update password</button>
-          <span id="account-modal-status" class="hint-text"></span>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div class="main-content">
     <header>
@@ -1011,8 +984,8 @@
     </div>
     <div class="row" style="margin-top:6px;">
       <span class="hint-text" style="margin-right:2px;">Quick export (findings currently shown, no AI narrative):</span>
-      <button id="vuln-export-csv-btn" class="btn btn-sm" type="button" style="background:transparent;border:1px solid var(--border);">Export CSV</button>
-      <button id="vuln-export-json-btn" class="btn btn-sm" type="button" style="background:transparent;border:1px solid var(--border);">Export JSON</button>
+      <button id="vuln-export-csv-btn" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Export CSV</button>
+      <button id="vuln-export-json-btn" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Export JSON</button>
     </div>
   </div>
 
@@ -1068,12 +1041,20 @@
   </div>
 
   <div class="hero-block" style="margin-top:24px;">
+    <div class="hero-block-title">User accounts</div>
+    <div class="hero-block-desc">Reset any account's password directly - no need to know their current one.</div>
+  </div>
+  <div class="panel-card">
+    <div id="settings-users-list" style="display:flex;flex-direction:column;gap:2px;"><span class="hint-text">Loading...</span></div>
+  </div>
+
+  <div class="hero-block" style="margin-top:24px;">
     <div class="hero-block-title">System health</div>
     <div class="hero-block-desc">What's configured and what isn't, so a missing API key shows up here instead of as a cryptic error mid-scan.</div>
   </div>
   <div class="panel-card">
     <div id="settings-health-list" style="display:flex;flex-direction:column;gap:2px;"><span class="hint-text">Loading...</span></div>
-    <button id="settings-health-refresh-btn" class="btn btn-sm" type="button" style="margin-top:12px;background:transparent;border:1px solid var(--border);">Re-check</button>
+    <button id="settings-health-refresh-btn" class="btn btn-sm" type="button" style="margin-top:12px;background:transparent;color:var(--text-primary);border:1px solid var(--border);">Re-check</button>
   </div>
 </div>
 
@@ -1098,7 +1079,7 @@
           <option value="custom">Custom range&hellip;</option>
         </select>
       </div>
-      <label data-perm="team_bugs_ai"><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
+      <label data-perm="ai_features"><input type="checkbox" id="monitor-ai"><span>AI-verified bugs (slower, more accurate)</span></label>
     </div>
     <div class="row" id="monitor-custom-range-row" style="display:none;">
       <div class="field-group">
@@ -1153,7 +1134,7 @@
 
   <div class="row" id="monitor-export-row" style="display:none;">
     <button id="monitor-export-csv-btn">Export CSV</button>
-    <div class="field-group" data-perm="team_ai_reports">
+    <div class="field-group" data-perm="ai_features">
       <span class="field-label">Report format</span>
       <select id="monitor-report-format" style="max-width:150px;">
         <option value="pdf">PDF</option>
@@ -1162,7 +1143,7 @@
         <option value="html">HTML</option>
       </select>
     </div>
-    <button id="monitor-export-report-btn" data-perm="team_ai_reports">Export team report</button>
+    <button id="monitor-export-report-btn" data-perm="ai_features">Export team report</button>
     <span id="monitor-export-status" class="hint-text"></span>
   </div>
   <div id="monitor-table-wrap" style="overflow-x:auto;"></div>
@@ -1249,23 +1230,59 @@ function applyRoleUI(role, permissions) {
     el.style.display = allowed ? '' : 'none';
   });
 
+  // Overview is the hardcoded default landing tab, but a "user" with no
+  // permissions granted yet won't have it in the sidebar at all - land on
+  // whatever IS visible instead of an active tab with no matching nav item.
+  if (role !== 'admin') {
+    const activeTab = document.querySelector('.nav-item.active[data-panel]');
+    const activeHidden = activeTab && activeTab.style.display === 'none';
+    if (!activeTab || activeHidden) {
+      const firstVisible = document.querySelector('.nav-item[data-panel]:not([style*="display: none"])');
+      if (firstVisible) {
+        activatePanel(firstVisible.dataset.panel, { silent: true });
+      } else {
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        const main = document.querySelector('.main-content');
+        if (main) {
+          const notice = document.createElement('div');
+          notice.className = 'card';
+          notice.style.margin = '24px';
+          notice.textContent = 'No sections have been enabled for your account yet. Ask an admin to grant access from Settings.';
+          main.appendChild(notice);
+        }
+      }
+    }
+  }
+
   if (role === 'admin') initSettingsPanel();
 }
 checkAuth();
 
 // ---- Settings panel: admin manages what the "user" role can do --------
 const PERMISSION_LABELS = {
+  tab_overview: {
+    title: 'Overview tab',
+    desc: 'Search and browse a GitHub profile: stats, language mix, repo activity.',
+  },
+  tab_monitor: {
+    title: 'Monitor tab',
+    desc: 'Team commit activity and heuristic bug counts per contributor.',
+  },
+  tab_activity: {
+    title: 'Activity tab',
+    desc: 'Recent pull request and commit activity.',
+  },
+  tab_run_scan: {
+    title: 'Run scan tab',
+    desc: 'The PR summary and diff-based security-scan tools.',
+  },
   vuln_scan: {
-    title: 'Run vulnerability scans',
-    desc: 'Start a scan from the Vuln Scan tab (code, web, network, AI-verified findings). Viewing scan history and reports is already available to every account.',
+    title: 'Vuln Scan tab',
+    desc: 'See the tab and its scan history, and start new scans (code, web, network, AI-verified findings).',
   },
-  team_bugs_ai: {
-    title: 'AI-verified bug attribution',
-    desc: 'Use the "AI-verified bugs" option on the Monitor tab - slower and costs LLM tokens, but more accurate than the heuristic pass.',
-  },
-  team_ai_reports: {
-    title: 'Generate AI team reports',
-    desc: 'Generate the AI executive summary and export a downloadable Team Performance report from the Monitor tab.',
+  ai_features: {
+    title: 'AI features',
+    desc: 'Every LLM-cost action in one switch: AI-verified bug attribution, AI-generated PR summaries, and AI team summaries/reports.',
   },
   browse_filesystem: {
     title: 'Browse local folders',
@@ -1335,9 +1352,82 @@ async function initSettingsPanel() {
     });
   }
 
+  loadSettingsUsers();
   loadSettingsHealth();
   const healthRefreshBtn = document.getElementById('settings-health-refresh-btn');
   if (healthRefreshBtn) healthRefreshBtn.addEventListener('click', loadSettingsHealth);
+}
+
+async function loadSettingsUsers() {
+  const listEl = document.getElementById('settings-users-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<span class="hint-text">Loading...</span>';
+  try {
+    const res = await fetch(API_BASE + '/api/admin/users');
+    const data = await res.json();
+    const users = data.users || [];
+    listEl.innerHTML = users.map(u => (
+      '<div class="user-account-row" data-username="' + attr(u.username) + '" style="padding:10px 0;border-bottom:1px solid var(--divider);">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+          '<div>' +
+            '<div style="font-weight:600;font-size:13px;color:var(--text-primary);">' + esc(u.username) + '</div>' +
+            '<div class="hint-text" style="font-size:11.5px;">' + (u.role === 'admin' ? 'Administrator' : 'Viewer') + '</div>' +
+          '</div>' +
+          '<button type="button" class="btn btn-sm user-reset-toggle" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Reset password</button>' +
+        '</div>' +
+        '<div class="user-reset-form" style="display:none;margin-top:10px;gap:8px;flex-direction:column;">' +
+          '<input type="password" class="user-reset-input" placeholder="New password (min 6 chars)" style="max-width:260px;color:var(--text-primary);background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:6px 8px;">' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<button type="button" class="btn btn-sm user-reset-confirm">Set password</button>' +
+            '<span class="hint-text user-reset-status"></span>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    )).join('');
+
+    listEl.querySelectorAll('.user-reset-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const form = btn.closest('.user-account-row').querySelector('.user-reset-form');
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+      });
+    });
+    listEl.querySelectorAll('.user-reset-confirm').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.user-account-row');
+        const username = row.getAttribute('data-username');
+        const input = row.querySelector('.user-reset-input');
+        const statusEl = row.querySelector('.user-reset-status');
+        const newPassword = input.value;
+        if (newPassword.length < 6) {
+          statusEl.textContent = 'Must be at least 6 characters.';
+          statusEl.style.color = '#dc2626';
+          return;
+        }
+        btn.disabled = true;
+        statusEl.style.color = '';
+        statusEl.textContent = 'Saving…';
+        try {
+          const token = await ensureCsrfToken();
+          const res = await fetch(API_BASE + '/api/admin/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, new_password: newPassword, csrf_token: token }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Could not reset password.');
+          statusEl.textContent = 'Password updated for ' + username + '.';
+          input.value = '';
+        } catch (err) {
+          statusEl.style.color = '#dc2626';
+          statusEl.textContent = err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = '<span class="hint-text">Could not load accounts.</span>';
+  }
 }
 
 async function loadSettingsHealth() {
@@ -1377,89 +1467,6 @@ if (logoutBtn) {
       console.error('Logout request failed:', err);
     }
     window.location.href = '/login';
-  });
-}
-
-// ---- Account modal: change-password, available to every role -----------
-const accountModalBackdrop = document.getElementById('account-modal-backdrop');
-const accountModalError = document.getElementById('account-modal-error');
-const accountModalStatus = document.getElementById('account-modal-status');
-
-function openAccountModal() {
-  if (!accountModalBackdrop) return;
-  ['account-current-password', 'account-new-password', 'account-confirm-password'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-  accountModalError.style.display = 'none';
-  accountModalStatus.textContent = '';
-  accountModalBackdrop.style.display = 'flex';
-  document.getElementById('account-current-password').focus();
-}
-function closeAccountModal() {
-  if (accountModalBackdrop) accountModalBackdrop.style.display = 'none';
-}
-
-const sidebarUserInfo = document.getElementById('sidebar-user-info');
-if (sidebarUserInfo) sidebarUserInfo.addEventListener('click', openAccountModal);
-
-const accountModalClose = document.getElementById('account-modal-close');
-if (accountModalClose) accountModalClose.addEventListener('click', closeAccountModal);
-if (accountModalBackdrop) {
-  accountModalBackdrop.addEventListener('click', (e) => {
-    if (e.target === accountModalBackdrop) closeAccountModal();
-  });
-}
-
-const accountModalSave = document.getElementById('account-modal-save');
-if (accountModalSave) {
-  accountModalSave.addEventListener('click', async () => {
-    const current = document.getElementById('account-current-password').value;
-    const next = document.getElementById('account-new-password').value;
-    const confirm = document.getElementById('account-confirm-password').value;
-
-    accountModalError.style.display = 'none';
-    if (!current || !next) {
-      accountModalError.textContent = 'Fill in your current and new password.';
-      accountModalError.style.display = 'block';
-      return;
-    }
-    if (next.length < 6) {
-      accountModalError.textContent = 'New password must be at least 6 characters.';
-      accountModalError.style.display = 'block';
-      return;
-    }
-    if (next !== confirm) {
-      accountModalError.textContent = 'New password and confirmation do not match.';
-      accountModalError.style.display = 'block';
-      return;
-    }
-
-    accountModalSave.disabled = true;
-    accountModalStatus.textContent = 'Saving…';
-    try {
-      const token = await ensureCsrfToken();
-      const res = await fetch(API_BASE + '/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current_password: current, new_password: next, csrf_token: token }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        accountModalError.textContent = data.error || 'Could not change password.';
-        accountModalError.style.display = 'block';
-        accountModalStatus.textContent = '';
-      } else {
-        accountModalStatus.textContent = 'Password updated.';
-        setTimeout(closeAccountModal, 1200);
-      }
-    } catch (err) {
-      accountModalError.textContent = 'Connection error. Please try again.';
-      accountModalError.style.display = 'block';
-      accountModalStatus.textContent = '';
-    } finally {
-      accountModalSave.disabled = false;
-    }
   });
 }
 
