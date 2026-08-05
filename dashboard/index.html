@@ -2269,7 +2269,12 @@ async function loadDashboard() {
 
   try {
     const prRes = await ghFetch(API_BASE + '/api/github/pulls?repo=' + encodeURIComponent(repo));
-    if (!prRes.ok) throw new Error('Could not reach ' + repo + ' (' + prRes.status + ')');
+    if (!prRes.ok) {
+      if (prRes.status === 404) {
+        throw new Error(repo + ' has no pull requests available (repository not found, private, or pull requests disabled).');
+      }
+      throw new Error('Could not load pull requests for ' + repo + ' (HTTP ' + prRes.status + ').');
+    }
     const prs = await prRes.json();
 
     statusEl.textContent = prs.length === 0 ? 'No pull requests found.' : prs.length + ' recent pull requests';
@@ -2557,10 +2562,13 @@ function refreshVulnBucketView() {
   renderVulnFilterPills(counts);
   renderVulnTypeFilterPills(bucket);
   renderVulnFindingsList();
-  // Mirror the current bucket into the header chips.
+  // Mirror the current bucket into the header chips - counting dismissed
+  // (test-fixture / false-positive) findings here would show "11 CRITICAL"
+  // in bold at the top of the page for a scan where every single one of
+  // those was dismissed, which reads as a real, live risk when it isn't.
   const allCounts = { critical: 0, high: 0, medium: 0, low: 0 };
   (lastVulnFindings || []).forEach(f => {
-    if (allCounts.hasOwnProperty(f.severity)) allCounts[f.severity]++;
+    if (!isDismissedFinding(f) && allCounts.hasOwnProperty(f.severity)) allCounts[f.severity]++;
   });
   renderHeaderStats(allCounts, lastVulnFilesScanned);
 }
@@ -4617,7 +4625,7 @@ runMonitorBtn.addEventListener('click', async () => {
     try {
       const summaryRes = await fetch(API_BASE + '/api/team-summary', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ range: monitorRange.value, totalCommits, totalLines, totalBugs, prTurnaround, contributors: monitorTableData })
+        body: JSON.stringify({ range: monitorRange.value, totalCommits, totalLines, totalBugs, prTurnaroundHours: prTurnaround, contributors: monitorTableData })
       });
       const summaryData = await summaryRes.json();
       monitorSummaryCard.textContent = summaryRes.ok ? summaryData.summary : 'Could not generate summary.';
