@@ -267,6 +267,16 @@ def require_permission(perm_key):
     return decorated_function
   return decorator
 
+def _current_user_has_permission(perm_key):
+  """Same check require_permission does, usable inline for an optional
+  feature toggle inside an otherwise-allowed route (e.g. the AI-verification
+  checkbox within a vuln scan the user is already permitted to run)."""
+  if current_role() == 'admin':
+    return True
+  with _permissions_lock:
+    perms = _load_permissions()
+  return bool(perms.get(perm_key, False))
+
 # This API can read arbitrary local folders and run build commands, so a
 # wildcard CORS policy is genuinely dangerous: any website you happened to have
 # open could call http://127.0.0.1:5000 and read the response. Restrict it to
@@ -2993,11 +3003,22 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             text=True, bufsize=1, encoding="utf-8", errors="replace",
             env=scan_env,
         )
+        job["proc"] = proc
         for line in proc.stdout:
             line = line.rstrip()
             if line:
                 job["log"].append(line)
         proc.wait()
+        job["proc"] = None
+
+        # Cancel arrives by terminating `proc`, which just ends the log loop
+        # above on its own (closed stdout) - detect it here rather than
+        # trying to interrupt the loop directly, so partial/garbled output
+        # from a half-written report.json is never parsed as a real result.
+        if job.get("cancel_requested"):
+            job["status"] = "cancelled"
+            job["log"].append("Scan cancelled.")
+            return
 
         try:
             with open(json_out, "r", encoding="utf-8") as f:
@@ -3018,6 +3039,11 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
 
             for finding in report["findings"]:
                 finding.setdefault("scan_type", classify_scan_type(finding))
+
+            if use_ai and job.get("cancel_requested"):
+                job["status"] = "cancelled"
+                job["log"].append("Scan cancelled.")
+                return
 
             if use_ai:
                 ai_findings = []
@@ -3127,12 +3153,13 @@ def vuln_scan_start():
     VULN_JOBS[job_id] = {
         "status": "running", "log": [], "result": None, "error": None, "started": time.time(),
         "repo": repo or (str(local_path) if local_path else "(uploaded folder)"), "name": "",
+        "cancel_requested": False, "proc": None,
     }
     thread = threading.Thread(
         target=run_vuln_scan_job,
         args=(
             job_id, repo,
-            data.get("ai", True),
+            data.get("ai", True) and _current_user_has_permission("ai_features"),
             data.get("scan_types", ["code"]),
             data.get("fail_on", "high"),
             data.get("include_test_files", False),
@@ -3184,6 +3211,30 @@ def vuln_scan_status(job_id):
         "error": job["error"],
         "elapsed": round(time.time() - job["started"], 1),
     })
+
+
+@app.route("/api/vuln-scan/cancel/<job_id>", methods=["POST"])
+@require_permission("vuln_scan")
+@require_csrf_token
+def vuln_scan_cancel(job_id):
+    """Stops a running scan. Sets cancel_requested so the worker thread
+    exits cleanly instead of parsing a half-written report, and terminates
+    the scanner subprocess directly since that's what the worker thread is
+    blocked reading from - killing it is what actually unblocks it."""
+    job = VULN_JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "Unknown job_id - the server may have restarted."}), 404
+    if job["status"] != "running":
+        return jsonify({"error": "Scan is not running."}), 400
+
+    job["cancel_requested"] = True
+    proc = job.get("proc")
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/vuln-scan/history")

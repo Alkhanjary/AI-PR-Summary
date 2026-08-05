@@ -832,7 +832,7 @@
     <textarea id="diff-input" placeholder="A diff loads here automatically when you pick a pull request above, or paste your own diff (e.g. from `git diff`) to summarize instead" style="width:100%;height:180px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d0d0d0;border-radius:6px;"></textarea>
     <div id="diff-preview" style="display:none;width:100%;height:180px;overflow:auto;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--input-border);border-radius:6px;background:var(--code-bg);"></div>
     <div class="row">
-      <button id="run-scan-btn">Generate summary & security review</button>
+      <button id="run-scan-btn" data-perm="ai_features">Generate summary & security review</button>
     </div>
   </div>
   <div class="status" id="run-status"></div>
@@ -934,7 +934,7 @@
       </div>
     </div>
     <div class="row">
-      <label><input type="checkbox" id="vuln-ai" checked><span>AI verification (slower, more accurate)</span></label>
+      <label data-perm="ai_features"><input type="checkbox" id="vuln-ai" checked><span>AI verification (slower, more accurate)</span></label>
       <label><input type="checkbox" id="vuln-include-tests"><span>Include test files in gate</span></label>
     </div>
     <div class="row" style="margin-top:-0.75rem;">
@@ -942,6 +942,7 @@
     </div>
     <div class="row">
       <button id="run-vuln-btn">Run vulnerability scan</button>
+      <button id="cancel-vuln-btn" style="display:none;background:transparent;color:var(--sev-critical-fg,#c0392b);border:1px solid var(--sev-critical-fg,#c0392b);">Cancel scan</button>
     </div>
   </div>
 
@@ -2386,6 +2387,8 @@ async function runBothScans() {
 runScanBtn.addEventListener('click', runBothScans);
 
 const runVulnBtn = document.getElementById('run-vuln-btn');
+const cancelVulnBtn = document.getElementById('cancel-vuln-btn');
+let cancelVulnJobId = null;
 const vulnStatus = document.getElementById('vuln-status');
 const vulnSummary = document.getElementById('vuln-summary');
 const vulnResults = document.getElementById('vuln-results');
@@ -3820,6 +3823,10 @@ runVulnBtn.addEventListener('click', async () => {
       return;
     }
     const jobId = startData.job_id;
+    cancelVulnJobId = jobId;
+    cancelVulnBtn.style.display = '';
+    cancelVulnBtn.disabled = false;
+    cancelVulnBtn.textContent = 'Cancel scan';
     const progressLog = document.getElementById('vuln-progress-log');
     const progressSimple = document.getElementById('vuln-progress-simple');
 
@@ -3905,6 +3912,11 @@ runVulnBtn.addEventListener('click', async () => {
         notifyScanComplete('Vulnerability scan failed', pollData.error || 'Check the dashboard for details.');
         return;
       }
+      if (pollData.status === 'cancelled') {
+        vulnStatus.textContent = 'Scan cancelled.';
+        if (progressSimple) progressSimple.innerHTML = renderSimpleProgress(fullLog);
+        return;
+      }
     }
 
     const report = data.report;
@@ -3948,6 +3960,25 @@ runVulnBtn.addEventListener('click', async () => {
   } finally {
     vulnScanInFlight = false;
     runVulnBtn.disabled = false;
+    cancelVulnBtn.style.display = 'none';
+    cancelVulnJobId = null;
+  }
+});
+
+cancelVulnBtn.addEventListener('click', async () => {
+  if (!cancelVulnJobId) return;
+  cancelVulnBtn.disabled = true;
+  cancelVulnBtn.textContent = 'Cancelling…';
+  try {
+    await ensureCsrfToken();
+    await fetch(API_BASE + '/api/vuln-scan/cancel/' + cancelVulnJobId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csrf_token: csrfToken })
+    });
+  } catch (e) {
+    // The poll loop will keep running either way and surface the real
+    // outcome once the server-side thread notices cancel_requested.
   }
 });
 
