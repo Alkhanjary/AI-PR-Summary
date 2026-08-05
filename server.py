@@ -21,6 +21,7 @@ import requests
 from flask import Flask, jsonify, request, Response, session, redirect, url_for
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from summarize_pr import (
@@ -84,26 +85,28 @@ import time
 from functools import wraps
 from flask import session, abort
 
-_csrf_tokens = {}  # token -> (creation_time, valid)
 _request_counts = {}  # ip -> [(timestamp, endpoint)]
 MAX_REQUESTS_PER_MINUTE = 60
 CSRF_TOKEN_LIFETIME = 3600  # 1 hour
 
+# Signed rather than tracked in a server-side dict, so a token stays valid
+# for its full lifetime across a server restart - an in-memory store gets
+# wiped on every restart, which invalidates every token a page already has
+# open and produces a confusing "security token expired" error that has
+# nothing to do with the token's actual age.
+_csrf_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt="csrf-token")
+
 def _get_csrf_token():
   """Generate a new CSRF token."""
-  token = secrets.token_urlsafe(32)
-  _csrf_tokens[token] = (time.time(), True)
-  return token
+  return _csrf_serializer.dumps("csrf")
 
 def _validate_csrf_token(token):
   """Validate a CSRF token."""
-  if token not in _csrf_tokens:
+  try:
+    _csrf_serializer.loads(token, max_age=CSRF_TOKEN_LIFETIME)
+    return True
+  except (BadSignature, SignatureExpired):
     return False
-  created, valid = _csrf_tokens[token]
-  if not valid or (time.time() - created) > CSRF_TOKEN_LIFETIME:
-    _csrf_tokens[token] = (created, False)
-    return False
-  return True
 
 def require_csrf_token(f):
   """Decorator to require valid CSRF token in POST requests."""
