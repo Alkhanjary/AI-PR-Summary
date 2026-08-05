@@ -90,7 +90,7 @@ def require_csrf_token(f):
       if not token and request.json:
         token = request.json.get('csrf_token')
       if not token or not _validate_csrf_token(token):
-        abort(403)
+        abort(403, description="Security token expired or missing - refresh the page and try again.")
     return f(*args, **kwargs)
   return decorated_function
 
@@ -195,7 +195,7 @@ def require_admin(f):
         abort(401)
       return redirect(url_for('login_page'))
     if current_role() != 'admin':
-      abort(403)
+      abort(403, description="Admin access required for this action.")
     return f(*args, **kwargs)
   return decorated_function
 
@@ -262,7 +262,7 @@ def require_permission(perm_key):
       with _permissions_lock:
         perms = _load_permissions()
       if not perms.get(perm_key, False):
-        abort(403)
+        abort(403, description="Your account doesn't have permission for this action - ask an admin to grant it in Settings.")
       return f(*args, **kwargs)
     return decorated_function
   return decorator
@@ -585,9 +585,10 @@ def _handle_401(e):
 
 @app.errorhandler(403)
 def _handle_403(e):
+    message = e.description if getattr(e, "description", None) else "Access denied."
     if request.path.startswith("/api/"):
-        return jsonify({"error": "Admin access required for this action."}), 403
-    return "Forbidden - admin access required.", 403
+        return jsonify({"error": message}), 403
+    return message, 403
 
 
 @app.route("/api/github/repos")
