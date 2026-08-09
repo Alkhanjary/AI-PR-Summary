@@ -789,7 +789,7 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V8l7-4 7 4v13"/><path d="M13 21V12h4v9"/><path d="M7 9h.01M7 12h.01M7 15h.01M7 18h.01"/><path d="M17 21h4"/></svg></span>
         <span class="nav-label">Organization</span>
       </div>
-      <div class="nav-item active" data-panel="overview" data-perm="tab_overview">
+      <div class="nav-item active" data-panel="overview">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
         <span class="nav-label">Overview</span>
       </div>
@@ -1139,14 +1139,6 @@
   </div>
 
   <div class="hero-block" style="margin-top:24px;">
-    <div class="hero-block-title">User accounts</div>
-    <div class="hero-block-desc">Reset any account's password directly - no need to know their current one.</div>
-  </div>
-  <div class="panel-card">
-    <div id="settings-users-list" style="display:flex;flex-direction:column;gap:2px;"><span class="hint-text">Loading...</span></div>
-  </div>
-
-  <div class="hero-block" style="margin-top:24px;">
     <div class="hero-block-title">System health</div>
     <div class="hero-block-desc">What's configured and what isn't, so a missing API key shows up here instead of as a cryptic error mid-scan.</div>
   </div>
@@ -1237,7 +1229,6 @@
           <select id="org-new-role" style="max-width:160px;">
             <option value="user">user</option>
             <option value="admin">admin</option>
-            <option value="organization">organization</option>
           </select>
         </div>
       </div>
@@ -1492,10 +1483,6 @@ checkAuth();
 
 // ---- Settings panel: admin manages what the "user" role can do --------
 const PERMISSION_LABELS = {
-  tab_overview: {
-    title: 'Overview tab',
-    desc: 'Search and browse a GitHub profile: stats, language mix, repo activity.',
-  },
   tab_monitor: {
     title: 'Monitor tab',
     desc: 'Team commit activity and heuristic bug counts per contributor.',
@@ -1584,82 +1571,9 @@ async function initSettingsPanel() {
     });
   }
 
-  loadSettingsUsers();
   loadSettingsHealth();
   const healthRefreshBtn = document.getElementById('settings-health-refresh-btn');
   if (healthRefreshBtn) healthRefreshBtn.addEventListener('click', loadSettingsHealth);
-}
-
-async function loadSettingsUsers() {
-  const listEl = document.getElementById('settings-users-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<span class="hint-text">Loading...</span>';
-  try {
-    const res = await fetch(API_BASE + '/api/admin/users');
-    const data = await res.json();
-    const users = data.users || [];
-    listEl.innerHTML = users.map(u => (
-      '<div class="user-account-row" data-username="' + attr(u.username) + '" style="padding:10px 0;border-bottom:1px solid var(--divider);">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
-          '<div>' +
-            '<div style="font-weight:600;font-size:13px;color:var(--text-primary);">' + esc(u.username) + '</div>' +
-            '<div class="hint-text" style="font-size:11.5px;">' + (u.role === 'admin' ? 'Administrator' : 'Viewer') + '</div>' +
-          '</div>' +
-          '<button type="button" class="btn btn-sm user-reset-toggle" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Reset password</button>' +
-        '</div>' +
-        '<div class="user-reset-form" style="display:none;margin-top:10px;gap:8px;flex-direction:column;">' +
-          '<input type="password" class="user-reset-input" placeholder="New password (min 6 chars)" style="max-width:260px;color:var(--text-primary);background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:6px 8px;">' +
-          '<div style="display:flex;align-items:center;gap:10px;">' +
-            '<button type="button" class="btn btn-sm user-reset-confirm">Set password</button>' +
-            '<span class="hint-text user-reset-status"></span>' +
-          '</div>' +
-        '</div>' +
-      '</div>'
-    )).join('');
-
-    listEl.querySelectorAll('.user-reset-toggle').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const form = btn.closest('.user-account-row').querySelector('.user-reset-form');
-        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
-      });
-    });
-    listEl.querySelectorAll('.user-reset-confirm').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const row = btn.closest('.user-account-row');
-        const username = row.getAttribute('data-username');
-        const input = row.querySelector('.user-reset-input');
-        const statusEl = row.querySelector('.user-reset-status');
-        const newPassword = input.value;
-        if (newPassword.length < 6) {
-          statusEl.textContent = 'Must be at least 6 characters.';
-          statusEl.style.color = '#dc2626';
-          return;
-        }
-        btn.disabled = true;
-        statusEl.style.color = '';
-        statusEl.textContent = 'Saving…';
-        try {
-          const token = await ensureCsrfToken();
-          const res = await fetch(API_BASE + '/api/admin/reset-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, new_password: newPassword, csrf_token: token }),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Could not reset password.');
-          statusEl.textContent = 'Password updated for ' + username + '.';
-          input.value = '';
-        } catch (err) {
-          statusEl.style.color = '#dc2626';
-          statusEl.textContent = err.message;
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
-  } catch (err) {
-    listEl.innerHTML = '<span class="hint-text">Could not load accounts.</span>';
-  }
 }
 
 async function loadSettingsHealth() {
@@ -1833,10 +1747,14 @@ async function loadOrgUsers() {
     const myUsername = currentUser && currentUser.username;
     listEl.innerHTML = users.map(u => {
       const isSelf = u.username === myUsername;
-      const roleControl = isSelf
-        ? '<span class="org-role-badge org-role-' + esc(u.role) + '" title="You can\'t change your own role">' + esc(u.role) + '</span>'
+      // "organization" is a fixed oversight tier, not one assignable through
+      // this control (see server.py's ASSIGNABLE_ROLES) - an account that's
+      // already organization (other than yourself) gets a static badge
+      // rather than a dropdown that can't actually represent its own value.
+      const roleControl = (isSelf || u.role === 'organization')
+        ? '<span class="org-role-badge org-role-' + esc(u.role) + '" title="' + (isSelf ? "You can't change your own role" : 'Organization role is not assignable here') + '">' + esc(u.role) + '</span>'
         : '<select class="org-role-select org-user-role-select" data-current="' + attr(u.role) + '">' +
-            ['user', 'admin', 'organization'].map(r => '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>').join('') +
+            ['user', 'admin'].map(r => '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>').join('') +
           '</select>';
       const deleteBtn = isSelf
         ? ''

@@ -26,25 +26,34 @@ def login(client, username, password):
 
 def test_list_users_requires_login(client):
     c, _ = client
-    resp = c.get("/api/admin/users")
+    resp = c.get("/api/org/users")
     assert resp.status_code == 401
 
 
-def test_list_users_rejects_non_admin(client):
+def test_list_users_rejects_user(client):
     c, _ = client
     login(c, "user", "user123")
-    resp = c.get("/api/admin/users")
+    resp = c.get("/api/org/users")
     assert resp.status_code == 403
 
 
-def test_list_users_allows_admin_and_hides_password_hash(client):
+def test_list_users_rejects_admin(client):
+    # organization sits above admin specifically so admin can't see or
+    # manage the account roster on its own - this must stay 403, not 200.
     c, _ = client
     login(c, "admin", "admin123")
-    resp = c.get("/api/admin/users")
+    resp = c.get("/api/org/users")
+    assert resp.status_code == 403
+
+
+def test_list_users_allows_organization_and_hides_password_hash(client):
+    c, _ = client
+    login(c, "org", "org123")
+    resp = c.get("/api/org/users")
     assert resp.status_code == 200
     body = resp.get_json()
     usernames = {u["username"] for u in body["users"]}
-    assert {"admin", "user"} <= usernames
+    assert {"admin", "user", "org"} <= usernames
     for u in body["users"]:
         assert "password" not in u
         assert set(u.keys()) == {"username", "role"}
@@ -56,23 +65,37 @@ def test_reset_password_requires_login(client):
     assert resp.status_code == 401
 
 
-def test_reset_password_rejects_non_admin(client):
+def test_reset_password_rejects_user(client):
     c, _ = client
     login(c, "user", "user123")
     resp = c.post("/api/admin/reset-password", json={"username": "admin", "new_password": "newpass1"})
     assert resp.status_code == 403
 
 
+def test_reset_password_rejects_admin(client):
+    # Admin used to be able to reset user/admin passwords; that capability
+    # is now organization-only. This is the behavior change itself, not
+    # incidental - keep it pinned so a future edit can't silently widen
+    # admin's access back out.
+    c, server_module = client
+    login(c, "admin", "admin123")
+    token = server_module._get_csrf_token()
+    resp = c.post("/api/admin/reset-password", json={
+        "username": "user", "new_password": "newpass1", "csrf_token": token,
+    })
+    assert resp.status_code == 403
+
+
 def test_reset_password_rejects_missing_csrf_token(client):
     c, _ = client
-    login(c, "admin", "admin123")
+    login(c, "org", "org123")
     resp = c.post("/api/admin/reset-password", json={"username": "user", "new_password": "newpass1"})
     assert resp.status_code == 403
 
 
 def test_reset_password_rejects_unknown_account(client):
     c, server_module = client
-    login(c, "admin", "admin123")
+    login(c, "org", "org123")
     token = server_module._get_csrf_token()
     resp = c.post("/api/admin/reset-password", json={
         "username": "nobody", "new_password": "newpass1", "csrf_token": token,
@@ -82,7 +105,7 @@ def test_reset_password_rejects_unknown_account(client):
 
 def test_reset_password_rejects_short_password(client):
     c, server_module = client
-    login(c, "admin", "admin123")
+    login(c, "org", "org123")
     token = server_module._get_csrf_token()
     resp = c.post("/api/admin/reset-password", json={
         "username": "user", "new_password": "abc", "csrf_token": token,
@@ -92,7 +115,7 @@ def test_reset_password_rejects_short_password(client):
 
 def test_reset_password_succeeds_and_new_password_logs_in(client):
     c, server_module = client
-    login(c, "admin", "admin123")
+    login(c, "org", "org123")
     token = server_module._get_csrf_token()
     resp = c.post("/api/admin/reset-password", json={
         "username": "user", "new_password": "brandnewpass1", "csrf_token": token,
@@ -107,3 +130,15 @@ def test_reset_password_succeeds_and_new_password_logs_in(client):
     c.post("/api/auth/logout")
     stale = login(c, "user", "user123")
     assert stale.status_code == 401
+
+
+def test_reset_password_allows_organization_to_reset_admin(client):
+    # This is the specific capability admin never had: organization can
+    # reset ANY account's password, including another admin's.
+    c, server_module = client
+    login(c, "org", "org123")
+    token = server_module._get_csrf_token()
+    resp = c.post("/api/admin/reset-password", json={
+        "username": "admin", "new_password": "brandnewadminpass1", "csrf_token": token,
+    })
+    assert resp.status_code == 200

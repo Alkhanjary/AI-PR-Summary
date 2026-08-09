@@ -267,12 +267,12 @@ def require_organization(f):
 # scan only call already-general (require_login) endpoints, so hiding the
 # tab is the actual point, not a new server-side lock.
 #
-# Everything defaults to OFF: a freshly created "user" account sees nothing
-# until admin explicitly grants it from the Settings panel, rather than
-# most things being on by default and admin only locking down the
-# expensive/risky ones.
+# Everything defaults to OFF except Overview: a freshly created "user"
+# account still needs a landing page rather than the "nothing enabled yet"
+# empty state, so Overview is a baseline every authenticated account gets
+# regardless of permissions - not one more toggle admin has to remember to
+# flip. Every other tab stays opt-in.
 DEFAULT_PERMISSIONS = {
-    "tab_overview": False,     # Overview tab (GitHub profile/stats browsing)
     "tab_monitor": False,      # Monitor tab (team activity, heuristic bug counts)
     "tab_activity": False,     # Activity tab
     "tab_run_scan": False,     # Run scan tab (PR summary + security-scan tools)
@@ -573,16 +573,6 @@ def api_admin_health():
   return jsonify({"checks": checks})
 
 
-@app.route("/api/admin/users")
-@require_admin
-def api_admin_list_users():
-  """Lists accounts (username + role only - never the password hash) so
-  the Settings panel can offer a reset-password action per account."""
-  with _users_lock:
-    users = _load_users()
-  return jsonify({"users": [{"username": u, "role": info.get("role", "user")} for u, info in users.items()]})
-
-
 # ============ Organization oversight ============
 # Read-only views for the "organization" role: every account (including
 # admin's own), and the full activity log. See require_organization for why
@@ -627,15 +617,20 @@ def api_org_overview():
 @app.route("/api/org/users")
 @require_organization
 def api_org_list_users():
-  """Same shape as /api/admin/users, exposed under /org too so the
-  Organization tab doesn't depend on an admin-only endpoint to build its
-  account list - organization access shouldn't route through admin's."""
+  """Lists accounts (username + role only - never the password hash) for
+  the Organization tab's roster."""
   with _users_lock:
     users = _load_users()
   return jsonify({"users": [{"username": u, "role": info.get("role", "user")} for u, info in users.items()]})
 
 
 VALID_ROLES = ("user", "admin", "organization")
+# "organization" is deliberately not assignable through create/change-role -
+# it's a single fixed oversight tier seeded by hand (see _default_users()),
+# not something meant to proliferate. Letting an org account mint peers via
+# the UI would dilute the "one entity watches everyone, including admin"
+# model this role exists for.
+ASSIGNABLE_ROLES = ("user", "admin")
 
 @app.route("/api/org/users", methods=["POST"])
 @require_organization
@@ -653,8 +648,8 @@ def api_org_create_user():
     return jsonify({"error": "Username must be non-empty and contain only letters, numbers, dots, dashes, or underscores."}), 400
   if len(password) < 6:
     return jsonify({"error": "Password must be at least 6 characters."}), 400
-  if role not in VALID_ROLES:
-    return jsonify({"error": "Role must be one of: " + ", ".join(VALID_ROLES)}), 400
+  if role not in ASSIGNABLE_ROLES:
+    return jsonify({"error": "Role must be one of: " + ", ".join(ASSIGNABLE_ROLES)}), 400
 
   with _users_lock:
     users = _load_users()
@@ -701,16 +696,16 @@ def api_org_rename_user():
 @require_organization
 @require_csrf_token
 def api_org_change_role():
-  """Organization-only: promote/demote an account between user, admin, and
-  organization. Refuses to change your own role - locking yourself out of
-  the only tier that can undo it isn't a mistake this endpoint should let
-  you make silently."""
+  """Organization-only: promote/demote an account between user and admin.
+  Can't be used to grant "organization" (see ASSIGNABLE_ROLES) or to
+  change your own role - locking yourself out of the only tier that can
+  undo it isn't a mistake this endpoint should let you make silently."""
   data = request.get_json(force=True) or {}
   username = (data.get("username") or "").strip()
   new_role = (data.get("role") or "").strip()
 
-  if new_role not in VALID_ROLES:
-    return jsonify({"error": "Role must be one of: " + ", ".join(VALID_ROLES)}), 400
+  if new_role not in ASSIGNABLE_ROLES:
+    return jsonify({"error": "Role must be one of: " + ", ".join(ASSIGNABLE_ROLES)}), 400
   if username == session.get("user_id"):
     return jsonify({"error": "You can't change your own role."}), 400
 
@@ -905,13 +900,48 @@ def api_org_report():
       lines.append(f"- `{rec.get('repo', '?')}` - {len(real_findings)} finding(s) - started by **{rec.get('initiated_by') or '(unknown)'}** - {when}")
     lines.append("")
 
-  lines.append("## Recent activity log")
-  lines.append(f"Most recent {min(len(log), 50)} of {len(log)} total event(s).")
-  lines.append("")
-  for entry in log[:50]:
-    when = datetime.fromtimestamp(entry.get("timestamp", 0), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    detail = f" - {entry.get('detail')}" if entry.get("detail") else ""
-    lines.append(f"- **{entry.get('username', '(anonymous)')}** ({entry.get('role') or '-'}) &mdash; {entry.get('action')}{detail} &mdash; {when}")
+  # Grouped by who did it, not one flat interleaved timeline - the point of
+  # this report is "what has each person been doing", so each account gets
+  # its own section (a plain-English summary, then the detailed log) rather
+  # than making the reader pick their entries out of everyone else's. (log
+  # itself already excludes organization's own actions - see log_activity -
+  # so this is user/admin only regardless.)
+  lines.append("## Activity by user")
+  by_user = {}
+  for entry in log:
+    by_user.setdefault(entry.get("username") or "(anonymous)", []).append(entry)
+  MAX_PER_USER = 25
+  if not by_user:
+    lines.append("No activity recorded yet.")
+    lines.append("")
+  for username in sorted(by_user, key=lambda u: -len(by_user[u])):
+    entries = by_user[username]
+    role = entries[0].get("role") or "-"
+    first_seen = datetime.fromtimestamp(min(e.get("timestamp", 0) for e in entries), timezone.utc).strftime("%Y-%m-%d")
+    last_seen = datetime.fromtimestamp(max(e.get("timestamp", 0) for e in entries), timezone.utc).strftime("%Y-%m-%d")
+    lines.append(f"### {username} ({role}) &mdash; {len(entries)} event(s)")
+    lines.append(f"*Active {first_seen} to {last_seen}*" if first_seen != last_seen else f"*Active on {first_seen}*")
+    lines.append("")
+
+    action_counts = {}
+    for e in entries:
+      action_counts[e.get("action")] = action_counts.get(e.get("action"), 0) + 1
+    lines.append("**Summary:**")
+    for action, count in sorted(action_counts.items(), key=lambda kv: -kv[1]):
+      label = _ACTION_LABELS.get(action, action)
+      lines.append(f"- {count}&times; {label}")
+    lines.append("")
+
+    lines.append("**Log:**")
+    shown = entries[:MAX_PER_USER]
+    for entry in shown:
+      when = datetime.fromtimestamp(entry.get("timestamp", 0), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+      label = _ACTION_LABELS.get(entry.get("action"), entry.get("action"))
+      detail = f" - {entry.get('detail')}" if entry.get("detail") else ""
+      lines.append(f"- {label}{detail} &mdash; {when}")
+    if len(entries) > MAX_PER_USER:
+      lines.append(f"- _(+{len(entries) - MAX_PER_USER} more not shown)_")
+    lines.append("")
 
   report_md = normalize_report_text("\n".join(lines))
   title = "Organization Oversight Report"
@@ -928,19 +958,37 @@ def api_org_report():
                      mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                      headers={"Content-Disposition": "attachment; filename=organization-report.docx"})
   if fmt == "pdf":
-    return Response(build_report_pdf(report_md, title, subtitle), mimetype="application/pdf",
+    # A distinct cover from the vulnerability report's (violet, not the
+    # security-report navy/blue) so the two are never mistaken for each
+    # other at a glance, with stat tiles that mirror the Organization tab
+    # itself rather than reusing the severity-count tiles built for scans.
+    org_theme = {
+        "eyebrow": "ORGANIZATION  ·  CONFIDENTIAL",
+        "title_lines": ["ORGANIZATION", "OVERSIGHT REPORT"],
+        "accent_color": "#7c3aed",
+        "stats": [
+            (str(len(users)), "TOTAL ACCOUNTS", "#a78bfa"),
+            (str(role_counts.get("admin", 0)), "ADMINS", "#93c5fd"),
+            (str(role_counts.get("user", 0)), "USERS", "#93c5fd"),
+            (str(len(last_24h)), "EVENTS (24H)", "#cbd5e1"),
+            (str(len(failed_24h)), "FAILED LOGINS", "#f87171"),
+            (str(len(running_scans)), "SCANS RUNNING", "#34d399"),
+        ],
+    }
+    return Response(build_report_pdf(report_md, title, subtitle, theme=org_theme), mimetype="application/pdf",
                      headers={"Content-Disposition": "attachment; filename=organization-report.pdf"})
   return jsonify({"error": f"Unknown format: {fmt}"}), 400
 
 
 @app.route("/api/admin/reset-password", methods=["POST"])
-@require_admin
+@require_organization
 @require_csrf_token
 def api_admin_reset_password():
-  """Admin sets a DIFFERENT account's password directly, no current-password
+  """Sets a DIFFERENT account's password directly, no current-password
   needed - unlike /api/auth/change-password, which is self-service and
-  requires proving you already know the old one. This is how an admin
-  recovers a locked-out user without needing their old credentials."""
+  requires proving you already know the old one. Organization-only:
+  admin used to be able to reset user/admin passwords too, but that's now
+  exclusively an organization capability."""
   data = request.get_json(force=True) or {}
   username = (data.get("username") or "").strip()
   new_password = data.get("new_password", "")
@@ -953,11 +1001,6 @@ def api_admin_reset_password():
     target = users.get(username)
     if not target:
       return jsonify({"error": "No such account."}), 404
-    # Admin can reset a "user" or another "admin" account, but not an
-    # "organization" one - letting admin take over the oversight role above
-    # it would defeat the whole point of that role existing.
-    if target.get("role") == "organization" and not role_at_least("organization"):
-      return jsonify({"error": "Only an organization-level account can reset another organization account's password."}), 403
     target["password"] = generate_password_hash(new_password)
     _save_users(users)
 
@@ -1676,9 +1719,11 @@ def _save_scan_history(records):
 
 
 # ============ Activity log (organization oversight) ============
-# Every account's actions, including admin's - the whole point of an
-# "organization" role sitting above admin is that admin's own activity is
-# visible to someone, not just what admin chooses to let a "user" see.
+# "user" and "admin" actions only - the whole point of an "organization"
+# role sitting above admin is that admin's own activity is visible to
+# someone, not just what admin chooses to let a "user" see. Organization's
+# own actions are deliberately excluded (see log_activity): it's the one
+# doing the watching here, not something this log watches itself.
 #
 # Deliberately no delete/prune endpoint and no automatic cap: an audit trail
 # that the people being audited can trim isn't one. If this file's size ever
@@ -1687,6 +1732,31 @@ def _save_scan_history(records):
 # (see: the scan-history 200-record cap that used to quietly eat old scans).
 ACTIVITY_LOG_FILE = SCAN_HISTORY_DIR / "activity_log.json"
 _activity_log_lock = threading.Lock()
+
+# Mirrors the frontend's ORG_ACTION_META labels (dashboard/index.html) -
+# keep the two in sync if a new log_activity() call site is added. Used for
+# the human-readable /api/org/report; the JSON activity endpoints still
+# return the raw action string, which the dashboard maps itself.
+_ACTION_LABELS = {
+    "login": "Signed in",
+    "login_failed": "Failed sign-in attempt",
+    "logout": "Signed out",
+    "change_own_password": "Changed their own password",
+    "admin_reset_password": "Reset another account's password",
+    "update_permissions": "Updated user permissions",
+    "vuln_scan_start": "Started a vulnerability scan",
+    "vuln_scan_cancel": "Cancelled a vulnerability scan",
+    "vuln_scan_rename": "Renamed a saved scan",
+    "vuln_scan_delete": "Deleted a saved scan",
+    "team_summary_generated": "Generated an AI team summary",
+    "team_report_generated": "Generated a team report",
+    "team_bugs_start": "Started AI-verified bug attribution",
+    "pr_summary_generated": "Generated an AI PR summary",
+    "account_created": "Created a new account",
+    "account_renamed": "Renamed an account",
+    "account_role_changed": "Changed an account's role",
+    "account_deleted": "Deleted an account",
+}
 
 def _load_activity_log():
     try:
@@ -1711,11 +1781,21 @@ def log_activity(action, detail="", username=None, role=None):
 
     username/role default to the current session, but a failed login has no
     session yet - pass the attempted username explicitly there so failed
-    attempts still show up (arguably the most important entries in the log)."""
+    attempts still show up (arguably the most important entries in the log).
+
+    The log tracks "user" and "admin" only - organization is the one doing
+    the watching here, not something it watches itself, so its own actions
+    (managing accounts, viewing the tab) are deliberately not recorded. A
+    failed login attempt is kept regardless of whose username was typed
+    (role="" there, never "organization") since a failed attempt against
+    the org account is exactly the kind of thing worth keeping visible."""
+    resolved_role = role if role is not None else (session.get("role") or "")
+    if resolved_role == "organization":
+        return
     entry = {
         "timestamp": time.time(),
         "username": username if username is not None else (session.get("user_id") or "(anonymous)"),
-        "role": role if role is not None else (session.get("role") or ""),
+        "role": resolved_role,
         "action": action,
         "detail": detail,
         "ip": request.remote_addr,
@@ -4812,7 +4892,7 @@ def _ascii_fallback(text, active):
     return text
 
 
-def build_report_pdf(md_text, title, subtitle=None, meta=None):
+def build_report_pdf(md_text, title, subtitle=None, meta=None, theme=None):
     import html as _html
     from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib.pagesizes import letter
@@ -4831,6 +4911,16 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
     # True only if no TrueType font could be registered, in which case
     # characters outside WinAnsi have to be transliterated to survive.
     ASCII_ONLY = F_REG == "Helvetica"
+
+    # Cover identity - defaults reproduce the original vulnerability-report
+    # look exactly, so every existing caller is unaffected. A caller that
+    # wants a visually distinct cover (see api_org_report) passes its own
+    # eyebrow/title/accent/stats instead of leaving this at None.
+    theme = theme or {}
+    T_EYEBROW = theme.get("eyebrow", "SECURITY  ·  CONFIDENTIAL")
+    T_TITLE_LINES = theme.get("title_lines", ["VULNERABILITY", "ASSESSMENT REPORT"])
+    T_ACCENT = theme.get("accent_color", "#3b82f6")
+    T_STATS = theme.get("stats")  # None => derive from meta (severity counts); else explicit [(value, label, color), ...]
 
     # Palette
     C_NAVY   = HexColor("#1e293b")
@@ -4865,40 +4955,44 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         # Dark navy background
         c.setFillColor(C_NAVY)
         c.rect(0, 0, W, H, fill=1, stroke=0)
-        # Blue accent stripe
-        c.setFillColor(HexColor("#3b82f6"))
+        # Accent stripe
+        c.setFillColor(HexColor(T_ACCENT))
         c.rect(0.75 * inch, H * 0.415, W - 1.5 * inch, 3, fill=1, stroke=0)
         # Eyebrow
         c.setFillColor(HexColor("#64748b"))
         c.setFont(F_REG, 10)
-        c.drawCentredString(W / 2, H * 0.72, "SECURITY  ·  CONFIDENTIAL")
-        # Big title
+        c.drawCentredString(W / 2, H * 0.72, T_EYEBROW)
+        # Big title (1 or 2 lines - the first carries the larger size)
         c.setFillColor(white)
-        c.setFont(F_BOLD, 38)
-        c.drawCentredString(W / 2, H * 0.615, "VULNERABILITY")
-        c.setFont(F_BOLD, 30)
-        c.drawCentredString(W / 2, H * 0.545, "ASSESSMENT REPORT")
+        title_y = [H * 0.615, H * 0.545]
+        title_sizes = [38, 30]
+        for i, line in enumerate(T_TITLE_LINES[:2]):
+            c.setFont(F_BOLD, title_sizes[i])
+            c.drawCentredString(W / 2, title_y[i], line)
         # Subtitle (date / files / count line)
         c.setFillColor(HexColor("#94a3b8"))
         c.setFont(F_REG, 11)
         sub = _ascii_fallback((subtitle or "").replace("&middot;", "·"), ASCII_ONLY)
         c.drawCentredString(W / 2, H * 0.43, sub)
         # Bottom stats panel
-        counts = (meta or {}).get("counts", {})
-        files  = (meta or {}).get("files_scanned", "?")
-        total  = sum(counts.values()) if counts else "?"
+        if T_STATS:
+            stats = T_STATS
+        else:
+            counts = (meta or {}).get("counts", {})
+            files  = (meta or {}).get("files_scanned", "?")
+            total  = sum(counts.values()) if counts else "?"
+            stats = [
+                (str(files),                        "FILES SCANNED",  "#94a3b8"),
+                (str(total),                         "TOTAL FINDINGS", "#cbd5e1"),
+                (str(counts.get("critical", 0)),     "CRITICAL",       "#dc2626"),
+                (str(counts.get("high", 0)),         "HIGH",           "#ea580c"),
+                (str(counts.get("medium", 0)),       "MEDIUM",         "#d97706"),
+                (str(counts.get("low", 0)),          "LOW",            "#16a34a"),
+            ]
         c.setFillColor(HexColor("#0f172a"))
         c.rect(0, 0, W, H * 0.29, fill=1, stroke=0)
         c.setFillColor(HexColor("#334155"))
         c.rect(0, H * 0.29, W, 1, fill=1, stroke=0)
-        stats = [
-            (str(files),                        "FILES SCANNED",  "#94a3b8"),
-            (str(total),                         "TOTAL FINDINGS", "#cbd5e1"),
-            (str(counts.get("critical", 0)),     "CRITICAL",       "#dc2626"),
-            (str(counts.get("high", 0)),         "HIGH",           "#ea580c"),
-            (str(counts.get("medium", 0)),       "MEDIUM",         "#d97706"),
-            (str(counts.get("low", 0)),          "LOW",            "#16a34a"),
-        ]
         col_w = W / len(stats)
         for i, (val, lbl, clr) in enumerate(stats):
             cx = i * col_w + col_w / 2
@@ -4914,6 +5008,8 @@ def build_report_pdf(md_text, title, subtitle=None, meta=None):
         # Top bar
         c.setFillColor(C_NAVY)
         c.rect(0, H - 0.44 * inch, W, 0.44 * inch, fill=1, stroke=0)
+        c.setFillColor(HexColor(T_ACCENT))
+        c.rect(0, H - 0.44 * inch, W, 2, fill=1, stroke=0)
         c.setFillColor(white)
         c.setFont(F_BOLD, 8)
         c.drawString(0.75 * inch, H - 0.27 * inch, title)
