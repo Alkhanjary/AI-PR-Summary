@@ -5150,9 +5150,20 @@ async function computePrTurnaround(repo) {
   }
 }
 
+let monitorInFlight = false;
 runMonitorBtn.addEventListener('click', async () => {
+  // Without this, clicking the button again while a bug-attribution scan is
+  // still polling (easy to do - AI verification can run for minutes) starts
+  // a SECOND overlapping while(true) poll loop on top of the first, each
+  // hitting the server every second forever until its own job finishes.
+  // Stack up a few of those over a session and the whole dashboard turns
+  // sluggish from the sheer volume of concurrent polling and DOM writes.
+  if (monitorInFlight) return;
+  monitorInFlight = true;
+  runMonitorBtn.disabled = true;
+
   const repo = repoSelect.value;
-  if (!repo) { monitorStatus.textContent = 'Pick a repo above first.'; return; }
+  if (!repo) { monitorStatus.textContent = 'Pick a repo above first.'; monitorInFlight = false; runMonitorBtn.disabled = false; return; }
 
   monitorTableWrap.innerHTML = '';
   monitorSummaryCard.style.display = 'none';
@@ -5261,6 +5272,12 @@ runMonitorBtn.addEventListener('click', async () => {
   } catch (e) {
     monitorProgressWrap.style.display = 'none';
     monitorStatus.textContent = 'Could not reach the local server. Is server.py running?';
+  } finally {
+    // Runs on every exit path - the early returns above included - so the
+    // button can never get stuck disabled, and a second click can never
+    // start a second overlapping poll loop.
+    monitorInFlight = false;
+    runMonitorBtn.disabled = false;
   }
 });
 

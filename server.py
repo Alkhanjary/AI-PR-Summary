@@ -868,45 +868,26 @@ def api_org_report():
     scan_records = _load_scan_history()
   running_scans = [j for j in VULN_JOBS.values() if j.get("status") == "running"]
 
+  def cell(value):
+    """Table cells are parsed by splitting each row on '|', so anything
+    user-controlled (a scan's repo/path, a rename's old detail text) that
+    happens to contain a literal '|' would silently corrupt the table's
+    column count instead of erroring - replace it before it ever reaches
+    the table builders, in all four formats at once since they all parse
+    the same markdown."""
+    text = str(value if value is not None else "").replace("|", "/").replace("\n", " ").strip()
+    return (text[:117] + "...") if len(text) > 120 else text
+
+  # No accounts/activity-totals/scan tables here - those just restate the
+  # Organization tab's own stat tiles and lists. The report's whole reason
+  # to exist is the thing the live tab can't show at a glance: what has
+  # each specific person actually been doing. (Scan activity isn't a
+  # separate section either - each vuln_scan_start entry already carries
+  # its repo/target in the per-user log below.)
   lines = []
-  lines.append("## Accounts")
-  lines.append(f"- **Total:** {len(users)}  ({role_counts['organization']} organization, {role_counts['admin']} admin, {role_counts['user']} user)")
-  lines.append("")
-  for username, info in sorted(users.items(), key=lambda kv: kv[0].lower()):
-    lines.append(f"- `{username}` - {info.get('role', 'user')}")
+  lines.append(f"{len(users)} account(s) tracked. Per-account summary and detailed log follow.")
   lines.append("")
 
-  lines.append("## Activity summary")
-  lines.append(f"- **Total events recorded:** {len(log)}")
-  lines.append(f"- **Events in the last 24h:** {len(last_24h)}")
-  lines.append(f"- **Failed sign-in attempts in the last 24h:** {len(failed_24h)}")
-  lines.append("")
-
-  lines.append("## Scan activity")
-  lines.append(f"- **Scans saved:** {len(scan_records)}")
-  lines.append(f"- **Running right now:** {len(running_scans)}")
-  lines.append("")
-  if running_scans:
-    lines.append("### Currently running")
-    for j in running_scans:
-      lines.append(f"- `{j.get('repo', '?')}` - started by **{j.get('initiated_by') or '(unknown)'}**")
-    lines.append("")
-  recent_scans = sorted(scan_records, key=lambda r: -r.get("timestamp", 0))[:15]
-  if recent_scans:
-    lines.append("### Most recent saved scans")
-    for rec in recent_scans:
-      when = datetime.fromtimestamp(rec.get("timestamp", 0), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-      real_findings = [f for f in (rec.get("findings") or []) if not _is_dismissed(f)]
-      lines.append(f"- `{rec.get('repo', '?')}` - {len(real_findings)} finding(s) - started by **{rec.get('initiated_by') or '(unknown)'}** - {when}")
-    lines.append("")
-
-  # Grouped by who did it, not one flat interleaved timeline - the point of
-  # this report is "what has each person been doing", so each account gets
-  # its own section (a plain-English summary, then the detailed log) rather
-  # than making the reader pick their entries out of everyone else's. (log
-  # itself already excludes organization's own actions - see log_activity -
-  # so this is user/admin only regardless.)
-  lines.append("## Activity by user")
   by_user = {}
   for entry in log:
     by_user.setdefault(entry.get("username") or "(anonymous)", []).append(entry)
@@ -919,20 +900,25 @@ def api_org_report():
     role = entries[0].get("role") or "-"
     first_seen = datetime.fromtimestamp(min(e.get("timestamp", 0) for e in entries), timezone.utc).strftime("%Y-%m-%d")
     last_seen = datetime.fromtimestamp(max(e.get("timestamp", 0) for e in entries), timezone.utc).strftime("%Y-%m-%d")
-    lines.append(f"### {username} ({role}) &mdash; {len(entries)} event(s)")
+    lines.append(f"## {username} ({role}) &mdash; {len(entries)} event(s)")
     lines.append(f"*Active {first_seen} to {last_seen}*" if first_seen != last_seen else f"*Active on {first_seen}*")
     lines.append("")
 
+    lines.append("### Summary")
     action_counts = {}
     for e in entries:
       action_counts[e.get("action")] = action_counts.get(e.get("action"), 0) + 1
-    lines.append("**Summary:**")
-    for action, count in sorted(action_counts.items(), key=lambda kv: -kv[1]):
+    ranked = sorted(action_counts.items(), key=lambda kv: -kv[1])
+    max_count = ranked[0][1] if ranked else 1
+    lines.append("| Action | Count | |")
+    lines.append("|---|---|---|")
+    for action, count in ranked:
       label = _ACTION_LABELS.get(action, action)
-      lines.append(f"- {count}&times; {label}")
+      bar_units = max(1, round((count / max_count) * 20))
+      lines.append(f"| {cell(label)} | {count} | {'█' * bar_units} |")
     lines.append("")
 
-    lines.append("**Log:**")
+    lines.append("### Log")
     shown = entries[:MAX_PER_USER]
     for entry in shown:
       when = datetime.fromtimestamp(entry.get("timestamp", 0), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
