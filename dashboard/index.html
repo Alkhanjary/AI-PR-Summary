@@ -543,6 +543,70 @@
   .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: var(--space-5); }
   .chart-wrap { position: relative; width: 100%; height: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); margin-bottom: 0; box-shadow: none; }
 
+  /* ---- Organization tab: the one tier above admin, so it gets its own
+     quiet accent (violet) rather than reusing the app's blue - a visual cue
+     that this is oversight of everyone, admin included, not another admin
+     screen. ---- */
+  .org-hero .hero-block-title { color: var(--text-primary); }
+  .org-live-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--text-2xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 3px 10px 3px 8px; border-radius: var(--radius-pill);
+    background: color-mix(in srgb, #7c3aed 12%, transparent);
+    color: #7c3aed; border: 1px solid color-mix(in srgb, #7c3aed 28%, transparent);
+  }
+  .org-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #7c3aed; box-shadow: 0 0 0 0 rgba(124,58,237,0.55); animation: org-pulse 2s ease-out infinite; flex-shrink: 0; }
+  @keyframes org-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(124,58,237,0.55); }
+    70% { box-shadow: 0 0 0 6px rgba(124,58,237,0); }
+    100% { box-shadow: 0 0 0 0 rgba(124,58,237,0); }
+  }
+
+  .org-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-4); margin-top: var(--space-5); }
+  .org-stat-tile {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid #7c3aed;
+    border-radius: var(--radius-lg); padding: var(--space-4); box-shadow: var(--elev-1);
+    transition: box-shadow 0.14s ease, transform 0.14s ease;
+  }
+  .org-stat-tile:hover { box-shadow: var(--elev-2); transform: translateY(-1px); }
+  .org-stat-tile-warn { border-left-color: #dc2626; }
+  .org-stat-tile-warn .org-stat-value { color: #dc2626; }
+  .org-stat-value { font-size: var(--text-2xl); font-weight: var(--weight-semibold); color: var(--text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .org-stat-label { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-muted); margin-top: 2px; }
+
+  .org-role-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); padding: 2px 8px; border-radius: var(--radius-pill); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  .org-role-organization { background: color-mix(in srgb, #7c3aed 14%, transparent); color: #7c3aed; }
+  .org-role-admin { background: color-mix(in srgb, #0284c7 14%, transparent); color: #0284c7; }
+  .org-role-user { background: var(--segmented-bg); color: var(--text-secondary); }
+
+  .org-user-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--divider); }
+  .org-user-row:last-child { border-bottom: none; }
+  .org-user-avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg,#7c3aed,#a78bfa); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .org-user-name { font-weight: var(--weight-semibold); font-size: var(--text-base); }
+
+  .org-activity-list { display: flex; flex-direction: column; max-height: 560px; overflow-y: auto; }
+  .org-activity-item { display: flex; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--divider); }
+  .org-activity-item:last-child { border-bottom: none; }
+  .org-activity-icon { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .org-activity-icon svg { width: 15px; height: 15px; }
+  .org-activity-body { min-width: 0; flex: 1; }
+  .org-activity-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .org-activity-label { font-weight: var(--weight-semibold); font-size: var(--text-base); color: var(--text-primary); }
+  .org-activity-detail { font-size: var(--text-sm); color: var(--text-secondary); margin-top: 1px; word-break: break-word; font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace; }
+  .org-activity-meta { font-size: var(--text-xs); color: var(--text-faint); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .org-scan-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--divider); }
+  .org-scan-row:last-child { border-bottom: none; }
+  .org-scan-repo { font-weight: var(--weight-semibold); font-size: var(--text-base); word-break: break-all; }
+  .org-scan-meta { font-size: var(--text-xs); color: var(--text-muted); margin-top: 1px; }
+  .org-scan-running-dot { width: 7px; height: 7px; border-radius: 50%; background: #059669; box-shadow: 0 0 0 0 rgba(5,150,105,0.55); animation: org-pulse-green 2s ease-out infinite; flex-shrink: 0; }
+  @keyframes org-pulse-green {
+    0% { box-shadow: 0 0 0 0 rgba(5,150,105,0.55); }
+    70% { box-shadow: 0 0 0 6px rgba(5,150,105,0); }
+    100% { box-shadow: 0 0 0 0 rgba(5,150,105,0); }
+  }
+  .org-role-select { font-size: var(--text-2xs); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.04em; border-radius: var(--radius-pill); border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); padding: 2px 6px; }
+
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); margin-bottom: 8px; box-shadow: var(--elev-1); transition: border-color 0.12s ease, box-shadow 0.14s ease; }
   .card:hover { box-shadow: var(--elev-2); }
   .card:hover { border-color: var(--text-muted); }
@@ -721,6 +785,10 @@
       <div class="sidebar-brand-text">PR Insights</div>
     </div>
     <div class="sidebar-nav">
+      <div class="nav-item org-only" data-panel="org" style="display:none;">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V8l7-4 7 4v13"/><path d="M13 21V12h4v9"/><path d="M7 9h.01M7 12h.01M7 15h.01M7 18h.01"/><path d="M17 21h4"/></svg></span>
+        <span class="nav-label">Organization</span>
+      </div>
       <div class="nav-item active" data-panel="overview" data-perm="tab_overview">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
         <span class="nav-label">Overview</span>
@@ -1088,6 +1156,125 @@
   </div>
 </div>
 
+<div class="panel" id="panel-org">
+  <div class="hero-block org-hero">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+      <div>
+        <div class="hero-block-title" style="display:flex;align-items:center;gap:10px;">
+          Organization Oversight
+          <span class="org-live-pill"><span class="org-live-dot"></span>Live audit trail</span>
+        </div>
+        <div class="hero-block-desc">Every account on this instance, and everything they've done - including admin. Nothing here can be filtered out or deleted by the people it's watching.</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <select id="org-report-format" style="max-width:130px;">
+          <option value="pdf">PDF</option>
+          <option value="docx">Word (.docx)</option>
+          <option value="html">HTML</option>
+          <option value="markdown">Markdown</option>
+        </select>
+        <button id="org-report-download" type="button" class="btn btn-sm">Download report</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="org-stat-grid" id="org-stat-grid">
+    <div class="org-stat-tile"><div class="org-stat-value" id="org-stat-total">&mdash;</div><div class="org-stat-label">Total accounts</div></div>
+    <div class="org-stat-tile"><div class="org-stat-value" id="org-stat-admins">&mdash;</div><div class="org-stat-label">Admins</div></div>
+    <div class="org-stat-tile"><div class="org-stat-value" id="org-stat-users">&mdash;</div><div class="org-stat-label">Users</div></div>
+    <div class="org-stat-tile"><div class="org-stat-value" id="org-stat-events24h">&mdash;</div><div class="org-stat-label">Events (24h)</div></div>
+    <div class="org-stat-tile org-stat-tile-warn" id="org-stat-failed-tile"><div class="org-stat-value" id="org-stat-failed24h">&mdash;</div><div class="org-stat-label">Failed logins (24h)</div></div>
+    <div class="org-stat-tile"><div class="org-stat-value" id="org-stat-scans-running">&mdash;</div><div class="org-stat-label">Scans running now</div></div>
+  </div>
+
+  <div class="chart-grid" style="margin-top:var(--space-6);">
+    <div class="chart-wrap">
+      <canvas id="orgActivityTimelineChart" role="img" aria-label="Line chart of activity events per day"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="orgActivityTypeChart" role="img" aria-label="Bar chart of activity events by type"></canvas>
+    </div>
+  </div>
+
+  <div class="panel-card" style="margin-top:var(--space-6);">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div class="panel-card-title" style="margin-bottom:2px;">Scans</div>
+        <div class="panel-card-desc" style="margin:0;">Who's scanning what, right now and recently - across every account.</div>
+      </div>
+      <button id="org-scans-refresh" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Refresh</button>
+    </div>
+    <div id="org-scans-running-wrap" style="display:none;margin-top:14px;">
+      <div class="section-label" style="margin:0 0 8px;">Running now</div>
+      <div id="org-scans-running-list"></div>
+    </div>
+    <div style="margin-top:14px;">
+      <div class="section-label" style="margin:0 0 8px;">Recent scans</div>
+      <div id="org-scans-recent-list"><span class="hint-text">Loading...</span></div>
+    </div>
+  </div>
+
+  <div class="panel-card" style="margin-top:var(--space-6);">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div class="panel-card-title" style="margin-bottom:2px;">Accounts</div>
+        <div class="panel-card-desc" style="margin:0;">Every account on this instance and its role. Click a username to rename it.</div>
+      </div>
+      <button id="org-add-account-toggle" class="btn btn-sm" type="button">+ Add account</button>
+    </div>
+    <div id="org-add-account-form" style="display:none;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
+      <div class="row" style="margin-bottom:0;">
+        <div class="field-group">
+          <span class="field-label">Username</span>
+          <input type="text" id="org-new-username" placeholder="jsmith" style="max-width:180px;">
+        </div>
+        <div class="field-group">
+          <span class="field-label">Password</span>
+          <input type="password" id="org-new-password" placeholder="At least 6 characters" style="max-width:200px;">
+        </div>
+        <div class="field-group">
+          <span class="field-label">Role</span>
+          <select id="org-new-role" style="max-width:160px;">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+            <option value="organization">organization</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+        <button id="org-add-account-submit" class="btn btn-sm" type="button">Create account</button>
+        <span class="hint-text" id="org-add-account-status"></span>
+      </div>
+    </div>
+    <div id="org-users-list" style="margin-top:14px;"><span class="hint-text">Loading...</span></div>
+  </div>
+
+  <div class="panel-card" style="margin-top:var(--space-6);">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div class="panel-card-title" style="margin-bottom:2px;">Activity log</div>
+        <div class="panel-card-desc" style="margin:0;">Most recent first. Login, permission, and scan-lifecycle events across every account.</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button id="org-activity-export-csv" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Export CSV</button>
+        <button id="org-activity-export-json" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Export JSON</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;margin-bottom:0;">
+      <input type="text" id="org-activity-search" placeholder="Filter by username…" style="max-width:220px;">
+      <select id="org-activity-action-filter" style="max-width:220px;">
+        <option value="">All actions</option>
+      </select>
+      <button id="org-activity-refresh" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Refresh</button>
+      <span class="hint-text" id="org-activity-count" style="margin-left:auto;"></span>
+    </div>
+    <div id="org-activity-list" class="org-activity-list" style="margin-top:12px;"><span class="hint-text">Loading...</span></div>
+    <div style="text-align:center;margin-top:12px;">
+      <button id="org-activity-load-more" class="btn btn-sm" type="button" style="display:none;background:transparent;color:var(--text-primary);border:1px solid var(--border);">Load more</button>
+    </div>
+  </div>
+</div>
+
 <div class="panel" id="panel-monitor">
   <div class="hero-block">
     <div class="hero-block-title">Team Performance</div>
@@ -1242,28 +1429,42 @@ function applyRoleUI(role, permissions) {
   const usernameEl = document.getElementById('sidebar-username-display');
   const roleEl = document.getElementById('sidebar-role-display');
   const avatarEl = document.getElementById('sidebar-user-avatar');
+  const roleLabels = { admin: 'Administrator', organization: 'Organization', user: 'Viewer' };
   if (usernameEl) usernameEl.textContent = username;
-  if (roleEl) roleEl.textContent = role === 'admin' ? 'Administrator' : 'Viewer';
+  if (roleEl) roleEl.textContent = roleLabels[role] || 'Viewer';
   if (avatarEl) avatarEl.textContent = username.charAt(0).toUpperCase();
+
+  // "organization" sits above admin (see server.py's ROLE_RANK) - it must
+  // pass every admin-level gate on top of getting the org-only tab, or the
+  // one role meant to see the most would end up seeing less than admin.
+  const isAdminOrAbove = role === 'admin' || role === 'organization';
 
   // Hard admin-only controls (can never be delegated - e.g. the permissions
   // panel itself, or destructive actions like deleting a saved scan).
-  if (role !== 'admin') {
+  if (!isAdminOrAbove) {
     document.querySelectorAll('.admin-only').forEach(el => { el.style.display = 'none'; });
   }
 
-  // Delegable controls - visible for admin always, and for "user" only if
-  // the admin granted the matching permission via the Settings panel.
+  // Org-only controls - the oversight tab itself. Never delegable to "user"
+  // or granted to "admin" by a permission toggle; role is the only gate.
+  document.querySelectorAll('.org-only').forEach(el => { el.style.display = role === 'organization' ? '' : 'none'; });
+
+  // Delegable controls - visible for admin/organization always, and for
+  // "user" only if admin granted the matching permission via Settings.
   document.querySelectorAll('[data-perm]').forEach(el => {
     const key = el.getAttribute('data-perm');
-    const allowed = role === 'admin' || !!(permissions && permissions[key]);
+    const allowed = isAdminOrAbove || !!(permissions && permissions[key]);
     el.style.display = allowed ? '' : 'none';
   });
 
-  // Overview is the hardcoded default landing tab, but a "user" with no
-  // permissions granted yet won't have it in the sidebar at all - land on
-  // whatever IS visible instead of an active tab with no matching nav item.
-  if (role !== 'admin') {
+  if (role === 'organization') {
+    // Organization's whole point is oversight - land there first rather
+    // than on the hardcoded Overview default that every other role gets.
+    activatePanel('org', { silent: true });
+  } else if (!isAdminOrAbove) {
+    // Overview is the hardcoded default landing tab, but a "user" with no
+    // permissions granted yet won't have it in the sidebar at all - land on
+    // whatever IS visible instead of an active tab with no matching nav item.
     const activeTab = document.querySelector('.nav-item.active[data-panel]');
     const activeHidden = activeTab && activeTab.style.display === 'none';
     if (!activeTab || activeHidden) {
@@ -1284,7 +1485,8 @@ function applyRoleUI(role, permissions) {
     }
   }
 
-  if (role === 'admin') initSettingsPanel();
+  if (isAdminOrAbove) initSettingsPanel();
+  if (role === 'organization') initOrgPanel();
 }
 checkAuth();
 
@@ -1481,6 +1683,496 @@ async function loadSettingsHealth() {
   } catch (err) {
     healthEl.innerHTML = '<span class="hint-text">Could not load health checks.</span>';
   }
+}
+
+// ============================================================
+// Organization tab - oversight of every account, admin included.
+// ============================================================
+
+// One entry per action string log_activity() actually emits server-side
+// (grep server.py for log_activity( to keep this in sync). label is the
+// plain-English past-tense description; color groups actions by what kind
+// of event they are, not by severity - a scan delete and a failed login
+// are both "red" for different reasons, so they get different icons too.
+const ORG_ACTION_META = {
+  login:                  { label: 'Signed in',                          color: '#059669', icon: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>' },
+  login_failed:           { label: 'Failed sign-in attempt',              color: '#dc2626', icon: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
+  logout:                 { label: 'Signed out',                          color: '#64748b', icon: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>' },
+  change_own_password:    { label: 'Changed their own password',         color: '#0284c7', icon: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3"/><path d="M16.5 6.5l3 3"/>' },
+  admin_reset_password:   { label: "Reset another account's password",   color: '#d97706', icon: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3"/><path d="M16.5 6.5l3 3"/><line x1="4" y1="19" x2="6" y2="21"/>' },
+  update_permissions:     { label: 'Updated user permissions',            color: '#7c3aed', icon: '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/>' },
+  vuln_scan_start:        { label: 'Started a vulnerability scan',        color: '#0891b2', icon: '<circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/>' },
+  vuln_scan_cancel:       { label: 'Cancelled a vulnerability scan',      color: '#64748b', icon: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6"/>' },
+  vuln_scan_rename:       { label: 'Renamed a saved scan',                color: '#0891b2', icon: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>' },
+  vuln_scan_delete:       { label: 'Deleted a saved scan',                color: '#dc2626', icon: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>' },
+  team_summary_generated: { label: 'Generated an AI team summary',        color: '#6366f1', icon: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>' },
+  team_report_generated:  { label: 'Generated a team report',             color: '#6366f1', icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>' },
+  team_bugs_start:        { label: 'Started AI-verified bug attribution', color: '#6366f1', icon: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>' },
+  pr_summary_generated:   { label: 'Generated an AI PR summary',          color: '#6366f1', icon: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>' },
+  account_created:        { label: 'Created a new account',               color: '#7c3aed', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/>' },
+  account_renamed:        { label: 'Renamed an account',                  color: '#7c3aed', icon: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>' },
+  account_role_changed:   { label: "Changed an account's role",           color: '#7c3aed', icon: '<path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>' },
+  account_deleted:        { label: 'Deleted an account',                  color: '#dc2626', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="11" x2="23" y2="11"/>' },
+};
+const ORG_ACTION_DEFAULT = { label: null, color: '#64748b', icon: '<circle cx="12" cy="12" r="9"/>' };
+
+function orgActionMeta(action) {
+  return ORG_ACTION_META[action] || { ...ORG_ACTION_DEFAULT, label: action };
+}
+
+let orgInitialized = false;
+let orgActivityTimelineChartInstance = null;
+let orgActivityTypeChartInstance = null;
+let orgActivityOffset = 0;
+let orgActivityItems = [];
+let orgActivityTotal = 0;
+const ORG_ACTIVITY_PAGE_SIZE = 50;
+
+async function initOrgPanel() {
+  if (orgInitialized) { loadOrgOverview(); loadOrgActivity(true); loadOrgUsers(); loadOrgScans(); return; }
+  orgInitialized = true;
+
+  const actionFilterEl = document.getElementById('org-activity-action-filter');
+  Object.keys(ORG_ACTION_META).forEach(action => {
+    const opt = document.createElement('option');
+    opt.value = action;
+    opt.textContent = orgActionMeta(action).label;
+    actionFilterEl.appendChild(opt);
+  });
+
+  let searchDebounce = null;
+  document.getElementById('org-activity-search').addEventListener('input', () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => loadOrgActivity(true), 300);
+  });
+  actionFilterEl.addEventListener('change', () => loadOrgActivity(true));
+  document.getElementById('org-activity-refresh').addEventListener('click', () => {
+    loadOrgOverview();
+    loadOrgActivity(true);
+  });
+  document.getElementById('org-activity-load-more').addEventListener('click', () => loadOrgActivity(false));
+  document.getElementById('org-activity-export-csv').addEventListener('click', exportOrgActivityCsv);
+  document.getElementById('org-activity-export-json').addEventListener('click', exportOrgActivityJson);
+
+  const addForm = document.getElementById('org-add-account-form');
+  document.getElementById('org-add-account-toggle').addEventListener('click', () => {
+    addForm.style.display = addForm.style.display === 'none' ? 'block' : 'none';
+  });
+  document.getElementById('org-add-account-submit').addEventListener('click', async () => {
+    const username = document.getElementById('org-new-username').value.trim();
+    const password = document.getElementById('org-new-password').value;
+    const role = document.getElementById('org-new-role').value;
+    const statusEl = document.getElementById('org-add-account-status');
+    const btn = document.getElementById('org-add-account-submit');
+
+    if (!username) { statusEl.style.color = '#dc2626'; statusEl.textContent = 'Enter a username.'; return; }
+    if (password.length < 6) { statusEl.style.color = '#dc2626'; statusEl.textContent = 'Password must be at least 6 characters.'; return; }
+
+    btn.disabled = true;
+    statusEl.style.color = '';
+    statusEl.textContent = 'Creating…';
+    try {
+      const token = await ensureCsrfToken();
+      const res = await fetch(API_BASE + '/api/org/users', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, role, csrf_token: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create account.');
+      toast('Account "' + username + '" created.');
+      document.getElementById('org-new-username').value = '';
+      document.getElementById('org-new-password').value = '';
+      addForm.style.display = 'none';
+      statusEl.textContent = '';
+      loadOrgUsers();
+      loadOrgOverview();
+      loadOrgActivity(true);
+    } catch (err) {
+      statusEl.style.color = '#dc2626';
+      statusEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('org-scans-refresh').addEventListener('click', loadOrgScans);
+  document.getElementById('org-report-download').addEventListener('click', () => {
+    const fmt = document.getElementById('org-report-format').value;
+    window.open(API_BASE + '/api/org/report?format=' + encodeURIComponent(fmt), '_blank');
+  });
+
+  loadOrgOverview();
+  loadOrgUsers();
+  loadOrgActivity(true);
+  loadOrgScans();
+}
+
+async function loadOrgOverview() {
+  try {
+    const res = await fetch(API_BASE + '/api/org/overview');
+    if (!res.ok) return;
+    const data = await res.json();
+    const accounts = data.accounts || {};
+    document.getElementById('org-stat-total').textContent = data.total_accounts ?? 0;
+    document.getElementById('org-stat-admins').textContent = accounts.admin ?? 0;
+    document.getElementById('org-stat-users').textContent = accounts.user ?? 0;
+    document.getElementById('org-stat-events24h').textContent = data.events_last_24h ?? 0;
+    document.getElementById('org-stat-failed24h').textContent = data.failed_logins_last_24h ?? 0;
+    document.getElementById('org-stat-scans-running').textContent = data.scans_running_now ?? 0;
+    const failedTile = document.getElementById('org-stat-failed-tile');
+    if (failedTile) failedTile.classList.toggle('org-stat-tile-warn', (data.failed_logins_last_24h || 0) > 0);
+  } catch (err) { /* stat tiles just keep their last-known values */ }
+}
+
+async function loadOrgUsers() {
+  const listEl = document.getElementById('org-users-list');
+  try {
+    const res = await fetch(API_BASE + '/api/org/users');
+    const data = await res.json();
+    const users = data.users || [];
+    const myUsername = currentUser && currentUser.username;
+    listEl.innerHTML = users.map(u => {
+      const isSelf = u.username === myUsername;
+      const roleControl = isSelf
+        ? '<span class="org-role-badge org-role-' + esc(u.role) + '" title="You can\'t change your own role">' + esc(u.role) + '</span>'
+        : '<select class="org-role-select org-user-role-select" data-current="' + attr(u.role) + '">' +
+            ['user', 'admin', 'organization'].map(r => '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>').join('') +
+          '</select>';
+      const deleteBtn = isSelf
+        ? ''
+        : '<button type="button" class="btn btn-sm org-user-delete" title="Delete this account" style="font-size:11px;padding:3px 10px;background:transparent;color:#dc2626;border:1px solid #fecaca;">Delete</button>';
+      return (
+        '<div class="org-user-row" data-username="' + attr(u.username) + '" style="flex-direction:column;align-items:stretch;">' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<span class="org-user-avatar">' + esc(u.username.charAt(0).toUpperCase()) + '</span>' +
+            '<span class="org-user-name org-user-name-text" style="flex:1;cursor:text;" title="Click to rename">' + esc(u.username) + (isSelf ? ' <span class="hint-text" style="font-weight:400;">(you)</span>' : '') + '</span>' +
+            roleControl +
+            '<button type="button" class="btn btn-sm org-user-reset-toggle" style="font-size:11px;padding:3px 10px;background:transparent;color:var(--text-primary);border:1px solid var(--border);">Reset password</button>' +
+            deleteBtn +
+          '</div>' +
+          '<div class="org-user-reset-form" style="display:none;margin:8px 0 4px 36px;gap:8px;flex-direction:column;">' +
+            '<input type="password" class="org-user-reset-input" placeholder="New password (min 6 chars)" style="max-width:240px;">' +
+            '<div style="display:flex;align-items:center;gap:10px;">' +
+              '<button type="button" class="btn btn-sm org-user-reset-confirm" style="font-size:11px;padding:3px 10px;">Set password</button>' +
+              '<span class="hint-text org-user-reset-status"></span>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('') || '<span class="hint-text">No accounts found.</span>';
+
+    listEl.querySelectorAll('.org-user-name-text').forEach(nameEl => {
+      nameEl.addEventListener('click', () => startOrgUserRename(nameEl));
+    });
+    listEl.querySelectorAll('.org-user-role-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const row = sel.closest('.org-user-row');
+        const username = row.getAttribute('data-username');
+        const newRole = sel.value;
+        const prevRole = sel.getAttribute('data-current');
+        sel.disabled = true;
+        try {
+          const token = await ensureCsrfToken();
+          const res = await fetch(API_BASE + '/api/org/users/role', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, role: newRole, csrf_token: token }),
+          });
+          const data2 = await res.json();
+          if (!res.ok) throw new Error(data2.error || 'Could not change role.');
+          toast(username + ' is now ' + newRole + '.');
+          sel.setAttribute('data-current', newRole);
+          loadOrgOverview();
+          loadOrgActivity(true);
+        } catch (err) {
+          toast(err.message, 'err');
+          sel.value = prevRole;
+        } finally {
+          sel.disabled = false;
+        }
+      });
+    });
+    listEl.querySelectorAll('.org-user-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.org-user-row');
+        const username = row.getAttribute('data-username');
+        if (!confirm('Delete the account "' + username + '"? This cannot be undone.')) return;
+        btn.disabled = true;
+        try {
+          const token = await ensureCsrfToken();
+          const res = await fetch(API_BASE + '/api/org/users/' + encodeURIComponent(username), {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csrf_token: token }),
+          });
+          const data2 = await res.json();
+          if (!res.ok) throw new Error(data2.error || 'Could not delete account.');
+          toast('Deleted "' + username + '".');
+          loadOrgUsers();
+          loadOrgOverview();
+          loadOrgActivity(true);
+        } catch (err) {
+          toast(err.message, 'err');
+          btn.disabled = false;
+        }
+      });
+    });
+    listEl.querySelectorAll('.org-user-reset-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const form = btn.closest('.org-user-row').querySelector('.org-user-reset-form');
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+      });
+    });
+    listEl.querySelectorAll('.org-user-reset-confirm').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.org-user-row');
+        const username = row.getAttribute('data-username');
+        const input = row.querySelector('.org-user-reset-input');
+        const statusEl = row.querySelector('.org-user-reset-status');
+        const newPassword = input.value;
+        if (newPassword.length < 6) {
+          statusEl.style.color = '#dc2626';
+          statusEl.textContent = 'Must be at least 6 characters.';
+          return;
+        }
+        btn.disabled = true;
+        statusEl.style.color = '';
+        statusEl.textContent = 'Saving…';
+        try {
+          const token = await ensureCsrfToken();
+          const res = await fetch(API_BASE + '/api/admin/reset-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, new_password: newPassword, csrf_token: token }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Could not reset password.');
+          statusEl.style.color = '';
+          statusEl.textContent = 'Password updated.';
+          input.value = '';
+          loadOrgActivity(true);
+        } catch (err) {
+          statusEl.style.color = '#dc2626';
+          statusEl.textContent = err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = '<span class="hint-text">Could not load accounts.</span>';
+  }
+}
+
+function startOrgUserRename(nameEl) {
+  if (nameEl.tagName === 'INPUT') return;
+  const oldUsername = nameEl.textContent.trim();
+  const inp = document.createElement('input');
+  inp.value = oldUsername;
+  inp.style.cssText = 'font-weight:600;font-size:13px;border:1px solid #7c3aed;border-radius:4px;padding:1px 6px;flex:1;';
+  nameEl.replaceWith(inp);
+  inp.focus();
+  inp.select();
+
+  const finish = async () => {
+    const newUsername = inp.value.trim();
+    if (!newUsername || newUsername === oldUsername) { loadOrgUsers(); return; }
+    try {
+      const token = await ensureCsrfToken();
+      const res = await fetch(API_BASE + '/api/org/users/rename', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_username: oldUsername, new_username: newUsername, csrf_token: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast(data.error || 'Could not rename account.', 'err'); loadOrgUsers(); return; }
+      if (currentUser && currentUser.username === oldUsername) {
+        // Renaming your own account invalidates the session server-side.
+        window.location.href = '/login';
+        return;
+      }
+      toast('Renamed ' + oldUsername + ' to ' + newUsername + '.');
+      loadOrgUsers();
+      loadOrgActivity(true);
+    } catch (err) {
+      toast('Could not reach the server.', 'err');
+      loadOrgUsers();
+    }
+  };
+  inp.addEventListener('blur', finish);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = oldUsername; inp.blur(); } });
+}
+
+function renderOrgScanRow(entry, isRunning) {
+  const findingsText = entry.total_findings != null
+    ? entry.total_findings + ' finding(s)'
+    : (isRunning ? 'in progress' : '');
+  const sevBits = [];
+  if (entry.counts) {
+    ['critical', 'high', 'medium', 'low'].forEach(sev => {
+      if (entry.counts[sev]) sevBits.push('<span class="org-role-badge" style="background:none;padding:0;color:var(--text-muted);">' + entry.counts[sev] + ' ' + sev + '</span>');
+    });
+  }
+  return (
+    '<div class="org-scan-row">' +
+      (isRunning ? '<span class="org-scan-running-dot"></span>' : '<span class="org-user-avatar" style="width:22px;height:22px;font-size:10px;">' + esc((entry.initiated_by || '?').charAt(0).toUpperCase()) + '</span>') +
+      '<div style="flex:1;min-width:0;">' +
+        '<div class="org-scan-repo">' + esc(entry.repo || '(unknown target)') + '</div>' +
+        '<div class="org-scan-meta">started by <strong>' + esc(entry.initiated_by || '(unknown)') + '</strong> &middot; ' +
+          (isRunning ? 'running for ' + esc(timeAgo((entry.started || 0) * 1000).replace(' ago', '')) : esc(timeAgo((entry.started || 0) * 1000))) +
+          (findingsText ? ' &middot; ' + esc(findingsText) : '') +
+        '</div>' +
+      '</div>' +
+      (sevBits.length ? '<div style="display:flex;gap:8px;font-size:11px;">' + sevBits.join('') + '</div>' : '') +
+    '</div>'
+  );
+}
+
+async function loadOrgScans() {
+  const runningWrap = document.getElementById('org-scans-running-wrap');
+  const runningList = document.getElementById('org-scans-running-list');
+  const recentList = document.getElementById('org-scans-recent-list');
+  try {
+    const res = await fetch(API_BASE + '/api/org/scans');
+    const data = await res.json();
+    const running = data.running || [];
+    const items = (data.items || []).filter(e => e.status !== 'running');
+
+    if (running.length) {
+      runningWrap.style.display = 'block';
+      runningList.innerHTML = running.map(e => renderOrgScanRow(e, true)).join('');
+    } else {
+      runningWrap.style.display = 'none';
+    }
+
+    recentList.innerHTML = items.length
+      ? items.slice(0, 15).map(e => renderOrgScanRow(e, false)).join('')
+      : '<span class="hint-text">No scans yet.</span>';
+  } catch (err) {
+    recentList.innerHTML = '<span class="hint-text">Could not load scan activity.</span>';
+  }
+}
+
+async function loadOrgActivity(reset) {
+  if (reset) { orgActivityOffset = 0; orgActivityItems = []; }
+  const listEl = document.getElementById('org-activity-list');
+  const loadMoreBtn = document.getElementById('org-activity-load-more');
+  const countEl = document.getElementById('org-activity-count');
+  if (reset) listEl.innerHTML = '<span class="hint-text">Loading...</span>';
+
+  const username = document.getElementById('org-activity-search').value.trim();
+  const action = document.getElementById('org-activity-action-filter').value;
+  const params = new URLSearchParams({ limit: ORG_ACTIVITY_PAGE_SIZE, offset: orgActivityOffset });
+  if (username) params.set('username', username);
+  if (action) params.set('action', action);
+
+  try {
+    const res = await fetch(API_BASE + '/api/org/activity?' + params.toString());
+    const data = await res.json();
+    const items = data.items || [];
+    orgActivityItems = reset ? items : orgActivityItems.concat(items);
+    orgActivityOffset += items.length;
+    orgActivityTotal = data.total || 0;
+
+    listEl.innerHTML = orgActivityItems.length
+      ? orgActivityItems.map(renderOrgActivityItem).join('')
+      : '<span class="hint-text">No matching activity.</span>';
+    countEl.textContent = orgActivityItems.length + ' of ' + orgActivityTotal + ' event(s)';
+    loadMoreBtn.style.display = data.has_more ? 'inline-flex' : 'none';
+
+    // The paginated list only ever shows a slice - the charts summarize a
+    // wider, independent window (see loadOrgActivityForCharts) so a filtered
+    // search here doesn't also empty out the "what's been happening" charts.
+    if (reset) loadOrgActivityForCharts();
+  } catch (err) {
+    if (reset) listEl.innerHTML = '<span class="hint-text">Could not load activity.</span>';
+  }
+}
+
+function renderOrgActivityItem(entry) {
+  const meta = orgActionMeta(entry.action);
+  const roleBadge = entry.role ? '<span class="org-role-badge org-role-' + esc(entry.role) + '" style="font-size:9px;padding:1px 6px;">' + esc(entry.role) + '</span>' : '';
+  const ts = (entry.timestamp || 0) * 1000;
+  return (
+    '<div class="org-activity-item">' +
+      '<span class="org-activity-icon" style="background:' + meta.color + '1a;color:' + meta.color + ';">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + meta.icon + '</svg>' +
+      '</span>' +
+      '<div class="org-activity-body">' +
+        '<div class="org-activity-top">' +
+          '<span class="org-activity-label">' + esc(entry.username || '(anonymous)') + '</span>' +
+          roleBadge +
+          '<span style="color:var(--text-muted);font-size:var(--text-sm);">' + esc(meta.label) + '</span>' +
+        '</div>' +
+        (entry.detail ? '<div class="org-activity-detail">' + esc(entry.detail) + '</div>' : '') +
+        '<div class="org-activity-meta">' +
+          '<span title="' + esc(formatDate(ts)) + '">' + esc(timeAgo(ts)) + '</span>' +
+          (entry.ip ? '<span>' + esc(entry.ip) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+async function loadOrgActivityForCharts() {
+  try {
+    const res = await fetch(API_BASE + '/api/org/activity?limit=200');
+    const data = await res.json();
+    const items = data.items || [];
+    renderOrgActivityTimelineChart(items);
+    renderOrgActivityTypeChart(items);
+  } catch (err) { /* charts just stay on whatever they last showed */ }
+}
+
+function renderOrgActivityTimelineChart(items) {
+  const ctx = document.getElementById('orgActivityTimelineChart');
+  if (!window.Chart || !ctx) return;
+  const byDay = {};
+  items.forEach(e => {
+    const day = new Date((e.timestamp || 0) * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    byDay[day] = (byDay[day] || 0) + 1;
+  });
+  // Server sends most-recent-first; walk back to chronological order for the x-axis.
+  const days = Object.keys(byDay).reverse();
+  if (orgActivityTimelineChartInstance) orgActivityTimelineChartInstance.destroy();
+  orgActivityTimelineChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: days, datasets: [{ label: 'Events', data: days.map(d => byDay[d]), borderColor: '#7c3aed', backgroundColor: '#7c3aed', tension: 0.3, fill: false }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: true, text: 'Activity over time' } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, x: { grid: { display: false } } },
+    },
+  });
+}
+
+function renderOrgActivityTypeChart(items) {
+  const ctx = document.getElementById('orgActivityTypeChart');
+  if (!window.Chart || !ctx) return;
+  const counts = {};
+  items.forEach(e => { counts[e.action] = (counts[e.action] || 0) + 1; });
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (orgActivityTypeChartInstance) orgActivityTypeChartInstance.destroy();
+  orgActivityTypeChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top.map(([action]) => orgActionMeta(action).label),
+      datasets: [{ data: top.map(([, n]) => n), backgroundColor: top.map(([action]) => orgActionMeta(action).color), borderRadius: 4 }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: true, text: 'Most common actions' } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { display: true, color: 'rgba(0,0,0,0.1)' } }, y: { grid: { display: false } } },
+    },
+  });
+}
+
+function exportOrgActivityCsv() {
+  if (!orgActivityItems.length) { alert('No activity loaded to export.'); return; }
+  const cols = ['timestamp', 'username', 'role', 'action', 'detail', 'ip'];
+  const rows = orgActivityItems.map(e => ({ ...e, timestamp: new Date((e.timestamp || 0) * 1000).toISOString() }));
+  const csvLines = [cols.map(csvField).join(',')].concat(rows.map(r => cols.map(c => csvField(r[c])).join(',')));
+  downloadBlob(csvLines.join('\r\n'), 'text/csv', 'org-activity-log.csv');
+}
+function exportOrgActivityJson() {
+  if (!orgActivityItems.length) { alert('No activity loaded to export.'); return; }
+  downloadBlob(JSON.stringify(orgActivityItems, null, 2), 'application/json', 'org-activity-log.json');
 }
 
 const logoutBtn = document.getElementById('logout-btn');
@@ -1927,7 +2619,7 @@ let hasRepos = false;
 
 function updateRepoControlsForActiveTab() {
   const activePanel = document.querySelector('.nav-item.active')?.dataset.panel;
-  if (!activePanel || activePanel === 'overview' || activePanel === 'settings') {
+  if (!activePanel || activePanel === 'overview' || activePanel === 'settings' || activePanel === 'org') {
     repoToolbar.style.display = 'none';
   } else if (activePanel === 'vuln') {
     toggleVulnSource();
@@ -2670,6 +3362,14 @@ function renderVulnHistoryItem(i, idx) {
         ((counts.critical || counts.high || counts.medium) && counts.low ? ' · ' : '') +
         `<span style="color:#15803d;">${counts.low || 0} low</span>`;
 
+      // Rename/delete are @require_admin server-side (see server.py's
+      // vuln_scan_rename/vuln_scan_delete) - applyRoleUI's .admin-only
+      // hiding only runs once at page load, before this list even exists,
+      // so a class alone wouldn't hide these in a "user" account's history
+      // list. Gate at render time instead, from the role /api/auth/me
+      // already gave us.
+      const canManageScans = currentUser && (currentUser.role === 'admin' || currentUser.role === 'organization');
+
       return `<div class="card" data-scan-ref="${ref}" data-scan-idx="${idx}"
           style="margin-bottom:10px;position:relative;">
         <div style="display:flex;align-items:flex-start;gap:10px;">
@@ -2679,9 +3379,8 @@ function renderVulnHistoryItem(i, idx) {
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <span class="vuln-scan-name" data-ref="${ref}"
-                style="font-weight:700;font-size:14px;cursor:text;" title="Click to rename"
-                onclick="startRename(this, '${ref}')">${_esc(displayName)}</span>
-              <span style="font-size:10px;color:#94a3b8;cursor:pointer;" onclick="startRename(this.previousElementSibling,'${ref}')" title="Rename">✏️</span>
+                style="font-weight:700;font-size:14px;${canManageScans ? 'cursor:text;' : ''}" ${canManageScans ? `title="Click to rename" onclick="startRename(this, '${ref}')"` : ''}>${_esc(displayName)}</span>
+              ${canManageScans ? `<span style="font-size:10px;color:#94a3b8;cursor:pointer;" onclick="startRename(this.previousElementSibling,'${ref}')" title="Rename">✏️</span>` : ''}
               <span class="hint-text" style="font-size:11px;margin-left:auto;">
                 ${when}${i.source === 'history' ? ' · saved' : ' · this session'}
               </span>
@@ -2699,10 +3398,10 @@ function renderVulnHistoryItem(i, idx) {
                 Open scan →</button>` : ''}
               <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#0f172a;color:#94a3b8;"
                 onclick="openHistoryDetail(${idx})">View findings</button>
-              <button class="btn btn-sm" title="Delete this scan"
+              ${canManageScans ? `<button class="btn btn-sm" title="Delete this scan"
                 style="font-size:11px;padding:3px 10px;background:transparent;color:#dc2626;
                        border:1px solid #fecaca;margin-left:auto;"
-                onclick="deleteScan('${ref}', this)">Delete</button>
+                onclick="deleteScan('${ref}', this)">Delete</button>` : ''}
             </div>
 
             <!-- Report controls: the detail toggle sits directly above the
@@ -2907,25 +3606,34 @@ function startRename(nameEl, ref) {
 
   const save = async () => {
     const newName = inp.value.trim() || current;
+    let ok = false;
     try {
       const token = await ensureCsrfToken();
-      await fetch(API_BASE + '/api/vuln-scan/rename', {
+      const res = await fetch(API_BASE + '/api/vuln-scan/rename', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({scan_ref: ref, name: newName, csrf_token: token}),
       });
-    } catch (e) { /* silent */ }
+      ok = res.ok;
+    } catch (e) { ok = false; }
+    // A failed rename (403, network blip, bad CSRF token) must not show the
+    // new name as if it stuck - that leaves the UI showing something the
+    // server never actually saved, which only surfaces as a "wait, my
+    // rename didn't work?" moment on the next reload.
+    const displayName = ok ? newName : current;
     const span = document.createElement('span');
     span.className = 'vuln-scan-name';
     span.dataset.ref = ref;
     span.style.cssText = 'font-weight:700;font-size:14px;cursor:text;';
-    span.title = 'Click to rename';
-    span.textContent = newName;
+    span.title = ok ? 'Click to rename' : 'Rename failed - click to try again';
+    if (!ok) span.style.color = '#dc2626';
+    span.textContent = displayName;
     span.onclick = () => startRename(span, ref);
     inp.replaceWith(span);
-    // update in-memory list
-    const item = _vulnHistoryItems.find(i => (i.scan_ref || ('job:' + i.job_id)) === ref);
-    if (item) item.name = newName;
+    if (ok) {
+      const item = _vulnHistoryItems.find(i => (i.scan_ref || ('job:' + i.job_id)) === ref);
+      if (item) item.name = newName;
+    }
   };
   inp.addEventListener('blur', save);
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = current; inp.blur(); } });

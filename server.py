@@ -167,6 +167,7 @@ _users_lock = threading.Lock()
 
 def _default_users():
     return {
+        "org": {"password": generate_password_hash("org123"), "role": "organization"},
         "admin": {"password": generate_password_hash("admin123"), "role": "admin"},
         "user": {"password": generate_password_hash("user123"), "role": "user"},
     }
@@ -200,6 +201,19 @@ def check_login(username, password):
 def current_role():
   return session.get("role")
 
+# Three tiers, each a strict superset of the one below: "user" (delegable
+# permissions only) < "admin" (full operational access - scanning, settings,
+# deleting/renaming, resetting a "user" or "admin" account's password) <
+# "organization" (everything admin can do, PLUS read-only oversight of every
+# account and a full activity log - including of what admins themselves do).
+# Rank comparison (role_at_least) is what lets "organization" fall through
+# every existing @require_admin / @require_permission check without having
+# to special-case it at every call site.
+ROLE_RANK = {"user": 0, "admin": 1, "organization": 2}
+
+def role_at_least(min_role):
+  return ROLE_RANK.get(current_role(), -1) >= ROLE_RANK.get(min_role, 999)
+
 def require_login(f):
   """Decorator to require any authenticated session."""
   @wraps(f)
@@ -212,17 +226,33 @@ def require_login(f):
   return decorated_function
 
 def require_admin(f):
-  """Decorator to require the admin role. Reserved for things a user must
-  never be able to grant themselves: the permissions panel itself, and
-  destructive/irreversible actions like deleting or renaming saved scans."""
+  """Decorator to require at least the admin role. Reserved for things a
+  user must never be able to grant themselves: the permissions panel
+  itself, and destructive/irreversible actions like deleting or renaming
+  saved scans. "organization" also passes - it sits above admin."""
   @wraps(f)
   def decorated_function(*args, **kwargs):
     if 'user_id' not in session:
       if request.path.startswith('/api/'):
         abort(401)
       return redirect(url_for('login_page'))
-    if current_role() != 'admin':
+    if not role_at_least('admin'):
       abort(403, description="Admin access required for this action.")
+    return f(*args, **kwargs)
+  return decorated_function
+
+def require_organization(f):
+  """Decorator for the organization-only oversight views: every account's
+  info and the activity log. Deliberately NOT satisfied by admin - the
+  point is that admin's own actions are visible to someone above them."""
+  @wraps(f)
+  def decorated_function(*args, **kwargs):
+    if 'user_id' not in session:
+      if request.path.startswith('/api/'):
+        abort(401)
+      return redirect(url_for('login_page'))
+    if not role_at_least('organization'):
+      abort(403, description="Organization access required for this action.")
     return f(*args, **kwargs)
   return decorated_function
 
@@ -284,7 +314,7 @@ def require_permission(perm_key):
         if request.path.startswith('/api/'):
           abort(401)
         return redirect(url_for('login_page'))
-      if current_role() == 'admin':
+      if role_at_least('admin'):
         return f(*args, **kwargs)
       with _permissions_lock:
         perms = _load_permissions()
@@ -298,7 +328,7 @@ def _current_user_has_permission(perm_key):
   """Same check require_permission does, usable inline for an optional
   feature toggle inside an otherwise-allowed route (e.g. the AI-verification
   checkbox within a vuln scan the user is already permitted to run)."""
-  if current_role() == 'admin':
+  if role_at_least('admin'):
     return True
   with _permissions_lock:
     perms = _load_permissions()
@@ -395,6 +425,7 @@ def api_login():
 
   role = check_login(username, password)
   if not role:
+    log_activity("login_failed", username=username, role="")
     return jsonify({"error": "Invalid username or password"}), 401
 
   session['user_id'] = username
@@ -402,12 +433,14 @@ def api_login():
   if remember_me:
     session.permanent = True
     app.permanent_session_lifetime = 30 * 24 * 60 * 60  # 30 days
+  log_activity("login", username=username, role=role)
   return jsonify({"status": "ok", "role": role}), 200
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def api_logout():
   """Handle logout requests."""
+  log_activity("logout")
   session.clear()
   return jsonify({"status": "ok"}), 200
 
@@ -435,6 +468,7 @@ def api_change_password():
     u["password"] = generate_password_hash(new_password)
     _save_users(users)
 
+  log_activity("change_own_password")
   return jsonify({"status": "ok"}), 200
 
 
@@ -447,7 +481,7 @@ def api_me():
   if 'user_id' not in session:
     return jsonify({"authenticated": False}), 200
   role = session.get("role", "user")
-  if role == "admin":
+  if role_at_least("admin"):
     permissions = {k: True for k in DEFAULT_PERMISSIONS}
   else:
     with _permissions_lock:
@@ -485,6 +519,7 @@ def api_set_permissions():
       if key in incoming:
         perms[key] = bool(incoming[key])
     _save_permissions(perms)
+  log_activity("update_permissions", detail=json.dumps(perms))
   return jsonify({"status": "ok", "permissions": perms})
 
 
@@ -548,6 +583,356 @@ def api_admin_list_users():
   return jsonify({"users": [{"username": u, "role": info.get("role", "user")} for u, info in users.items()]})
 
 
+# ============ Organization oversight ============
+# Read-only views for the "organization" role: every account (including
+# admin's own), and the full activity log. See require_organization for why
+# admin doesn't satisfy these - being watched is the point.
+
+@app.route("/api/org/overview")
+@require_organization
+def api_org_overview():
+  """Stat-tile summary for the Organization tab: account counts by role,
+  activity totals, and what's happened in the last 24h - the at-a-glance
+  numbers before drilling into the full log below them."""
+  with _users_lock:
+    users = _load_users()
+  role_counts = {"organization": 0, "admin": 0, "user": 0}
+  for info in users.values():
+    r = info.get("role", "user")
+    if r in role_counts:
+      role_counts[r] += 1
+
+  with _activity_log_lock:
+    log = _load_activity_log()
+  now = time.time()
+  last_24h = [e for e in log if now - e.get("timestamp", 0) <= 86400]
+  failed_logins_24h = [e for e in last_24h if e.get("action") == "login_failed"]
+
+  with _scan_history_lock:
+    scan_count = len(_load_scan_history())
+
+  active_sessions = len({j.get("started") for j in VULN_JOBS.values() if j.get("status") == "running"})
+
+  return jsonify({
+      "accounts": role_counts,
+      "total_accounts": sum(role_counts.values()),
+      "total_activity_events": len(log),
+      "events_last_24h": len(last_24h),
+      "failed_logins_last_24h": len(failed_logins_24h),
+      "total_scans_saved": scan_count,
+      "scans_running_now": active_sessions,
+  })
+
+
+@app.route("/api/org/users")
+@require_organization
+def api_org_list_users():
+  """Same shape as /api/admin/users, exposed under /org too so the
+  Organization tab doesn't depend on an admin-only endpoint to build its
+  account list - organization access shouldn't route through admin's."""
+  with _users_lock:
+    users = _load_users()
+  return jsonify({"users": [{"username": u, "role": info.get("role", "user")} for u, info in users.items()]})
+
+
+VALID_ROLES = ("user", "admin", "organization")
+
+@app.route("/api/org/users", methods=["POST"])
+@require_organization
+@require_csrf_token
+def api_org_create_user():
+  """Organization-only: create a brand new account. Admin can reset an
+  existing account's password but was never able to provision new ones -
+  every account until now had to be seeded by hand into users.json."""
+  data = request.get_json(force=True) or {}
+  username = (data.get("username") or "").strip()
+  password = data.get("password", "")
+  role = (data.get("role") or "user").strip()
+
+  if not username or not re.match(r"^[A-Za-z0-9._-]+$", username):
+    return jsonify({"error": "Username must be non-empty and contain only letters, numbers, dots, dashes, or underscores."}), 400
+  if len(password) < 6:
+    return jsonify({"error": "Password must be at least 6 characters."}), 400
+  if role not in VALID_ROLES:
+    return jsonify({"error": "Role must be one of: " + ", ".join(VALID_ROLES)}), 400
+
+  with _users_lock:
+    users = _load_users()
+    if username in users:
+      return jsonify({"error": "That username is already taken."}), 409
+    users[username] = {"password": generate_password_hash(password), "role": role}
+    _save_users(users)
+
+  log_activity("account_created", detail=f"username={username} role={role}")
+  return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/org/users/rename", methods=["POST"])
+@require_organization
+@require_csrf_token
+def api_org_rename_user():
+  """Organization-only: rename an account (the username itself, not its
+  display data - this app has no separate display-name field, the login
+  username IS the identity). Renaming yourself mid-session logs you out,
+  since the session is keyed on the old username."""
+  data = request.get_json(force=True) or {}
+  old_username = (data.get("old_username") or "").strip()
+  new_username = (data.get("new_username") or "").strip()
+
+  if not new_username or not re.match(r"^[A-Za-z0-9._-]+$", new_username):
+    return jsonify({"error": "New username must be non-empty and contain only letters, numbers, dots, dashes, or underscores."}), 400
+
+  with _users_lock:
+    users = _load_users()
+    if old_username not in users:
+      return jsonify({"error": "No such account."}), 404
+    if new_username != old_username and new_username in users:
+      return jsonify({"error": "That username is already taken."}), 409
+    users[new_username] = users.pop(old_username)
+    _save_users(users)
+
+  log_activity("account_renamed", detail=f"{old_username} -> {new_username}")
+  if session.get("user_id") == old_username:
+    session.clear()
+  return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/org/users/role", methods=["POST"])
+@require_organization
+@require_csrf_token
+def api_org_change_role():
+  """Organization-only: promote/demote an account between user, admin, and
+  organization. Refuses to change your own role - locking yourself out of
+  the only tier that can undo it isn't a mistake this endpoint should let
+  you make silently."""
+  data = request.get_json(force=True) or {}
+  username = (data.get("username") or "").strip()
+  new_role = (data.get("role") or "").strip()
+
+  if new_role not in VALID_ROLES:
+    return jsonify({"error": "Role must be one of: " + ", ".join(VALID_ROLES)}), 400
+  if username == session.get("user_id"):
+    return jsonify({"error": "You can't change your own role."}), 400
+
+  with _users_lock:
+    users = _load_users()
+    target = users.get(username)
+    if not target:
+      return jsonify({"error": "No such account."}), 404
+    old_role = target.get("role", "user")
+    target["role"] = new_role
+    _save_users(users)
+
+  log_activity("account_role_changed", detail=f"{username}: {old_role} -> {new_role}")
+  return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/org/users/<username>", methods=["DELETE"])
+@require_organization
+@require_csrf_token
+def api_org_delete_user(username):
+  """Organization-only: permanently remove an account. Refuses to delete
+  your own account (you'd lock yourself out) and refuses to delete the
+  last remaining organization account (the oversight role disappearing
+  entirely is not something to allow as a side effect of one click)."""
+  username = (username or "").strip()
+  if username == session.get("user_id"):
+    return jsonify({"error": "You can't delete your own account."}), 400
+
+  with _users_lock:
+    users = _load_users()
+    target = users.get(username)
+    if not target:
+      return jsonify({"error": "No such account."}), 404
+    if target.get("role") == "organization":
+      remaining_org = sum(1 for u, info in users.items() if u != username and info.get("role") == "organization")
+      if remaining_org == 0:
+        return jsonify({"error": "Can't delete the last organization account."}), 400
+    del users[username]
+    _save_users(users)
+
+  log_activity("account_deleted", detail=f"username={username}")
+  return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/org/activity")
+@require_organization
+def api_org_activity():
+  """Paginated, most-recent-first activity log. Optional filters:
+  ?username=, ?action=, ?limit=, ?offset= - the Organization tab uses these
+  for its search box and the same load-more pattern as scan history."""
+  with _activity_log_lock:
+    records = _load_activity_log()
+  records = list(reversed(records))  # most recent first
+
+  username_filter = (request.args.get("username") or "").strip().lower()
+  action_filter = (request.args.get("action") or "").strip().lower()
+  if username_filter:
+    records = [r for r in records if username_filter in (r.get("username") or "").lower()]
+  if action_filter:
+    records = [r for r in records if action_filter == (r.get("action") or "").lower()]
+
+  try:
+    limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+  except (TypeError, ValueError):
+    limit = 50
+  try:
+    offset = max(int(request.args.get("offset", 0)), 0)
+  except (TypeError, ValueError):
+    offset = 0
+
+  page = records[offset:offset + limit]
+  return jsonify({
+      "items": page,
+      "total": len(records),
+      "has_more": offset + limit < len(records),
+  })
+
+
+@app.route("/api/org/scans")
+@require_organization
+def api_org_scans():
+  """Every vulnerability scan - running right now or already saved - with
+  who started it. /api/vuln-scan/history deliberately never exposes
+  initiated_by to a plain "user" (seeing who-scanned-what for OTHER
+  accounts is exactly the oversight this role exists for); this is the
+  org-only equivalent that does."""
+  items = []
+  for job_id, job in VULN_JOBS.items():
+    entry = {
+        "job_id": job_id, "repo": job.get("repo", ""), "status": job["status"],
+        "started": job["started"], "initiated_by": job.get("initiated_by"),
+        "source": "session",
+    }
+    if job.get("result"):
+      findings = job["result"].get("findings", [])
+      real_findings = [f for f in findings if not _is_dismissed(f)]
+      counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+      for f in real_findings:
+        sev = (f.get("severity") or "").lower()
+        if sev in counts:
+          counts[sev] += 1
+      entry["total_findings"] = len(real_findings)
+      entry["counts"] = counts
+    items.append(entry)
+  items.sort(key=lambda e: -e["started"])
+
+  with _scan_history_lock:
+    disk_records = _load_scan_history()
+  session_ts = {job["started"] for job in VULN_JOBS.values()}
+  for rec in reversed(disk_records):
+    if rec.get("timestamp") in session_ts:
+      continue
+    all_findings = rec.get("findings") or []
+    real_findings = [f for f in all_findings if not _is_dismissed(f)]
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for f in real_findings:
+      sev = (f.get("severity") or "").lower()
+      if sev in counts:
+        counts[sev] += 1
+    items.append({
+        "repo": rec.get("repo", ""), "status": "done",
+        "started": rec.get("timestamp", 0), "initiated_by": rec.get("initiated_by"),
+        "total_findings": len(real_findings), "counts": counts, "source": "history",
+    })
+  items.sort(key=lambda e: -e["started"])
+
+  try:
+    limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+  except (TypeError, ValueError):
+    limit = 50
+  running = [e for e in items if e["status"] == "running"]
+  return jsonify({"items": items[:limit], "running": running, "total": len(items)})
+
+
+@app.route("/api/org/report")
+@require_organization
+def api_org_report():
+  """Downloadable snapshot of everything the Organization tab shows on
+  screen - accounts, activity totals, the recent audit trail, and scan
+  activity - for whoever needs it as a file rather than a live view
+  (compliance handoff, an incident writeup, a weekly send-around).
+  ?format= one of pdf (default), markdown, html, docx."""
+  fmt = (request.args.get("format") or "pdf").lower()
+
+  with _users_lock:
+    users = _load_users()
+  role_counts = {"organization": 0, "admin": 0, "user": 0}
+  for info in users.values():
+    r = info.get("role", "user")
+    if r in role_counts:
+      role_counts[r] += 1
+
+  with _activity_log_lock:
+    log = list(reversed(_load_activity_log()))
+  now = time.time()
+  last_24h = [e for e in log if now - e.get("timestamp", 0) <= 86400]
+  failed_24h = [e for e in last_24h if e.get("action") == "login_failed"]
+
+  with _scan_history_lock:
+    scan_records = _load_scan_history()
+  running_scans = [j for j in VULN_JOBS.values() if j.get("status") == "running"]
+
+  lines = []
+  lines.append("## Accounts")
+  lines.append(f"- **Total:** {len(users)}  ({role_counts['organization']} organization, {role_counts['admin']} admin, {role_counts['user']} user)")
+  lines.append("")
+  for username, info in sorted(users.items(), key=lambda kv: kv[0].lower()):
+    lines.append(f"- `{username}` - {info.get('role', 'user')}")
+  lines.append("")
+
+  lines.append("## Activity summary")
+  lines.append(f"- **Total events recorded:** {len(log)}")
+  lines.append(f"- **Events in the last 24h:** {len(last_24h)}")
+  lines.append(f"- **Failed sign-in attempts in the last 24h:** {len(failed_24h)}")
+  lines.append("")
+
+  lines.append("## Scan activity")
+  lines.append(f"- **Scans saved:** {len(scan_records)}")
+  lines.append(f"- **Running right now:** {len(running_scans)}")
+  lines.append("")
+  if running_scans:
+    lines.append("### Currently running")
+    for j in running_scans:
+      lines.append(f"- `{j.get('repo', '?')}` - started by **{j.get('initiated_by') or '(unknown)'}**")
+    lines.append("")
+  recent_scans = sorted(scan_records, key=lambda r: -r.get("timestamp", 0))[:15]
+  if recent_scans:
+    lines.append("### Most recent saved scans")
+    for rec in recent_scans:
+      when = datetime.fromtimestamp(rec.get("timestamp", 0), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+      real_findings = [f for f in (rec.get("findings") or []) if not _is_dismissed(f)]
+      lines.append(f"- `{rec.get('repo', '?')}` - {len(real_findings)} finding(s) - started by **{rec.get('initiated_by') or '(unknown)'}** - {when}")
+    lines.append("")
+
+  lines.append("## Recent activity log")
+  lines.append(f"Most recent {min(len(log), 50)} of {len(log)} total event(s).")
+  lines.append("")
+  for entry in log[:50]:
+    when = datetime.fromtimestamp(entry.get("timestamp", 0), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    detail = f" - {entry.get('detail')}" if entry.get("detail") else ""
+    lines.append(f"- **{entry.get('username', '(anonymous)')}** ({entry.get('role') or '-'}) &mdash; {entry.get('action')}{detail} &mdash; {when}")
+
+  report_md = normalize_report_text("\n".join(lines))
+  title = "Organization Oversight Report"
+  subtitle = "generated " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+  if fmt == "markdown":
+    return Response(report_md, mimetype="text/markdown",
+                     headers={"Content-Disposition": "attachment; filename=organization-report.md"})
+  if fmt == "html":
+    return Response(build_report_html(report_md, title, subtitle), mimetype="text/html",
+                     headers={"Content-Disposition": "attachment; filename=organization-report.html"})
+  if fmt == "docx":
+    return Response(build_report_docx(report_md, title, subtitle),
+                     mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                     headers={"Content-Disposition": "attachment; filename=organization-report.docx"})
+  if fmt == "pdf":
+    return Response(build_report_pdf(report_md, title, subtitle), mimetype="application/pdf",
+                     headers={"Content-Disposition": "attachment; filename=organization-report.pdf"})
+  return jsonify({"error": f"Unknown format: {fmt}"}), 400
+
+
 @app.route("/api/admin/reset-password", methods=["POST"])
 @require_admin
 @require_csrf_token
@@ -565,11 +950,18 @@ def api_admin_reset_password():
 
   with _users_lock:
     users = _load_users()
-    if username not in users:
+    target = users.get(username)
+    if not target:
       return jsonify({"error": "No such account."}), 404
-    users[username]["password"] = generate_password_hash(new_password)
+    # Admin can reset a "user" or another "admin" account, but not an
+    # "organization" one - letting admin take over the oversight role above
+    # it would defeat the whole point of that role existing.
+    if target.get("role") == "organization" and not role_at_least("organization"):
+      return jsonify({"error": "Only an organization-level account can reset another organization account's password."}), 403
+    target["password"] = generate_password_hash(new_password)
     _save_users(users)
 
+  log_activity("admin_reset_password", detail=f"target={username}")
   return jsonify({"status": "ok"}), 200
 
 
@@ -946,6 +1338,7 @@ def team_summary():
                 {"role": "user", "content": prompt},
             ],
         )
+        log_activity("team_summary_generated")
         return jsonify({"summary": response.choices[0].message.content})
     except Exception as e:
         return jsonify({"error": str(e)}), 502
@@ -966,6 +1359,7 @@ def team_report():
     lines = []
     if summary:
         lines += ["## Executive Summary", "", summary, ""]
+    log_activity("team_report_generated", detail=f"format={fmt}")
     lines += ["## Contributor Breakdown", ""]
     for c in contributors:
         lines.append(f"### {c.get('login', 'unknown')}")
@@ -1018,6 +1412,7 @@ def team_bugs_start():
     thread = threading.Thread(target=run_team_bugs_job, args=(job_id, repo, use_ai, branch), daemon=True)
     thread.start()
 
+    log_activity("team_bugs_start", detail=f"repo={repo}")
     return jsonify({"job_id": job_id})
 
 
@@ -1106,6 +1501,7 @@ def scan():
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
+    log_activity("pr_summary_generated")
     return jsonify({"markdown": summary, "omitted_files": omitted})
 
 
@@ -1279,6 +1675,57 @@ def _save_scan_history(records):
         print(f"Warning: Could not save scan history to {SCAN_HISTORY_FILE}: {e}", file=sys.stderr)
 
 
+# ============ Activity log (organization oversight) ============
+# Every account's actions, including admin's - the whole point of an
+# "organization" role sitting above admin is that admin's own activity is
+# visible to someone, not just what admin chooses to let a "user" see.
+#
+# Deliberately no delete/prune endpoint and no automatic cap: an audit trail
+# that the people being audited can trim isn't one. If this file's size ever
+# becomes a real problem, that's a decision for whoever operates this
+# instance to make explicitly - not something to silently do by default
+# (see: the scan-history 200-record cap that used to quietly eat old scans).
+ACTIVITY_LOG_FILE = SCAN_HISTORY_DIR / "activity_log.json"
+_activity_log_lock = threading.Lock()
+
+def _load_activity_log():
+    try:
+        if ACTIVITY_LOG_FILE.exists():
+            return json.loads(ACTIVITY_LOG_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Warning: Could not load activity log from {ACTIVITY_LOG_FILE}: {e}", file=sys.stderr)
+    return []
+
+def _save_activity_log(records):
+    try:
+        ACTIVITY_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ACTIVITY_LOG_FILE.write_text(json.dumps(records, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not save activity log to {ACTIVITY_LOG_FILE}: {e}", file=sys.stderr)
+
+def log_activity(action, detail="", username=None, role=None):
+    """Records one audit-log entry. Call this at every meaningful mutation
+    (login, logout, password/permission changes, scan lifecycle, report
+    generation) - not read-only GETs, which would just drown the log in
+    noise without telling an org viewer anything new.
+
+    username/role default to the current session, but a failed login has no
+    session yet - pass the attempted username explicitly there so failed
+    attempts still show up (arguably the most important entries in the log)."""
+    entry = {
+        "timestamp": time.time(),
+        "username": username if username is not None else (session.get("user_id") or "(anonymous)"),
+        "role": role if role is not None else (session.get("role") or ""),
+        "action": action,
+        "detail": detail,
+        "ip": request.remote_addr,
+    }
+    with _activity_log_lock:
+        records = _load_activity_log()
+        records.append(entry)
+        _save_activity_log(records)
+
+
 def _finding_key(f):
     """Stable identity for a finding across scans: file + category.
     We don't use line number because it shifts between commits."""
@@ -1290,7 +1737,7 @@ def _finding_key(f):
 
 
 def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_scanned=None,
-                          job_id=None):
+                          job_id=None, initiated_by=None):
     """Persists this scan to disk and compares it against the previous scan
     for the same repo_key. Returns a delta dict with new/fixed/recurring counts."""
     ts = timestamp or time.time()
@@ -1304,6 +1751,7 @@ def save_and_compare_scan(repo_key, findings, scan_types, timestamp=None, files_
         "job_id": job_id,
         "scan_types": list(scan_types or []),
         "files_scanned": files_scanned,
+        "initiated_by": initiated_by,
         # Keep the fields the report builder needs (evidence/impact/improvement),
         # not just the ones the trend comparison uses - otherwise a report
         # generated from history is missing the parts that make it useful.
@@ -3156,7 +3604,8 @@ def run_vuln_scan_job(job_id, repo, use_ai, scan_types, fail_on, include_test_fi
             repo_key = repo or (local_path if local_path else "(uploaded)")
             delta = save_and_compare_scan(repo_key, all_findings, scan_types,
                                           files_scanned=report.get("files_scanned"),
-                                          timestamp=job.get("started"), job_id=job_id)
+                                          timestamp=job.get("started"), job_id=job_id,
+                                          initiated_by=job.get("initiated_by"))
             report["history_delta"] = delta
             # The requested "ai" flag can end up not reflecting what actually
             # ran (e.g. downgraded because the caller lacks ai_features) -
@@ -3235,6 +3684,11 @@ def vuln_scan_start():
         "status": "running", "log": [], "result": None, "error": None, "started": time.time(),
         "repo": repo or (str(local_path) if local_path else "(uploaded folder)"), "name": "",
         "cancel_requested": False, "proc": None,
+        # Captured here (request context) rather than inside the background
+        # thread - Flask's `session` proxy doesn't exist once the thread
+        # starts, so this is the only point where "who clicked scan" is
+        # actually available.
+        "initiated_by": session.get("user_id"),
     }
     thread = threading.Thread(
         target=run_vuln_scan_job,
@@ -3257,6 +3711,7 @@ def vuln_scan_start():
     )
     thread.start()
 
+    log_activity("vuln_scan_start", detail=f"repo={repo or local_path or '(uploaded)'} types={data.get('scan_types')}")
     return jsonify({"job_id": job_id})
 
 
@@ -3315,6 +3770,7 @@ def vuln_scan_cancel(job_id):
             proc.terminate()
         except OSError:
             pass
+    log_activity("vuln_scan_cancel", detail=f"job_id={job_id}")
     return jsonify({"status": "ok"})
 
 
@@ -3484,10 +3940,14 @@ def vuln_scan_rename():
         if job_id not in VULN_JOBS:
             return jsonify({"error": "job not found"}), 404
         VULN_JOBS[job_id]["name"] = name
+        log_activity("vuln_scan_rename", detail=f"scan_ref={ref} name={name}")
         return jsonify({"ok": True})
 
     if ref.startswith("ts:"):
-        ts = float(ref[3:])
+        try:
+            ts = float(ref[3:])
+        except ValueError:
+            return jsonify({"error": "invalid timestamp in scan_ref"}), 400
         with _scan_history_lock:
             records = _load_scan_history()
             updated = False
@@ -3499,6 +3959,7 @@ def vuln_scan_rename():
             if not updated:
                 return jsonify({"error": "scan not found in history"}), 404
             _save_scan_history(records)
+        log_activity("vuln_scan_rename", detail=f"scan_ref={ref} name={name}")
         return jsonify({"ok": True})
 
     return jsonify({"error": "invalid scan_ref format"}), 400
@@ -3533,6 +3994,7 @@ def vuln_scan_delete():
             kept = [r for r in records if abs(r.get("timestamp", 0) - (started or -1)) >= 1]
             if len(kept) != len(records):
                 _save_scan_history(kept)
+        log_activity("vuln_scan_delete", detail=f"scan_ref={ref}")
         return jsonify({"ok": True})
 
     if ref.startswith("ts:"):
@@ -3549,6 +4011,7 @@ def vuln_scan_delete():
         for jid, j in list(VULN_JOBS.items()):
             if abs(j.get("started", 0) - ts) < 1:
                 VULN_JOBS.pop(jid, None)
+        log_activity("vuln_scan_delete", detail=f"scan_ref={ref}")
         return jsonify({"ok": True})
 
     return jsonify({"error": "invalid scan_ref format"}), 400
