@@ -1255,7 +1255,9 @@
       </div>
     </div>
     <div class="row" style="margin-top:14px;margin-bottom:0;">
-      <input type="text" id="org-activity-search" placeholder="Filter by username…" style="max-width:220px;">
+      <select id="org-activity-user-filter" style="max-width:220px;">
+        <option value="">All users</option>
+      </select>
       <select id="org-activity-action-filter" style="max-width:220px;">
         <option value="">All actions</option>
       </select>
@@ -1664,11 +1666,7 @@ async function initOrgPanel() {
     actionFilterEl.appendChild(opt);
   });
 
-  let searchDebounce = null;
-  document.getElementById('org-activity-search').addEventListener('input', () => {
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => loadOrgActivity(true), 300);
-  });
+  document.getElementById('org-activity-user-filter').addEventListener('change', () => loadOrgActivity(true));
   actionFilterEl.addEventListener('change', () => loadOrgActivity(true));
   document.getElementById('org-activity-refresh').addEventListener('click', () => {
     loadOrgOverview();
@@ -1769,6 +1767,20 @@ async function loadOrgOverview() {
 
 let orgUsersData = [];
 
+function populateOrgActivityUserFilter(users) {
+  // Every account, org included - org's own actions aren't logged (see
+  // log_activity), so picking it here will correctly show "No matching
+  // activity" rather than silently being unavailable to select at all.
+  const sel = document.getElementById('org-activity-user-filter');
+  if (!sel) return;
+  const previous = sel.value;
+  sel.innerHTML = '<option value="">All users</option>' +
+    [...users].sort((a, b) => a.username.localeCompare(b.username))
+      .map(u => '<option value="' + attr(u.username) + '">' + esc(u.username) + (u.role === 'organization' ? ' (organization)' : '') + '</option>')
+      .join('');
+  if ([...sel.options].some(o => o.value === previous)) sel.value = previous;
+}
+
 async function loadOrgUsers() {
   const listEl = document.getElementById('org-users-list');
   try {
@@ -1776,6 +1788,7 @@ async function loadOrgUsers() {
     const data = await res.json();
     const users = data.users || [];
     orgUsersData = users;
+    populateOrgActivityUserFilter(users);
     const myUsername = currentUser && currentUser.username;
     listEl.innerHTML = users.map(u => {
       const isSelf = u.username === myUsername;
@@ -1831,10 +1844,10 @@ async function loadOrgUsers() {
     listEl.querySelectorAll('.org-user-view-activity').forEach(btn => {
       btn.addEventListener('click', () => {
         const username = btn.closest('.org-user-row').getAttribute('data-username');
-        const searchEl = document.getElementById('org-activity-search');
-        searchEl.value = username;
+        const filterEl = document.getElementById('org-activity-user-filter');
+        filterEl.value = username;
         loadOrgActivity(true);
-        searchEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        filterEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
     });
     listEl.querySelectorAll('.org-user-role-select').forEach(sel => {
@@ -2029,7 +2042,7 @@ async function loadOrgActivity(reset) {
   const countEl = document.getElementById('org-activity-count');
   if (reset) listEl.innerHTML = '<span class="hint-text">Loading...</span>';
 
-  const username = document.getElementById('org-activity-search').value.trim();
+  const username = document.getElementById('org-activity-user-filter').value.trim();
   const action = document.getElementById('org-activity-action-filter').value;
   const params = new URLSearchParams({ limit: ORG_ACTIVITY_PAGE_SIZE, offset: orgActivityOffset });
   if (username) params.set('username', username);

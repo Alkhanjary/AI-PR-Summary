@@ -768,7 +768,11 @@ def api_org_delete_user(username):
 def api_org_activity():
   """Paginated, most-recent-first activity log. Optional filters:
   ?username=, ?action=, ?limit=, ?offset= - the Organization tab uses these
-  for its search box and the same load-more pattern as scan history."""
+  for its account dropdown and the same load-more pattern as scan history.
+  username is matched exactly (not a substring) - the dropdown only ever
+  sends a real, complete username, and a substring match would have
+  silently pulled in an unrelated account whose name happens to contain
+  the selected one (e.g. picking "admin" also matching "superadmin")."""
   with _activity_log_lock:
     records = _load_activity_log()
   records = list(reversed(records))  # most recent first
@@ -776,7 +780,7 @@ def api_org_activity():
   username_filter = (request.args.get("username") or "").strip().lower()
   action_filter = (request.args.get("action") or "").strip().lower()
   if username_filter:
-    records = [r for r in records if username_filter in (r.get("username") or "").lower()]
+    records = [r for r in records if username_filter == (r.get("username") or "").lower()]
   if action_filter:
     records = [r for r in records if action_filter == (r.get("action") or "").lower()]
 

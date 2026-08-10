@@ -227,4 +227,28 @@ def test_activity_log_includes_admin_and_user_actions(client):
     roles_seen = {i.get("role") for i in items}
     assert "admin" in roles_seen
     assert "user" in roles_seen
-    assert "organization" not in roles_seen
+
+
+def test_activity_username_filter_is_exact_not_substring(client):
+    # The dropdown always sends a complete, real username - a substring
+    # match would incorrectly pull in an unrelated account whose name
+    # happens to contain the selected one (e.g. "admin" also matching a
+    # "superadmin" account). Rename admin to something one is a substring
+    # of the other to exercise that specifically.
+    c, server_module = client
+    login(c, "org", "org123")
+    t = server_module._get_csrf_token()
+    c.post("/api/org/users/rename", json={
+        "old_username": "user", "new_username": "superadmin", "csrf_token": t,
+    })
+    c.post("/api/auth/logout")
+    login(c, "admin", "admin123")
+    c.post("/api/auth/logout")
+    login(c, "superadmin", "user123")
+    c.post("/api/auth/logout")
+    login(c, "org", "org123")  # /api/org/activity is organization-only
+
+    resp = c.get("/api/org/activity?username=admin")
+    items = resp.get_json()["items"]
+    assert all(i.get("username") == "admin" for i in items)
+    assert not any(i.get("username") == "superadmin" for i in items)
