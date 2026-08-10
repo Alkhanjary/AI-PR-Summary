@@ -2479,6 +2479,7 @@ usernameSuggestions.addEventListener('click', e => {
   if (!item) return;
   usernameInput.value = item.dataset.login;
   closeSuggestions();
+  activatePanel('overview');
   loadRepos();
 });
 
@@ -2493,7 +2494,7 @@ usernameInput.addEventListener('keydown', e => {
     if (e.key === 'ArrowUp') { e.preventDefault(); suggestionIndex = Math.max(suggestionIndex - 1, 0); highlightSuggestion(suggestionIndex); return; }
     if (e.key === 'Enter' && suggestionIndex >= 0) { e.preventDefault(); items[suggestionIndex].click(); return; }
   }
-  if (e.key === 'Enter') loadRepos();
+  if (e.key === 'Enter') { activatePanel('overview'); loadRepos(); }
   if (e.key === 'Escape') closeSuggestions();
 });
 
