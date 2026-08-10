@@ -56,7 +56,23 @@ def test_list_users_allows_organization_and_hides_password_hash(client):
     assert {"admin", "user", "org"} <= usernames
     for u in body["users"]:
         assert "password" not in u
-        assert set(u.keys()) == {"username", "role"}
+        assert set(u.keys()) == {"username", "role", "last_active"}
+
+
+def test_list_users_last_active_reflects_logged_actions(client):
+    # "org" itself never appears as a logged action (see log_activity), so
+    # its last_active must stay None even after it logs in and does things -
+    # while admin/user's last_active should track their most recent login.
+    c, _ = client
+    login(c, "admin", "admin123")
+    c.post("/api/auth/logout")
+    login(c, "org", "org123")
+
+    body = c.get("/api/org/users").get_json()
+    by_username = {u["username"]: u for u in body["users"]}
+    assert by_username["admin"]["last_active"] is not None
+    assert by_username["org"]["last_active"] is None
+    assert by_username["user"]["last_active"] is None
 
 
 def test_reset_password_requires_login(client):

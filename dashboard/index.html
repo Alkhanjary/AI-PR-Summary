@@ -1210,9 +1210,12 @@
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
       <div>
         <div class="panel-card-title" style="margin-bottom:2px;">Accounts</div>
-        <div class="panel-card-desc" style="margin:0;">Every account on this instance and its role. Click a username to rename it.</div>
+        <div class="panel-card-desc" style="margin:0;">Every account on this instance, its role, and when it was last active. Click a username to rename it.</div>
       </div>
-      <button id="org-add-account-toggle" class="btn btn-sm" type="button">+ Add account</button>
+      <div style="display:flex;gap:8px;">
+        <button id="org-accounts-export-csv" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Export CSV</button>
+        <button id="org-add-account-toggle" class="btn btn-sm" type="button">+ Add account</button>
+      </div>
     </div>
     <div id="org-add-account-form" style="display:none;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
       <div class="row" style="margin-bottom:0;">
@@ -1257,6 +1260,12 @@
         <option value="">All actions</option>
       </select>
       <button id="org-activity-refresh" class="btn btn-sm" type="button" style="background:transparent;color:var(--text-primary);border:1px solid var(--border);">Refresh</button>
+      <select id="org-auto-refresh" style="max-width:150px;" title="Automatically re-check for new activity">
+        <option value="0">Auto-refresh: off</option>
+        <option value="15000">Every 15s</option>
+        <option value="30000">Every 30s</option>
+        <option value="60000">Every 60s</option>
+      </select>
       <span class="hint-text" id="org-activity-count" style="margin-left:auto;"></span>
     </div>
     <div id="org-activity-list" class="org-activity-list" style="margin-top:12px;"><span class="hint-text">Loading...</span></div>
@@ -1640,6 +1649,7 @@ let orgActivityTypeChartInstance = null;
 let orgActivityOffset = 0;
 let orgActivityItems = [];
 let orgActivityTotal = 0;
+let orgAutoRefreshTimer = null;
 const ORG_ACTIVITY_PAGE_SIZE = 50;
 
 async function initOrgPanel() {
@@ -1714,6 +1724,25 @@ async function initOrgPanel() {
     const fmt = document.getElementById('org-report-format').value;
     window.open(API_BASE + '/api/org/report?format=' + encodeURIComponent(fmt), '_blank');
   });
+  document.getElementById('org-accounts-export-csv').addEventListener('click', exportOrgAccountsCsv);
+
+  // A single named interval, cleared before every re-arm - the Monitor tab
+  // had a real bug from a poll loop with no such guard (see git history),
+  // so this one only ever has at most one timer alive. It also no-ops
+  // instead of fetching when the org panel isn't the active one, so
+  // leaving "Every 15s" on and switching tabs doesn't keep hitting the
+  // server in the background for a view nobody's looking at.
+  document.getElementById('org-auto-refresh').addEventListener('change', (e) => {
+    if (orgAutoRefreshTimer) { clearInterval(orgAutoRefreshTimer); orgAutoRefreshTimer = null; }
+    const ms = parseInt(e.target.value, 10);
+    if (!ms) return;
+    orgAutoRefreshTimer = setInterval(() => {
+      if (!document.getElementById('panel-org').classList.contains('active')) return;
+      loadOrgOverview();
+      loadOrgActivity(true);
+      loadOrgScans();
+    }, ms);
+  });
 
   loadOrgOverview();
   loadOrgUsers();
@@ -1738,12 +1767,15 @@ async function loadOrgOverview() {
   } catch (err) { /* stat tiles just keep their last-known values */ }
 }
 
+let orgUsersData = [];
+
 async function loadOrgUsers() {
   const listEl = document.getElementById('org-users-list');
   try {
     const res = await fetch(API_BASE + '/api/org/users');
     const data = await res.json();
     const users = data.users || [];
+    orgUsersData = users;
     const myUsername = currentUser && currentUser.username;
     listEl.innerHTML = users.map(u => {
       const isSelf = u.username === myUsername;
@@ -1759,12 +1791,26 @@ async function loadOrgUsers() {
       const deleteBtn = isSelf
         ? ''
         : '<button type="button" class="btn btn-sm org-user-delete" title="Delete this account" style="font-size:11px;padding:3px 10px;background:transparent;color:#dc2626;border:1px solid #fecaca;">Delete</button>';
+      // "organization" actions are deliberately excluded from the log (see
+      // log_activity), so its own row never has anything to view - showing
+      // an active-looking button that always returns nothing is worse than
+      // just not offering it.
+      const viewActivityBtn = u.role === 'organization'
+        ? ''
+        : '<button type="button" class="btn btn-sm org-user-view-activity" title="Filter the activity log below to this account" style="font-size:11px;padding:3px 10px;background:transparent;color:var(--text-primary);border:1px solid var(--border);">View activity</button>';
+      const lastActiveText = u.role === 'organization'
+        ? 'not tracked (see below)'
+        : (u.last_active ? 'last active ' + esc(timeAgo(u.last_active * 1000)) : 'no activity yet');
       return (
         '<div class="org-user-row" data-username="' + attr(u.username) + '" style="flex-direction:column;align-items:stretch;">' +
           '<div style="display:flex;align-items:center;gap:10px;">' +
             '<span class="org-user-avatar">' + esc(u.username.charAt(0).toUpperCase()) + '</span>' +
-            '<span class="org-user-name org-user-name-text" style="flex:1;cursor:text;" title="Click to rename">' + esc(u.username) + (isSelf ? ' <span class="hint-text" style="font-weight:400;">(you)</span>' : '') + '</span>' +
+            '<span style="flex:1;min-width:0;">' +
+              '<span class="org-user-name org-user-name-text" style="cursor:text;display:block;" title="Click to rename">' + esc(u.username) + (isSelf ? ' <span class="hint-text" style="font-weight:400;">(you)</span>' : '') + '</span>' +
+              '<span class="hint-text" style="font-size:11px;">' + lastActiveText + '</span>' +
+            '</span>' +
             roleControl +
+            viewActivityBtn +
             '<button type="button" class="btn btn-sm org-user-reset-toggle" style="font-size:11px;padding:3px 10px;background:transparent;color:var(--text-primary);border:1px solid var(--border);">Reset password</button>' +
             deleteBtn +
           '</div>' +
@@ -1781,6 +1827,15 @@ async function loadOrgUsers() {
 
     listEl.querySelectorAll('.org-user-name-text').forEach(nameEl => {
       nameEl.addEventListener('click', () => startOrgUserRename(nameEl));
+    });
+    listEl.querySelectorAll('.org-user-view-activity').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const username = btn.closest('.org-user-row').getAttribute('data-username');
+        const searchEl = document.getElementById('org-activity-search');
+        searchEl.value = username;
+        loadOrgActivity(true);
+        searchEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
     });
     listEl.querySelectorAll('.org-user-role-select').forEach(sel => {
       sel.addEventListener('change', async () => {
@@ -2091,6 +2146,14 @@ function exportOrgActivityCsv() {
 function exportOrgActivityJson() {
   if (!orgActivityItems.length) { alert('No activity loaded to export.'); return; }
   downloadBlob(JSON.stringify(orgActivityItems, null, 2), 'application/json', 'org-activity-log.json');
+}
+
+function exportOrgAccountsCsv() {
+  if (!orgUsersData.length) { alert('No accounts loaded to export.'); return; }
+  const cols = ['username', 'role', 'last_active'];
+  const rows = orgUsersData.map(u => ({ ...u, last_active: u.last_active ? new Date(u.last_active * 1000).toISOString() : '' }));
+  const csvLines = [cols.map(csvField).join(',')].concat(rows.map(r => cols.map(c => csvField(r[c])).join(',')));
+  downloadBlob(csvLines.join('\r\n'), 'text/csv', 'org-accounts.csv');
 }
 
 const logoutBtn = document.getElementById('logout-btn');

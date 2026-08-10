@@ -618,10 +618,23 @@ def api_org_overview():
 @require_organization
 def api_org_list_users():
   """Lists accounts (username + role only - never the password hash) for
-  the Organization tab's roster."""
+  the Organization tab's roster, plus each one's last-seen timestamp from
+  the activity log (None for an account that's never done anything logged,
+  or is organization itself - see log_activity)."""
   with _users_lock:
     users = _load_users()
-  return jsonify({"users": [{"username": u, "role": info.get("role", "user")} for u, info in users.items()]})
+  with _activity_log_lock:
+    log = _load_activity_log()
+  last_active = {}
+  for entry in log:
+    u = entry.get("username")
+    ts = entry.get("timestamp", 0)
+    if u and ts > last_active.get(u, 0):
+      last_active[u] = ts
+  return jsonify({"users": [
+      {"username": u, "role": info.get("role", "user"), "last_active": last_active.get(u)}
+      for u, info in users.items()
+  ]})
 
 
 VALID_ROLES = ("user", "admin", "organization")
